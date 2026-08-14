@@ -7,6 +7,8 @@ export const SHADOW = "rgba(6, 10, 16, 0.4)";
 
 export const GRASS = { dark: "#2f4a34", mid: "#3a5a40", light: "#4f7452" };
 export const DIRT = { dark: "#4a3623", mid: "#6b4f3a", light: "#84654a" };
+// Stronghold Crusader-style desert sand, the dominant region tone.
+export const SAND = { dark: "#c8a668", mid: "#dcbf87", light: "#ecd6a6" };
 export const STONE = { dark: "#495057", mid: "#6c757d", light: "#9099a1" };
 export const WATER = { dark: "#16294a", mid: "#1d3557", light: "#2a4d7a", foam: "#6ea8d8" };
 

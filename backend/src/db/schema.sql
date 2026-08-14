@@ -128,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_action_log_channel_tick ON action_log_entries(cha
 -- Fixed lobby list. Each channel gets a distinct seed so their maps look
 -- different; safe to re-run (ON CONFLICT DO NOTHING).
 INSERT INTO channels (name, map_size, max_players, seed) VALUES
-  ('Kanal 1', 300, 8, 1),
-  ('Kanal 2', 300, 8, 2),
-  ('Kanal 3', 300, 8, 3)
+  ('Kanal 1', 500, 8, 1),
+  ('Kanal 2', 500, 8, 2),
+  ('Kanal 3', 500, 8, 3)
 ON CONFLICT (name) DO NOTHING;

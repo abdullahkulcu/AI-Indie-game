@@ -1,8 +1,8 @@
 # AI Indie Game - MVP
 
-Web tabanli, 2D haritali (300x300, izometrik), coklu kanal/oda destekli
-multiplayer strateji oyunu (Stronghold Crusader'a yakin bir mantik/gorunum
-hedefleniyor). Oyuncular sabit sayida kanaldan (lobiden) birine katilir,
+Web tabanli, 2D haritali (500x500, izometrik, bolgeli/biome'lu), coklu
+kanal/oda destekli multiplayer strateji oyunu (Stronghold Crusader'a yakin bir
+mantik hedefleniyor). Oyuncular sabit sayida kanaldan (lobiden) birine katilir,
 haritada rastgele bir bolgede baslar; birimleri dogrudan yonetmez, kendi
 OpenAI API anahtarlariyla (BYOK) baglanan bir "general" AI'ya sohbet yoluyla
 strateji anlatir. AI, saglanan `attack` / `trade` / `build` / `recruit`
@@ -29,9 +29,21 @@ frontend/  React + TypeScript + Vite + PixiJS (2D grid render)
 - **Buyuk harita, sifir bulk depolama** (`backend/src/game/mapService.ts`):
   terrain ve maden yataklari `(seed, x, y)`'nin saf bir fonksiyonu - hicbir
   tile onceden DB'ye yazilmiyor, sadece sahiplik iddialari (`tile_claims`)
-  saklaniyor. Bu sayede 300x300'luk harita "bulk tile" maliyeti getirmiyor;
+  saklaniyor. Bu sayede 500x500'luk harita "bulk tile" maliyeti getirmiyor;
   frontend ayni fonksiyonu (`frontend/src/game/terrainMap.ts`) yerelde
-  calistirip kamerayla gezilen pencereyi hesaplar.
+  calistirip kamerayla gezilen pencereyi hesaplar. Terrain iki katmanli deger
+  gurultusuyle (value noise) uretilir: genis olcekli, yumusak bir "bolge"
+  siniflandirmasi (`desert`/`grassland`/`highlands`, Stronghold tarzi collu
+  bir haritaya benzemesi icin col-agirlikli) ve her tile icin ince detay -
+  boylece komsu tile'lar rastgele degil, cografi olarak tutarli bolgeler
+  halinde degisir. Maden yataklari sadece `mountain` tile'larda bulunur ve
+  `highlands` bolgesinde daha yogun kumelenir.
+- **Gorsel stil** (`frontend/src/pixelart/`): tum bina/birim/tile gorselleri
+  pixel-art degil, duz/vektor sekillerle (gradyanli izometrik karolar,
+  yuvarlatilmis dikdortgenler, daireler, yumusak egriler) canvas uzerinde
+  prosedurel olarak cizilip PixiJS texture'i olarak cache'lenir - internetten
+  indirilen bir asset dosyasi yoktur (bu ortamda dis asset indirme agi
+  politikasi tarafindan engellenmistir).
 - **Tick dongusu** (`backend/src/game/tickService.ts`): her `TICK_INTERVAL_MS`
   (varsayilan 45s) HER kanal icin ayri ayri calisir; otonom birim FSM'ini
   ilerletir, madenlerden pasif kaynak uretimi uygular, ve her oyuncu icin
@@ -49,7 +61,7 @@ frontend/  React + TypeScript + Vite + PixiJS (2D grid render)
   yeni bir LLM karari gelene kadar her tick tekrar calistirilir.
 - **LLM orkestrasyonu** (`backend/src/llm/`): gizli sistem promptu + oyuncunun
   kendi birim/yapi/kaynaklarini ve yakinindaki bilinen maden yataklarini iceren
-  bir durum ozetini olusturur (`promptBuilder.ts` - butun 300x300 harita
+  bir durum ozetini olusturur (`promptBuilder.ts` - butun 500x500 harita
   degil), OpenAI'a function-calling ile sorar (`openaiProvider.ts`), yaniti
   dogrulanmis `GameAction`'lara cevirir (`actionSchema.ts`), ve tumunu
   birlestirir (`llmOrchestrator.ts`).
@@ -89,7 +101,7 @@ bir army + bir caravan birimi otomatik verilir. Sohbet panelinden strateji
 yazmadan once ayarlardan kendi OpenAI API anahtarinizi baglamaniz gerekir
 (anahtar sunucuda AES-256-GCM ile sifreli saklanir, asla geri gosterilmez).
 
-Harita 300x300 oldugu icin tek ekranda gosterilmez; fare ile surukleyerek
+Harita 500x500 oldugu icin tek ekranda gosterilmez; fare ile surukleyerek
 veya haritanin altindaki yon butonlariyla kaydirabilirsiniz (kamera
 oyuncunun kendi ussunde baslar).
 

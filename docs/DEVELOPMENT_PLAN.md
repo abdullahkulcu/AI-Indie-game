@@ -76,7 +76,7 @@ olmayan bir seye bagimli olmaz.
 
 - Kanal sayisi sabit (3), otomatik acilip kapanmiyor - "coklu kanal" var ama
   Discord tarzi dinamik degil (bkz. yukaridaki yol haritasi maddesi).
-- Harita 300x300 sabit boyutta, gercek anlamda sonsuz/chunk-bazli degil;
+- Harita 500x500 sabit boyutta, gercek anlamda sonsuz/chunk-bazli degil;
   terrain'in `(seed, x, y)`'nin saf fonksiyonu olmasi (bkz. `mapService.ts`)
   pratikte "sinira hicbir zaman ulasilamaz" hissini ucuza veriyor.
 - Maden yatagi yogunlugu ayarlanmadi (butun dag karolari bir yatak tasiyor);
@@ -106,7 +106,7 @@ yapildi:
   sadece sahiplik iddialarini tutan `tile_claims` geldi; terrain/maden
   `mapService.terrainFor`/`depositFor` ile hesaplanir - hem backend hem
   frontend (`frontend/src/game/terrainMap.ts`) ayni algoritmayi calistirir.
-  Bu yuzden harita boyutu (300x300) network/DB maliyetine hemen hemen hic
+  Bu yuzden harita boyutu (500x500) network/DB maliyetine hemen hemen hic
   yansimaz.
 - **Rastgele baslangic konumu**: `mapService.randomStartingPosition` -
   diger oyunculardan en az bir minimum mesafede rastgele bir duz arazi
@@ -118,5 +118,37 @@ yapildi:
   harcayarak yeni bir army birimi egitir.
 - **Kamera/viewport**: `MapGrid.tsx` artik butun haritayi degil, oyuncunun
   konumu etrafinda pannable (surukle-birak + yon butonlari) bir pencere
-  render ediyor - 300x300'luk bir izometrik haritayi tek seferde cizmek
+  render ediyor - 500x500'luk bir izometrik haritayi tek seferde cizmek
   pratik olmadigi icin.
+
+## 5. Ucuncu tur degisiklikler (bolgeli harita + buyutulmus olcek + duz/vektor sanat)
+
+Kullanicinin "harita Stronghold Crusader'a benzesin, farkli bolgeler olsun,
+daha buyuk bir harita olsun, elementler/assetler daha buyuk olsun" istegine,
+ve ardindan "pixel art kavramindan cikalim, duz/vektor bir gorunume gecelim"
+yonlendirmesine cevaben:
+
+- **Harita boyutu** 300x300'den 500x500'e cikarildi.
+- **Bolgeli (biome) terrain uretimi** (`mapService.ts`/`terrainMap.ts`): iki
+  katmanli deger gurultusu (value noise) - genis olcekli, yumusak bir "bolge"
+  siniflandirmasi (`desert`/`grassland`/`highlands`, col-agirlikli) artik
+  hangi ince-detay terrain paletinin kullanilacagini belirliyor; bu sayede
+  harita, komsu tile'lari rastgele degil, cografi olarak tutarli buyuk
+  bolgeler (collar, otlaklar, kayalik yaylalar) halinde degisiyor. Collerde
+  vaha (`oasis`) noktalari ayri bir gurultu katmaniyla ayrica isaretleniyor.
+  Maden yataklari sadece `mountain` terrain'inde bulunuyor ve `highlands`
+  bolgesinde daha yogun kumelenip Stronghold'daki gibi "kiymetli, sinirli
+  bolge" hissi veriyor.
+- **Gorsel stilde tam degisim - pixel art'tan duz/vektor sanata**: bu ortamda
+  internetten hazir asset indirmek mumkun degil (kenney.nl, opengameart.org,
+  itch.io gibi siteler ag politikasi tarafindan 403 ile engelleniyor; npm
+  registry'de de sadece tekil ikon paketleri var, tam bir izometrik
+  tile/bina/karakter seti yok) - bu nedenle kullanicinin "pixel art'tan
+  cikalim" talebi, tum `frontend/src/pixelart/` modulunun (tiles.ts,
+  sprites.ts) prosedurel olarak "big pixel" ASCII-art rasterlemesi yerine duz,
+  yumusak kenarli vektor sekillerle (gradyanli izometrik karo dolgulari,
+  `roundRect`/`arc`/quadratic egrilerle cizilen bina-birim-dekorasyon
+  parcalari) yeniden yazilmasiyla karsilandi. `asciiSprite.ts` kaldirildi,
+  yerine `canvasTexture.ts` (texture cache) ve `shapes.ts` (paylasilan
+  golge/blob/bayrak yardimcilari) geldi. Hicbir dis asset dosyasi
+  kullanilmiyor - her sey hala versiyon kontrolundeki kod.

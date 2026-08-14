@@ -1,8 +1,8 @@
 /** Map size is very large but still fixed (not truly infinite/chunk-streamed):
- * 300x300 is big enough that no player will realistically reach an edge, while
+ * 500x500 is big enough that no player will realistically reach an edge, while
  * staying simple - terrain is a pure function of (channel seed, x, y) rather
  * than a pre-seeded row per tile, so the size costs nothing extra to store. */
-export const MAP_SIZE = 300;
+export const MAP_SIZE = 500;
 
 export type ResourceType = "gold" | "wood" | "food" | "stone" | "iron";
 
@@ -33,7 +33,13 @@ export interface Resources {
   iron: number;
 }
 
-export type TileTerrain = "plains" | "forest" | "mountain" | "water";
+export type TileTerrain = "plains" | "forest" | "mountain" | "water" | "desert" | "oasis";
+
+/** Large-scale biome a tile falls in - determines which fine-grained terrain
+ * types can appear there (see mapService.terrainFor). Desert is the dominant
+ * region (Stronghold Crusader-style arid map), with rockier highlands and
+ * greener grassland patches breaking it up. */
+export type Region = "desert" | "grassland" | "highlands";
 
 /** Terrain/deposits are computed on demand from (channel seed, x, y) - see
  * mapService.ts - so only claimed tiles (a player owns them) exist as rows.

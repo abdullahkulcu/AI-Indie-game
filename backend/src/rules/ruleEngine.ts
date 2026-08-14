@@ -128,7 +128,7 @@ export function validateBuild(
   if (!cost) return reject(`Bilinmeyen yapi tipi: ${action.structureType}`);
 
   const terrain = terrainFor(state.seed, action.x, action.y);
-  if (terrain === "water") return reject("Su uzerine insa edilemez.");
+  if (terrain === "water" || terrain === "oasis") return reject("Su/vaha uzerine insa edilemez.");
 
   if (action.structureType === "mine") {
     const deposit = depositFor(state.seed, action.x, action.y);

@@ -10,8 +10,9 @@ const TILE_W = TILE_PX_W;
 const TILE_H = TILE_PX_H;
 const TOP_MARGIN = 90; // room for buildings/units poking up above the top row
 /** How many tiles are visible around the camera in each direction - the map
- * itself is up to 300x300, but only this window is ever built into sprites. */
-const VIEW_RADIUS = 10;
+ * itself is up to 500x500, but only this window is ever built into sprites.
+ * Kept smaller than before since tiles now render at a bigger pixel size. */
+const VIEW_RADIUS = 7;
 
 function isoX(x: number, y: number): number {
   return (x - y) * (TILE_W / 2);
@@ -38,7 +39,7 @@ interface MapGridProps {
 
 /** Isometric, pixel-art 2D map renderer (Age of Empires 1/2-style diamond
  * tiles) built from procedurally generated PixiJS textures - see
- * `src/pixelart/`. The map itself can be up to 300x300 tiles, so this only
+ * `src/pixelart/`. The map itself can be up to 500x500 tiles, so this only
  * ever builds sprites for a small pannable window (VIEW_RADIUS around a
  * camera position) - ground terrain for that window is computed locally
  * (src/game/terrainMap.ts mirrors the backend's deterministic generator)
@@ -66,7 +67,7 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
     const app = new Application();
 
     app
-      .init({ width: canvasWidth, height: canvasHeight, backgroundColor: 0x0d1b2a, antialias: false })
+      .init({ width: canvasWidth, height: canvasHeight, backgroundColor: 0x0d1b2a, antialias: true })
       .then(() => {
         if (disposed || !containerRef.current) {
           app.destroy(true, { children: true });
@@ -91,7 +92,7 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
 
   function pan(dx: number, dy: number): void {
     const snap = snapshotRef.current;
-    const mapSize = snap?.mapSize ?? 300;
+    const mapSize = snap?.mapSize ?? 500;
     camera.current.x = Math.max(0, Math.min(mapSize - 1, camera.current.x + dx));
     camera.current.y = Math.max(0, Math.min(mapSize - 1, camera.current.y + dy));
     drawRef.current();

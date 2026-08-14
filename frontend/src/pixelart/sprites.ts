@@ -1,206 +1,420 @@
 import type { Texture } from "pixi.js";
-import { getSpriteTexture, sprite, type Legend } from "./asciiSprite";
-import { CROP, METAL, OUTLINE, SKIN, STONE, THATCH, WALL, WOOD } from "./palette";
+import { getProceduralTexture } from "./canvasTexture";
+import { lighten, shade } from "./color";
+import { flag, groundShadow } from "./shapes";
+import { CROP, METAL, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./palette";
 
-/** Building and unit art, defined as compact ASCII pixel-art ("big pixel" per
- * character) and rasterized on demand. "$"/"@"/"%" are reserved for the
- * owning player's accent color and its auto-derived dark/light shades (see
- * asciiSprite.ts) - buildings stay in neutral materials with a colored
- * flag/banner or decoration, units wear the accent (with real shading) as
- * their tunic/cart color, matching how Age of Empires-era games showed
- * ownership without recoloring the whole sprite. */
-
-// Buildings render noticeably larger than units (a town center should dwarf a
-// soldier standing next to it) - using a smaller scale for units, on top of
-// their already-shorter ASCII art, keeps that size hierarchy readable even
-// when a unit is standing right on its owner's building tile.
-const BUILDING_SCALE = 4;
-const UNIT_SCALE = 3;
+/** Building and unit art, drawn as flat, gradient-shaded vector shapes
+ * (rounded rects, circles, simple paths) rather than pixel art or downloaded
+ * image files - keeps every visual asset in version-controlled code with no
+ * external asset dependency. Buildings stay in neutral materials with an
+ * accent-colored flag/banner or decoration; units wear the accent (with real
+ * light/dark shading derived from it) as their tunic/wagon color, matching
+ * how Age of Empires-era games showed ownership without recoloring the whole
+ * sprite. Buildings render noticeably larger than units so a town center
+ * dwarfs a soldier standing next to it. */
 
 export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market" | "mine";
 export type UnitType = "army" | "caravan";
 
-const BUILDING_LEGEND: Legend = {
-  O: OUTLINE,
-  R: THATCH.mid,
-  r: THATCH.light,
-  W: WALL.mid,
-  w: WALL.light,
-  D: WOOD.dark,
-  F: CROP.mid,
-  f: CROP.light,
-  L: WOOD.mid,
-  l: WOOD.light,
-  S: STONE.dark,
-  M: STONE.mid,
-  n: STONE.light,
-  C: WOOD.mid,
-  P: WOOD.mid,
-  K: STONE.dark,
+const BUILDING_W = 116;
+const BUILDING_H = 138;
+const UNIT_W = 56;
+const UNIT_H = 92;
+
+function verticalFill(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  h: number,
+  top: string,
+  bottom: string,
+): CanvasGradient {
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, top);
+  g.addColorStop(1, bottom);
+  return g;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+
+function drawBase(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 4;
+  const bodyW = 66;
+  const bodyH = 48;
+  const bodyTop = bottomY - bodyH;
+
+  groundShadow(ctx, cx, bottomY + 2, bodyW * 0.62, 9);
+
+  ctx.fillStyle = STONE.dark;
+  roundRect(ctx, cx - bodyW / 2 - 3, bottomY - 8, bodyW + 6, 10, 3);
+  ctx.fill();
+
+  roundRect(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, 6);
+  ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, WALL.light, WALL.mid);
+  ctx.fill();
+
+  ctx.fillStyle = WOOD.dark;
+  roundRect(ctx, cx - 8, bottomY - 22, 16, 22, 3);
+  ctx.fill();
+
+  const roofTop = bodyTop - 30;
+  ctx.beginPath();
+  ctx.moveTo(cx - bodyW / 2 - 6, bodyTop + 4);
+  ctx.lineTo(cx, roofTop);
+  ctx.lineTo(cx + bodyW / 2 + 6, bodyTop + 4);
+  ctx.closePath();
+  ctx.fillStyle = verticalFill(ctx, 0, roofTop, bodyTop + 4 - roofTop, THATCH.light, THATCH.dark);
+  ctx.fill();
+
+  flag(ctx, cx, roofTop - 20, 20, accent);
+}
+
+function drawFarm(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 6;
+  const plotW = 84;
+  const plotH = 44;
+  const top = bottomY - plotH;
+
+  groundShadow(ctx, cx, bottomY + 2, plotW * 0.56, 9);
+
+  roundRect(ctx, cx - plotW / 2, top, plotW, plotH, 6);
+  ctx.fillStyle = "#5a4a2c";
+  ctx.fill();
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 3;
+  roundRect(ctx, cx - plotW / 2, top, plotW, plotH, 6);
+  ctx.stroke();
+
+  const rows = 3;
+  const cols = 5;
+  const padX = 8;
+  const padY = 8;
+  const cellW = (plotW - padX * 2) / cols;
+  const cellH = (plotH - padY * 2) / rows;
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const cellX = cx - plotW / 2 + padX + col * cellW;
+      const cellY = top + padY + row * cellH;
+      ctx.fillStyle = (row + col) % 2 === 0 ? CROP.mid : CROP.light;
+      roundRect(ctx, cellX + 1.5, cellY + 1.5, cellW - 3, cellH - 3, 2);
+      ctx.fill();
+    }
+  }
+
+  const poleX = cx + plotW / 2 - 4;
+  const poleTop = top - 16;
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(poleX, top);
+  ctx.lineTo(poleX, poleTop);
+  ctx.stroke();
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.arc(poleX, poleTop - 5, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = accent;
+  roundRect(ctx, poleX - 6, poleTop - 1, 12, 10, 3);
+  ctx.fill();
+}
+
+function drawSawmill(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 4;
+  const logsH = 16;
+  const bodyW = 68;
+  const bodyH = 44;
+  const bodyTop = bottomY - logsH - bodyH;
+
+  groundShadow(ctx, cx, bottomY + 2, bodyW * 0.6, 9);
+
+  for (let i = 0; i < 4; i += 1) {
+    ctx.fillStyle = i % 2 === 0 ? WOOD.mid : WOOD.light;
+    roundRect(ctx, cx - bodyW / 2 + i * (bodyW / 4), bottomY - logsH, bodyW / 4 - 2, logsH - 2, 3);
+    ctx.fill();
+  }
+
+  roundRect(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, 6);
+  ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, WALL.light, WALL.mid);
+  ctx.fill();
+
+  const bladeR = 15;
+  const bladeCx = cx;
+  const bladeCy = bodyTop + bodyH * 0.42;
+  ctx.fillStyle = STONE.mid;
+  ctx.beginPath();
+  ctx.arc(bladeCx, bladeCy, bladeR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = STONE.light;
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i / 8) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(bladeCx, bladeCy);
+    ctx.lineTo(bladeCx + Math.cos(a) * bladeR, bladeCy + Math.sin(a) * bladeR);
+    ctx.stroke();
+  }
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(bladeCx, bladeCy, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  flag(ctx, cx + bodyW / 2 - 6, bodyTop - 20, 20, accent);
+}
+
+function drawBarracks(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 4;
+  const towerW = 26;
+  const towerH = 46;
+  const towerTop = bottomY - towerH;
+  const gap = 30;
+
+  groundShadow(ctx, cx, bottomY + 2, 60, 9);
+
+  ctx.fillStyle = verticalFill(ctx, 0, towerTop, 20, WALL.light, WALL.mid);
+  roundRect(ctx, cx - gap / 2 - towerW / 2, towerTop + 20, gap + towerW, 22, 4);
+  ctx.fill();
+
+  for (const side of [-1, 1]) {
+    const tx = cx + side * (gap / 2 + towerW / 2) - towerW / 2;
+    roundRect(ctx, tx, towerTop, towerW, towerH, 4);
+    ctx.fillStyle = verticalFill(ctx, 0, towerTop, towerH, WALL.light, WALL.mid);
+    ctx.fill();
+
+    const roofTop = towerTop - 18;
+    ctx.beginPath();
+    ctx.moveTo(tx - 3, towerTop + 3);
+    ctx.lineTo(tx + towerW / 2, roofTop);
+    ctx.lineTo(tx + towerW + 3, towerTop + 3);
+    ctx.closePath();
+    ctx.fillStyle = STONE.dark;
+    ctx.fill();
+
+    flag(ctx, tx + towerW / 2, roofTop - 18, 18, accent);
+  }
+
+  ctx.fillStyle = "#241a12";
+  roundRect(ctx, cx - 8, bottomY - 20, 16, 20, 3);
+  ctx.fill();
+}
+
+function drawMarket(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 4;
+  const tentW = 78;
+  const tentTop = bottomY - 56;
+  const awningH = 20;
+
+  groundShadow(ctx, cx, bottomY + 2, tentW * 0.55, 9);
+
+  const stripes = 6;
+  for (let i = 0; i < stripes; i += 1) {
+    const x0 = cx - tentW / 2 + (i * tentW) / stripes;
+    const x1 = cx - tentW / 2 + ((i + 1) * tentW) / stripes;
+    ctx.beginPath();
+    ctx.moveTo(x0, tentTop + awningH);
+    ctx.lineTo(x1, tentTop + awningH);
+    ctx.lineTo(cx, tentTop);
+    ctx.closePath();
+    ctx.fillStyle = i % 2 === 0 ? accent : lighten(accent, 0.5);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 3;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + side * (tentW / 2 - 4), tentTop + awningH);
+    ctx.lineTo(cx + side * (tentW / 2 - 4), bottomY - 14);
+    ctx.stroke();
+  }
+
+  const counterW = tentW - 14;
+  roundRect(ctx, cx - counterW / 2, bottomY - 16, counterW, 16, 3);
+  ctx.fillStyle = WOOD.mid;
+  ctx.fill();
+
+  const goods: Array<[number, string]> = [
+    [-0.32, CROP.light],
+    [-0.1, CROP.mid],
+    [0.12, STONE.light],
+    [0.32, CROP.light],
+  ];
+  for (const [t, color] of goods) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx + t * counterW, bottomY - 20, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawMine(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = BUILDING_W / 2;
+  const bottomY = BUILDING_H - 4;
+  const shaftW = 34;
+  const shaftH = 22;
+  const shaftTop = bottomY - shaftH;
+  const frameTop = shaftTop - 34;
+
+  groundShadow(ctx, cx, bottomY + 2, 42, 9);
+
+  ctx.fillStyle = verticalFill(ctx, 0, shaftTop - 10, shaftH + 10, WALL.mid, WALL.mid);
+  roundRect(ctx, cx - shaftW / 2 - 12, shaftTop - 10, shaftW + 24, shaftH + 10, 5);
+  ctx.fill();
+
+  roundRect(ctx, cx - shaftW / 2, shaftTop, shaftW, shaftH, 4);
+  ctx.fillStyle = "#1a1410";
+  ctx.fill();
+
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - 22, shaftTop);
+  ctx.lineTo(cx, frameTop);
+  ctx.lineTo(cx + 22, shaftTop);
+  ctx.stroke();
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, shaftTop - 12);
+  ctx.lineTo(cx + 12, shaftTop - 12);
+  ctx.stroke();
+
+  flag(ctx, cx, frameTop - 18, 18, accent);
+}
+
+const BUILDING_PAINTERS: Record<StructureType, (ctx: CanvasRenderingContext2D, accent: string) => void> = {
+  base: drawBase,
+  farm: drawFarm,
+  sawmill: drawSawmill,
+  barracks: drawBarracks,
+  market: drawMarket,
+  mine: drawMine,
 };
 
-const BUILDINGS: Record<StructureType, string[]> = {
-  // Town center: a stone-footed cottage with a tapered thatch roof, a proud
-  // flag, and a small (not cavernous) doorway.
-  base: [
-    "........$........",
-    "........O........",
-    ".......OOO.......",
-    "......ORrRO......",
-    ".....ORrRRRO.....",
-    "....ORrRRRRRO....",
-    "...OWWWWWWWWWO...",
-    "..OWwWWWWWWWwWO..",
-    ".OWWWWWWWWWWWWWO.",
-    "OWWWWWWODDOWWWWWO",
-    "OwWWWWWDDWWwWWWWO",
-    "OWWWWWWWWWWWWWWWO",
-    ".OOOOOOOOOOOOOOO.",
-    "..SSSSSSSSSSSSS..",
-  ],
-  // Farm: fenced crop rows with a small accent-colored scarecrow watching.
-  farm: [
-    ".......$.......",
-    ".......O.......",
-    "......OOO......",
-    ".....O$$$O.....",
-    ".OOOOO...OOOOO.",
-    "OFFFfFFFfFFFFFO",
-    "OfFFFfFFFfFFFfO",
-    "OFFFfFFFfFFFFFO",
-    "OfFFFfFFFfFFFfO",
-    "OFFFfFFFfFFFFFO",
-    ".OOOOOOOOOOOOO.",
-  ],
-  // Sawmill: circular saw blade between a work shed and a stacked log pile.
-  sawmill: [
-    "........$......",
-    "........O......",
-    ".......OWO.....",
-    "......OWWWO....",
-    ".OOOOOOWWWOOOO.",
-    "OWWWWWWWWWWWWWO",
-    "OwWWW.nSn.WWWwO",
-    "OWWWW.SMS.WWWWO",
-    "OwWWW.nSn.WWWwO",
-    "OWWWWWWWWWWWWWO",
-    "OLLLLLLLLLLLLLO",
-    "OlLlLlLlLlLlLlO",
-    ".OOOOOOOOOOOOO.",
-  ],
-  // Barracks: twin-towered fort, a banner flying from each tower, one small
-  // reinforced doorway (not a full black archway).
-  barracks: [
-    ".....$...$.....",
-    ".....O...O.....",
-    "....OOO.OOO....",
-    "....OMSO.OSMO..",
-    "...OOMOOOOMOO..",
-    "..OWWWWWWWWWO..",
-    ".OWwWWWWWWWwWO.",
-    "OWWWWWWWWWWWWWO",
-    "OwWWWWWDDWWWwWO",
-    "OWWWWWWWWWWWWWO",
-    ".OOOOOOOOOOOOO.",
-  ],
-  // Market: an open trade-post tent with a striped awning, visible wooden
-  // support poles (not the near-invisible dark outline color), and goods on
-  // display at the counter - deliberately the most "busy" building so it
-  // reads as a place of commerce rather than another house. The poles are a
-  // clearly-colored material so the tent and counter read as one structure
-  // instead of two floating pieces against the dark background.
-  market: [
-    ".OOOOOOOOOOOO.",
-    "O$W$W$W$W$WWO.",
-    "O$W$W$W$W$WWO.",
-    "OWWWWWWWWWWWWO",
-    "P............P",
-    "P.CCCCCCCCCC.P",
-    "P.CfFfFfFfFC.P",
-    "P.CCCCCCCCCC.P",
-    "P............P",
-    "PPPPPPPPPPPPPP",
-  ],
-  // Mine: a timber-shored shaft entrance under a small A-frame headframe -
-  // deliberately doesn't hint at which resource (stone/iron/gold) it works,
-  // since that's a property of the deposit tile it's built on, not the
-  // building itself.
-  mine: [
-    "........$......",
-    "........O......",
-    ".......OWO.....",
-    "......OW.WO....",
-    ".OOOOOOW.WOOOO.",
-    "OWWWWWWW.WWWWWO",
-    "OwWWWKKKKKWWWwO",
-    "OWWWWKKKKKWWWWO",
-    "OwWWWKKKKKWWWwO",
-    "OWWWWWWWWWWWWWO",
-    "OLLLLLLLLLLLLLO",
-    ".OOOOOOOOOOOOO.",
-  ],
-};
+function drawArmy(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = UNIT_W / 2;
+  const bottomY = UNIT_H - 6;
 
-const UNIT_LEGEND: Legend = {
-  O: OUTLINE,
-  e: OUTLINE,
-  W: METAL,
-  w: WOOD.dark,
-  H: SKIN,
-  B: WOOD.dark,
-  "+": METAL,
-};
+  groundShadow(ctx, cx, bottomY, 14, 4.5);
 
-const UNITS: Record<UnitType, string[]> = {
-  // Soldier: a proper hilted sword (blade/crossguard/hilt, not just a line),
-  // a face with visible eyes under the helmet, a cape draped past the
-  // shoulders (the accent-shadow tone along the torso's outer edges), and
-  // booted legs.
-  army: [
-    ".....OWO.....",
-    ".....OWO.....",
-    "....OWWWO....",
-    ".....OwO.....",
-    "....OOOOO....",
-    "...OHHHHHO...",
-    "...OHeHeHO...",
-    "...OHHHHHO...",
-    "...OOOOOOO...",
-    "..O$$$$$$$O..",
-    ".O@$$$$$$$@O.",
-    ".O@$$%%%$$@O.",
-    ".O$$O...O$$O.",
-    "..OBO...OBO..",
-    "..OBO...OBO..",
-    ".sssssssssss.",
-  ],
-  // Covered wagon: light canopy top, shaded accent body, and two wheels
-  // with visible spokes (an axle hub, not a plain circle) - reads as an
-  // actual mechanism rather than a box on dots.
-  caravan: [
-    ".....OOO.....",
-    "...O%%%%%O...",
-    "..O$$$$$$$O..",
-    "..O$@@@@@$O..",
-    ".OOOOOOOOOOO.",
-    ".............",
-    ".OOO.....OOO.",
-    "O.+.O...O.+.O",
-    ".OOO.....OOO.",
-    ".sssssssssss.",
-  ],
+  ctx.fillStyle = "#241a12";
+  roundRect(ctx, cx - 8, bottomY - 20, 6, 20, 2);
+  ctx.fill();
+  roundRect(ctx, cx + 2, bottomY - 20, 6, 20, 2);
+  ctx.fill();
+
+  const bodyTop = bottomY - 48;
+  const bodyH = 30;
+  roundRect(ctx, cx - 12, bodyTop, 24, bodyH, 7);
+  ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, lighten(accent, 0.2), shade(accent, 0.7));
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, bodyTop + 6);
+  ctx.lineTo(cx - 12, bodyTop + bodyH);
+  ctx.moveTo(cx + 12, bodyTop + 6);
+  ctx.lineTo(cx + 12, bodyTop + bodyH);
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.arc(cx, bodyTop - 10, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = SKIN_SHADOW;
+  ctx.beginPath();
+  ctx.arc(cx - 3, bodyTop - 7, 1.6, 0, Math.PI * 2);
+  ctx.arc(cx + 3, bodyTop - 7, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = METAL;
+  ctx.beginPath();
+  ctx.arc(cx, bodyTop - 14, 10.5, Math.PI, Math.PI * 2);
+  ctx.fill();
+
+  const swordX = cx + 15;
+  ctx.strokeStyle = METAL;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(swordX, bodyTop + 2);
+  ctx.lineTo(swordX, bodyTop - 22);
+  ctx.stroke();
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(swordX - 4, bodyTop + 2);
+  ctx.lineTo(swordX + 4, bodyTop + 2);
+  ctx.stroke();
+  ctx.fillStyle = WOOD.dark;
+  roundRect(ctx, swordX - 1.5, bodyTop + 2, 3, 8, 1);
+  ctx.fill();
+}
+
+function drawCaravan(ctx: CanvasRenderingContext2D, accent: string): void {
+  const cx = UNIT_W / 2;
+  const bottomY = UNIT_H - 10;
+
+  groundShadow(ctx, cx, bottomY + 6, 22, 5);
+
+  for (const wx of [cx - 14, cx + 14]) {
+    ctx.fillStyle = WOOD.dark;
+    ctx.beginPath();
+    ctx.arc(wx, bottomY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = METAL;
+    ctx.lineWidth = 1.4;
+    for (const a of [0, 60, 120]) {
+      const rad = (a * Math.PI) / 180;
+      ctx.beginPath();
+      ctx.moveTo(wx - Math.cos(rad) * 7, bottomY - Math.sin(rad) * 7);
+      ctx.lineTo(wx + Math.cos(rad) * 7, bottomY + Math.sin(rad) * 7);
+      ctx.stroke();
+    }
+    ctx.fillStyle = METAL;
+    ctx.beginPath();
+    ctx.arc(wx, bottomY, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const bodyW = 40;
+  const bodyH = 20;
+  const bodyTop = bottomY - 8 - bodyH;
+  roundRect(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, 5);
+  ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, lighten(accent, 0.15), shade(accent, 0.75));
+  ctx.fill();
+
+  const canopyTop = bodyTop - 14;
+  ctx.beginPath();
+  ctx.moveTo(cx - bodyW / 2 + 2, bodyTop + 2);
+  ctx.quadraticCurveTo(cx, canopyTop - 4, cx + bodyW / 2 - 2, bodyTop + 2);
+  ctx.lineTo(cx + bodyW / 2 - 2, bodyTop);
+  ctx.quadraticCurveTo(cx, canopyTop - 8, cx - bodyW / 2 + 2, bodyTop);
+  ctx.closePath();
+  ctx.fillStyle = lighten(accent, 0.55);
+  ctx.fill();
+}
+
+const UNIT_PAINTERS: Record<UnitType, (ctx: CanvasRenderingContext2D, accent: string) => void> = {
+  army: drawArmy,
+  caravan: drawCaravan,
 };
 
 export function getBuildingTexture(type: StructureType, accent: string): Texture {
-  return getSpriteTexture(
-    `building:${type}:${accent}`,
-    sprite(BUILDINGS[type]),
-    BUILDING_LEGEND,
-    BUILDING_SCALE,
-    accent,
-  );
+  return getProceduralTexture(`building:${type}:${accent}`, BUILDING_W, BUILDING_H, (ctx) => {
+    BUILDING_PAINTERS[type](ctx, accent);
+  });
 }
 
 export function getUnitTexture(type: UnitType, accent: string): Texture {
-  return getSpriteTexture(`unit:${type}:${accent}`, sprite(UNITS[type]), UNIT_LEGEND, UNIT_SCALE, accent);
+  return getProceduralTexture(`unit:${type}:${accent}`, UNIT_W, UNIT_H, (ctx) => {
+    UNIT_PAINTERS[type](ctx, accent);
+  });
 }

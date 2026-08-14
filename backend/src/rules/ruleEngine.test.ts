@@ -6,7 +6,7 @@ import type { GameStateSnapshot, Unit } from "../models/types.js";
 const PLAYER_A = "player-a";
 const PLAYER_B = "player-b";
 const SEED = 1;
-const MAP_SIZE = 300;
+const MAP_SIZE = 500;
 
 /** Terrain/deposits are a pure function of (seed, x, y) now (see
  * mapService.ts) rather than fixtures we can just declare - so tests find
@@ -249,7 +249,7 @@ describe("build validation", () => {
       y: WATER.y,
     });
     expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/Su uzerine/);
+    expect(result.reason).toMatch(/Su\/vaha uzerine/);
   });
 
   it("rejects building on another player's claimed tile", () => {
