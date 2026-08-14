@@ -1,0 +1,20 @@
+{
+  "name": "ai-indie-game",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MVP: web tabanli, 2D haritali multiplayer strateji oyunu (AI generalleri).",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm run test --workspace backend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
