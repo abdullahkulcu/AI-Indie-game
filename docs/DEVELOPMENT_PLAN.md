@@ -225,3 +225,31 @@ her kanalda 4-5 mob olsun" isteklerine cevaben:
   sprite (kukuletali, kirmizi gozlu, sopali siluet) eklendi. Dogrulama:
   gercek Postgres'e karsi mob sayisinin 5'e tamamlandigi ve tarayicida
   ayirt edilebilir sekilde render edildigi goruldu.
+
+## 8. Gorsel detay artisi (Stronghold Crusader'a "yakinlik" talebi)
+
+Kullanici "pixel olmasina gerek yok ama Stronghold Crusader grafiklerine
+yakin olsun" dedi. Gercekci beklenti yonetimi: Stronghold'un gorunumu
+profesyonel sanatcilarin aylarca elle boyadigi/render ettigi yuksek
+cozunurluklu spritelardan geliyor - bu, kodla gercek zamanli sekil ciziminden
+temelde farkli bir surec ve birebir yakalanamaz; ayrica bu ortamda internetten
+hazir asset indirmek de mumkun degil (bkz. bolum 6/agent notlari). Bunun
+yerine mevcut duz/vektor prosedurel motor, "boyali/dokulu, detayli" yone
+mumkun oldugunca itildi:
+
+- **Boyali zemin dokusu** (`shapes.ts::speckleTexture`): her tile artik duz
+  gradyan degil, hash-tabanli, deterministik bir benek/leke dokusu tasiyor
+  (karo diamond'ina clip'lenmis), artı ust-sol'da ince bir isik/alt-sag'da
+  golge cizgisi - duz vektor gorunumden "boyanmis yuzey" hissine gecis.
+- **Bina detaylari**: `base` yapisina pencereler (sicak isikli, cerceveli),
+  bacadan yukselen duman (`shapes.ts::chimneySmoke`), kapi cercevesi ve
+  catida "kiremit/saman siralari" (`roofShingleLines`) eklendi; `barracks`
+  kulelerine ok mazgallari ve duvar dokusu; `mine`/`sawmill`/`market`
+  duvarlarina/tezgahina doku ve fici gibi ek dekor; `farm`a cit direkleri.
+  Tum duz renkli duvar/tezgah yuzeyleri artik `wallTexture` ile dokulu.
+- **Birim detaylari**: asker (`army`) artik omuzlardan sarkan bir pelerin ve
+  ust uste 3 zirh plakasi cizgisiyle daha katmanli gorunuyor.
+- Dogrulama: 6 yapi tipi + 3 asker + 1 kervan + 5 mob'un hepsinin ayni anda
+  goruldugu bir "uzun sureli oynanmis" sahne kurulup ekran goruntusu alindi;
+  yakin plan kirpma ile pencere/baca/mazgal/fici/pelerin detaylari teker
+  teker dogrulandi.

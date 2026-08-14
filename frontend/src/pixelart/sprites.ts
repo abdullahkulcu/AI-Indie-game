@@ -1,7 +1,7 @@
 import type { Texture } from "pixi.js";
 import { getProceduralTexture } from "./canvasTexture";
 import { lighten, shade } from "./color";
-import { flag, groundShadow } from "./shapes";
+import { chimneySmoke, flag, groundShadow, roofShingleLines, wallTexture, windowPane } from "./shapes";
 import { CROP, METAL, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./palette";
 
 /** Building and unit art, drawn as flat, gradient-shaded vector shapes
@@ -62,19 +62,44 @@ function drawBase(ctx: CanvasRenderingContext2D, accent: string): void {
   roundRect(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, 6);
   ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, WALL.light, WALL.mid);
   ctx.fill();
+  wallTexture(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, WALL.dark, WALL.light, 21);
+
+  windowPane(ctx, cx - bodyW / 2 + 9, bodyTop + 10, 9, 11);
+  windowPane(ctx, cx + bodyW / 2 - 18, bodyTop + 10, 9, 11);
 
   ctx.fillStyle = WOOD.dark;
   roundRect(ctx, cx - 8, bottomY - 22, 16, 22, 3);
   ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
+  ctx.lineWidth = 1.2;
+  roundRect(ctx, cx - 8, bottomY - 22, 16, 22, 3);
+  ctx.stroke();
 
   const roofTop = bodyTop - 30;
+  const roofPoints: Array<[number, number]> = [
+    [cx - bodyW / 2 - 6, bodyTop + 4],
+    [cx, roofTop],
+    [cx + bodyW / 2 + 6, bodyTop + 4],
+  ];
   ctx.beginPath();
-  ctx.moveTo(cx - bodyW / 2 - 6, bodyTop + 4);
-  ctx.lineTo(cx, roofTop);
-  ctx.lineTo(cx + bodyW / 2 + 6, bodyTop + 4);
+  ctx.moveTo(...roofPoints[0]);
+  ctx.lineTo(...roofPoints[1]);
+  ctx.lineTo(...roofPoints[2]);
   ctx.closePath();
   ctx.fillStyle = verticalFill(ctx, 0, roofTop, bodyTop + 4 - roofTop, THATCH.light, THATCH.dark);
   ctx.fill();
+  roofShingleLines(ctx, roofPoints, THATCH.dark, 5);
+
+  // Chimney + a wisp of smoke - the small "this place is lived in" cue. It
+  // pokes up through the lower half of the roof, extending just past the
+  // ridge line.
+  const chimneyX = cx + bodyW * 0.22;
+  const chimneyBase = bodyTop - 4;
+  const chimneyTop = roofTop - 2;
+  ctx.fillStyle = STONE.mid;
+  roundRect(ctx, chimneyX - 3.5, chimneyTop, 7, chimneyBase - chimneyTop, 1.5);
+  ctx.fill();
+  chimneySmoke(ctx, chimneyX, chimneyTop - 2, 7);
 
   flag(ctx, cx, roofTop - 20, 20, accent);
 }
@@ -91,10 +116,24 @@ function drawFarm(ctx: CanvasRenderingContext2D, accent: string): void {
   roundRect(ctx, cx - plotW / 2, top, plotW, plotH, 6);
   ctx.fillStyle = "#5a4a2c";
   ctx.fill();
+  wallTexture(ctx, cx - plotW / 2, top, plotW, plotH, "#3f331e", "#7a6338", 23);
   ctx.strokeStyle = WOOD.dark;
   ctx.lineWidth = 3;
   roundRect(ctx, cx - plotW / 2, top, plotW, plotH, 6);
   ctx.stroke();
+
+  // Fence posts around the perimeter - a fenced field reads more like a
+  // tended plot than a bare dirt rectangle.
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 2;
+  const postCount = 6;
+  for (let i = 0; i <= postCount; i += 1) {
+    const px = cx - plotW / 2 + (plotW * i) / postCount;
+    ctx.beginPath();
+    ctx.moveTo(px, top - 3);
+    ctx.lineTo(px, top + 3);
+    ctx.stroke();
+  }
 
   const rows = 3;
   const cols = 5;
@@ -148,6 +187,8 @@ function drawSawmill(ctx: CanvasRenderingContext2D, accent: string): void {
   roundRect(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, 6);
   ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, WALL.light, WALL.mid);
   ctx.fill();
+  wallTexture(ctx, cx - bodyW / 2, bodyTop, bodyW, bodyH, WALL.dark, WALL.light, 22);
+  windowPane(ctx, cx - bodyW / 2 + 8, bodyTop + 8, 8, 9);
 
   const bladeR = 15;
   const bladeCx = cx;
@@ -183,24 +224,38 @@ function drawBarracks(ctx: CanvasRenderingContext2D, accent: string): void {
 
   groundShadow(ctx, cx, bottomY + 2, 60, 9);
 
+  const wallX = cx - gap / 2 - towerW / 2;
+  const wallW = gap + towerW;
   ctx.fillStyle = verticalFill(ctx, 0, towerTop, 20, WALL.light, WALL.mid);
-  roundRect(ctx, cx - gap / 2 - towerW / 2, towerTop + 20, gap + towerW, 22, 4);
+  roundRect(ctx, wallX, towerTop + 20, wallW, 22, 4);
   ctx.fill();
+  wallTexture(ctx, wallX, towerTop + 20, wallW, 22, WALL.dark, WALL.light, 24);
 
   for (const side of [-1, 1]) {
     const tx = cx + side * (gap / 2 + towerW / 2) - towerW / 2;
     roundRect(ctx, tx, towerTop, towerW, towerH, 4);
     ctx.fillStyle = verticalFill(ctx, 0, towerTop, towerH, WALL.light, WALL.mid);
     ctx.fill();
+    wallTexture(ctx, tx, towerTop, towerW, towerH, WALL.dark, WALL.light, 25 + side);
+    // Arrow slit - a thin dark vertical window, more fortress than cottage.
+    ctx.fillStyle = "rgba(20, 14, 8, 0.7)";
+    roundRect(ctx, tx + towerW / 2 - 1.5, towerTop + 10, 3, 14, 1);
+    ctx.fill();
 
     const roofTop = towerTop - 18;
+    const roofPoints: Array<[number, number]> = [
+      [tx - 3, towerTop + 3],
+      [tx + towerW / 2, roofTop],
+      [tx + towerW + 3, towerTop + 3],
+    ];
     ctx.beginPath();
-    ctx.moveTo(tx - 3, towerTop + 3);
-    ctx.lineTo(tx + towerW / 2, roofTop);
-    ctx.lineTo(tx + towerW + 3, towerTop + 3);
+    ctx.moveTo(...roofPoints[0]);
+    ctx.lineTo(...roofPoints[1]);
+    ctx.lineTo(...roofPoints[2]);
     ctx.closePath();
     ctx.fillStyle = STONE.dark;
     ctx.fill();
+    roofShingleLines(ctx, roofPoints, STONE.light, 4);
 
     flag(ctx, tx + towerW / 2, roofTop - 18, 18, accent);
   }
@@ -245,6 +300,7 @@ function drawMarket(ctx: CanvasRenderingContext2D, accent: string): void {
   roundRect(ctx, cx - counterW / 2, bottomY - 16, counterW, 16, 3);
   ctx.fillStyle = WOOD.mid;
   ctx.fill();
+  wallTexture(ctx, cx - counterW / 2, bottomY - 16, counterW, 16, WOOD.dark, WOOD.light, 27);
 
   const goods: Array<[number, string]> = [
     [-0.32, CROP.light],
@@ -257,6 +313,21 @@ function drawMarket(ctx: CanvasRenderingContext2D, accent: string): void {
     ctx.beginPath();
     ctx.arc(cx + t * counterW, bottomY - 20, 4, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // A small barrel beside the counter - the kind of prop clutter that reads
+  // as "a place of trade" rather than an empty stall.
+  const barrelX = cx - tentW / 2 + 6;
+  ctx.fillStyle = WOOD.mid;
+  roundRect(ctx, barrelX - 6, bottomY - 22, 12, 20, 3);
+  ctx.fill();
+  ctx.strokeStyle = STONE.dark;
+  ctx.lineWidth = 1.4;
+  for (const dy of [-16, -8, 0]) {
+    ctx.beginPath();
+    ctx.moveTo(barrelX - 6, bottomY - 22 + 20 + dy);
+    ctx.lineTo(barrelX + 6, bottomY - 22 + 20 + dy);
+    ctx.stroke();
   }
 }
 
@@ -273,6 +344,7 @@ function drawMine(ctx: CanvasRenderingContext2D, accent: string): void {
   ctx.fillStyle = verticalFill(ctx, 0, shaftTop - 10, shaftH + 10, WALL.mid, WALL.mid);
   roundRect(ctx, cx - shaftW / 2 - 12, shaftTop - 10, shaftW + 24, shaftH + 10, 5);
   ctx.fill();
+  wallTexture(ctx, cx - shaftW / 2 - 12, shaftTop - 10, shaftW + 24, shaftH + 10, STONE.dark, WALL.light, 26);
 
   roundRect(ctx, cx - shaftW / 2, shaftTop, shaftW, shaftH, 4);
   ctx.fillStyle = "#1a1410";
@@ -318,17 +390,37 @@ function drawArmy(ctx: CanvasRenderingContext2D, accent: string): void {
 
   const bodyTop = bottomY - 48;
   const bodyH = 30;
+
+  // A dark cape peeking out past the tunic's silhouette, drawn first so it
+  // reads as fabric draped behind the shoulders rather than a flat outline.
+  ctx.fillStyle = shade(accent, 0.45);
+  ctx.beginPath();
+  ctx.moveTo(cx - 13, bodyTop + 2);
+  ctx.quadraticCurveTo(cx - 17, bodyTop + bodyH * 0.6, cx - 11, bodyTop + bodyH + 2);
+  ctx.lineTo(cx - 6, bodyTop + bodyH);
+  ctx.lineTo(cx - 9, bodyTop + 4);
+  ctx.closePath();
+  ctx.fill();
+
   roundRect(ctx, cx - 12, bodyTop, 24, bodyH, 7);
   ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, lighten(accent, 0.2), shade(accent, 0.7));
   ctx.fill();
 
   ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = 1.4;
+  // Armor-plate seams instead of just two side creases - three horizontal
+  // bands read as layered plating rather than a plain tunic.
+  for (const dy of [8, 15, 22]) {
+    ctx.beginPath();
+    ctx.moveTo(cx - 11, bodyTop + dy);
+    ctx.lineTo(cx + 11, bodyTop + dy);
+    ctx.stroke();
+  }
   ctx.beginPath();
   ctx.moveTo(cx - 12, bodyTop + 6);
   ctx.lineTo(cx - 12, bodyTop + bodyH);
   ctx.moveTo(cx + 12, bodyTop + 6);
   ctx.lineTo(cx + 12, bodyTop + bodyH);
-  ctx.lineWidth = 1.4;
   ctx.stroke();
 
   ctx.fillStyle = SKIN;
