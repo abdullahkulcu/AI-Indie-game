@@ -4,7 +4,7 @@ import { AuthError, login, register } from "./authService.js";
 import { requireAuth } from "./authPlugin.js";
 import { encryptSecret } from "../crypto/keyVault.js";
 import { getResources, hasApiKey, upsertApiKey } from "../repositories/playerRepository.js";
-import { joinGame } from "../game/onboarding.js";
+import { isGameFull, joinGame, MAX_PLAYERS } from "../game/onboarding.js";
 
 const registerSchema = z.object({
   username: z.string().min(3).max(32),
@@ -26,6 +26,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const body = registerSchema.safeParse(request.body);
     if (!body.success) {
       return reply.code(400).send({ error: body.error.flatten() });
+    }
+    if (await isGameFull()) {
+      return reply
+        .code(409)
+        .send({ error: `Oyun dolu: bu MVP en fazla ${MAX_PLAYERS} oyuncuyu destekliyor.` });
     }
     try {
       const result = await register(body.data.username, body.data.email, body.data.password);

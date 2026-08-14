@@ -17,6 +17,15 @@ function isoY(x: number, y: number): number {
   return (x + y) * (TILE_H / 2);
 }
 
+/** Deterministic small per-id offset so multiple units standing on the exact
+ * same tile (e.g. a fresh player's starting army + caravan) don't render
+ * perfectly stacked on top of one another. */
+function jitterFor(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 5) - 2; // -2..2
+}
+
 interface MapGridProps {
   snapshot: GameStateSnapshot | null;
   selfPlayerId: string | null;
@@ -118,7 +127,7 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
 
     for (const structure of snapshot.structures) {
       const groundX = originX + isoX(structure.x, structure.y);
-      const groundY = originY + isoY(structure.x, structure.y) + TILE_H / 2;
+      const groundY = originY + isoY(structure.x, structure.y) + TILE_H * 0.5;
       entities.push({
         depth: structure.x + structure.y,
         build: () => {
@@ -127,7 +136,7 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
           const buildingSprite = new Sprite(texture);
           buildingSprite.anchor.set(0.5, 1);
           buildingSprite.x = groundX;
-          buildingSprite.y = groundY + 2;
+          buildingSprite.y = groundY;
           entityLayer.addChild(buildingSprite);
         },
       });
@@ -135,8 +144,11 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
 
     for (const unit of snapshot.units) {
       if (unit.hp <= 0) continue;
-      const groundX = originX + isoX(unit.x, unit.y);
-      const groundY = originY + isoY(unit.x, unit.y) + TILE_H / 2;
+      // Small deterministic jitter so multiple units sharing a tile (e.g. two
+      // idle units guarding the same spot) don't render perfectly stacked.
+      const jitter = jitterFor(unit.id) * 6;
+      const groundX = originX + isoX(unit.x, unit.y) + jitter;
+      const groundY = originY + isoY(unit.x, unit.y) + TILE_H * 0.6;
       entities.push({
         depth: unit.x + unit.y + 0.5, // units render just in front of a building on the same tile
         build: () => {

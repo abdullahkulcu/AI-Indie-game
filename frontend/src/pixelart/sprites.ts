@@ -1,15 +1,21 @@
 import type { Texture } from "pixi.js";
 import { getSpriteTexture, sprite, type Legend } from "./asciiSprite";
-import { CROP, METAL, OUTLINE, SKIN, STONE, THATCH, WALL, WOOD } from "./palette";
+import { CROP, METAL, OUTLINE, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./palette";
 
 /** Building and unit art, defined as compact ASCII pixel-art ("big pixel" per
- * character) and rasterized on demand. "$" is reserved for the owning
- * player's accent color, so one definition covers every player - buildings
- * stay in neutral materials with a colored flag/banner, units wear the
- * accent as their tunic/cart color, matching how Age of Empires-era games
- * showed ownership without recoloring the whole sprite. */
+ * character) and rasterized on demand. "$"/"@"/"%" are reserved for the
+ * owning player's accent color and its auto-derived dark/light shades (see
+ * asciiSprite.ts) - buildings stay in neutral materials with a colored
+ * flag/banner or decoration, units wear the accent (with real shading) as
+ * their tunic/cart color, matching how Age of Empires-era games showed
+ * ownership without recoloring the whole sprite. */
 
-const SPRITE_SCALE = 4;
+// Buildings render noticeably larger than units (a town center should dwarf a
+// soldier standing next to it) - using a smaller scale for units, on top of
+// their already-shorter ASCII art, keeps that size hierarchy readable even
+// when a unit is standing right on its owner's building tile.
+const BUILDING_SCALE = 4;
+const UNIT_SCALE = 3;
 
 export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market";
 export type UnitType = "army" | "caravan";
@@ -17,72 +23,102 @@ export type UnitType = "army" | "caravan";
 const BUILDING_LEGEND: Legend = {
   O: OUTLINE,
   R: THATCH.mid,
+  r: THATCH.light,
   W: WALL.mid,
+  w: WALL.light,
   D: WOOD.dark,
   F: CROP.mid,
   f: CROP.light,
   L: WOOD.mid,
   l: WOOD.light,
-  S: STONE.mid,
+  S: STONE.dark,
+  M: STONE.mid,
+  n: STONE.light,
+  C: WOOD.mid,
+  P: WOOD.mid,
 };
 
 const BUILDINGS: Record<StructureType, string[]> = {
+  // Town center: a stone-footed cottage with a tapered thatch roof, a proud
+  // flag, and a small (not cavernous) doorway.
   base: [
-    "......$......",
-    "......O......",
-    ".....OOO.....",
-    "....ORRRO....",
-    "...ORRRRRO...",
-    "..OWWWWWWWO..",
-    ".OWWWWWWWWWO.",
-    "OWWWWODOWWWWO",
-    "OWWWWODOWWWWO",
-    "OWWWWWWWWWWWO",
-    ".OOOOOOOOOOO.",
+    "........$........",
+    "........O........",
+    ".......OOO.......",
+    "......ORrRO......",
+    ".....ORrRRRO.....",
+    "....ORrRRRRRO....",
+    "...OWWWWWWWWWO...",
+    "..OWwWWWWWWWwWO..",
+    ".OWWWWWWWWWWWWWO.",
+    "OWWWWWWODDOWWWWWO",
+    "OwWWWWWDDWWwWWWWO",
+    "OWWWWWWWWWWWWWWWO",
+    ".OOOOOOOOOOOOOOO.",
+    "..SSSSSSSSSSSSS..",
   ],
+  // Farm: fenced crop rows with a small accent-colored scarecrow watching.
   farm: [
-    "......$......",
-    ".OOOOOOOOOOO.",
-    "OFFFfFFFfFFFO",
-    "OfFFFfFFFfFFO",
-    "OFFFfFFFfFFFO",
-    "OfFFFfFFFfFFO",
-    "OFFFfFFFfFFFO",
-    ".OOOOOOOOOOO.",
+    ".......$.......",
+    ".......O.......",
+    "......OOO......",
+    ".....O$$$O.....",
+    ".OOOOO...OOOOO.",
+    "OFFFfFFFfFFFFFO",
+    "OfFFFfFFFfFFFfO",
+    "OFFFfFFFfFFFFFO",
+    "OfFFFfFFFfFFFfO",
+    "OFFFfFFFfFFFFFO",
+    ".OOOOOOOOOOOOO.",
   ],
+  // Sawmill: circular saw blade between a work shed and a stacked log pile.
   sawmill: [
-    ".......$.....",
-    ".......O.....",
-    "......OWO....",
-    ".....OWWWO...",
-    ".OOOOWWWWWOO.",
-    "OLLLLLLLLLLLO",
-    "OlLlLlLlLlLlO",
-    "OLLLLLLLLLLLO",
-    ".OOOOOOOOOOO.",
+    "........$......",
+    "........O......",
+    ".......OWO.....",
+    "......OWWWO....",
+    ".OOOOOOWWWOOOO.",
+    "OWWWWWWWWWWWWWO",
+    "OwWWW.nSn.WWWwO",
+    "OWWWW.SMS.WWWWO",
+    "OwWWW.nSn.WWWwO",
+    "OWWWWWWWWWWWWWO",
+    "OLLLLLLLLLLLLLO",
+    "OlLlLlLlLlLlLlO",
+    ".OOOOOOOOOOOOO.",
   ],
+  // Barracks: twin-towered fort, a banner flying from each tower, one small
+  // reinforced doorway (not a full black archway).
   barracks: [
     ".....$...$.....",
     ".....O...O.....",
     "....OOO.OOO....",
-    "....OSO.OSO....",
-    "...OOSOOOSOO...",
+    "....OMSO.OSMO..",
+    "...OOMOOOOMOO..",
     "..OWWWWWWWWWO..",
-    ".OWWWWWWWWWWWO.",
+    ".OWwWWWWWWWwWO.",
     "OWWWWWWWWWWWWWO",
-    "OWWWWWODOOWWWWO",
+    "OwWWWWWDDWWWwWO",
     "OWWWWWWWWWWWWWO",
     ".OOOOOOOOOOOOO.",
   ],
+  // Market: an open trade-post tent with a striped awning, visible wooden
+  // support poles (not the near-invisible dark outline color), and goods on
+  // display at the counter - deliberately the most "busy" building so it
+  // reads as a place of commerce rather than another house. The poles are a
+  // clearly-colored material so the tent and counter read as one structure
+  // instead of two floating pieces against the dark background.
   market: [
-    ".OOOOOOOOOOO.",
-    "O$W$W$W$W$WO.",
-    "OW$W$W$W$WWO.",
-    ".OOOOOOOOOO..",
-    "...O.....O...",
-    "...O.....O...",
-    "..O.......O..",
-    "..O.......O..",
+    ".OOOOOOOOOOOO.",
+    "O$W$W$W$W$WWO.",
+    "O$W$W$W$W$WWO.",
+    "OWWWWWWWWWWWWO",
+    "P............P",
+    "P.CCCCCCCCCC.P",
+    "P.CfFfFfFfFC.P",
+    "P.CCCCCCCCCC.P",
+    "P............P",
+    "PPPPPPPPPPPPPP",
   ],
 };
 
@@ -90,32 +126,45 @@ const UNIT_LEGEND: Legend = {
   O: OUTLINE,
   W: METAL,
   H: SKIN,
+  h: SKIN_SHADOW,
+  B: WOOD.dark,
 };
 
 const UNITS: Record<UnitType, string[]> = {
+  // Soldier: rounded helmet, shaded tunic (accent + accent-shadow fold +
+  // accent-highlight belt), and booted legs.
   army: [
-    "....O....",
-    "....W....",
-    "....W....",
-    "...OOO...",
-    "..OHHHO..",
-    "..OHHHO..",
-    ".OO$$$OO.",
-    "O$$$$$$O.",
-    ".O$$$$O..",
-    "..O$$O...",
-    "..O..O...",
-    ".sssssss.",
-  ],
-  caravan: [
-    "..OOOOOOO..",
-    ".O$$$$$$$O.",
-    ".O$$$$$$$O.",
-    ".OOOOOOOOO.",
-    "O....O....O",
-    "O.OOO.OOO.O",
-    "..O.....O..",
+    ".....OO....",
+    ".....OW....",
+    ".....OW....",
+    "....OOOO...",
+    "...OHHHHO..",
+    "...OHhhHO..",
+    "...OOHHOO..",
+    "..O$$$$$O..",
+    ".O$@@$@@$O.",
+    "O$$$%%%$$$O",
+    ".O$$OOO$$O.",
+    "..OBO.OBO..",
+    "..OBO.OBO..",
+    "...........",
     ".sssssssss.",
+  ],
+  // Covered wagon: light canopy top, shaded accent body, and two wheels on
+  // an axle - a trader's cart rather than a plain box.
+  caravan: [
+    "....OOOOO....",
+    "...O%%%%%O...",
+    "..O$$$$$$$O..",
+    "..O$@@@@@$O..",
+    "..OOOOOOOOO..",
+    ".O..O...O..O.",
+    "O.O.O...O.O.O",
+    "O..OOO.OOO..O",
+    ".O.........O.",
+    "..O.......O..",
+    "...........",
+    ".sssssssssss.",
   ],
 };
 
@@ -124,11 +173,11 @@ export function getBuildingTexture(type: StructureType, accent: string): Texture
     `building:${type}:${accent}`,
     sprite(BUILDINGS[type]),
     BUILDING_LEGEND,
-    SPRITE_SCALE,
+    BUILDING_SCALE,
     accent,
   );
 }
 
 export function getUnitTexture(type: UnitType, accent: string): Texture {
-  return getSpriteTexture(`unit:${type}:${accent}`, sprite(UNITS[type]), UNIT_LEGEND, SPRITE_SCALE, accent);
+  return getSpriteTexture(`unit:${type}:${accent}`, sprite(UNITS[type]), UNIT_LEGEND, UNIT_SCALE, accent);
 }

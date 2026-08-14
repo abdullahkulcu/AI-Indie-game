@@ -12,9 +12,12 @@ export const WATER = { dark: "#16294a", mid: "#1d3557", light: "#2a4d7a", foam: 
 
 export const WOOD = { dark: "#5c3a1a", mid: "#8b5a2b", light: "#a97844" };
 export const THATCH = { dark: "#6e4b1f", mid: "#9c7124", light: "#c79a3d" };
-export const WALL = { dark: "#8d99ae", mid: "#c9ced6", light: "#e9ecef" };
+// Warm plaster/timber wall tone - deliberately far from STONE/METAL's cool
+// grays so buildings read as cozy cottages, not silvery blobs.
+export const WALL = { dark: "#8a7355", mid: "#c2a878", light: "#e6d2a8" };
 export const SKIN = "#e8b98a";
-export const METAL = "#c9ced6";
+export const SKIN_SHADOW = "#c9976a";
+export const METAL = "#aeb4bd";
 export const CROP = { dark: "#a3821a", mid: "#d4a017", light: "#e8c04a" };
 export const LEAVES = { dark: "#173d2d", mid: "#1b4332", light: "#2d6a4f" };
 

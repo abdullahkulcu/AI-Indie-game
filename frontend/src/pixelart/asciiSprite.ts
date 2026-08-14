@@ -1,11 +1,23 @@
 import { Texture } from "pixi.js";
+import { lighten, shade } from "./color";
 import { SHADOW } from "./palette";
 
-/** Legend maps a single ASCII character to a CSS color. Two characters are
- * reserved: "." (transparent) and "$" (the caller's accent/player color,
- * substituted at raster time so one sprite definition works for every
- * player's color without redefining the art). */
+/** Legend maps a single ASCII character to a CSS color. A handful of
+ * characters are reserved and never appear in a `Legend` object:
+ * "." (transparent), "s" (the shared drop-shadow tone), and the caller's
+ * accent/player color and its two auto-derived shading tones - "$" (accent),
+ * "@" (a darker shade of accent, for folds/undersides), and "%" (a lighter
+ * shade, for highlights). This lets one sprite definition carry real shading
+ * for every player's color without redefining the art per player. */
 export type Legend = Record<string, string>;
+
+function resolveColor(ch: string, legend: Legend, accent?: string): string | undefined {
+  if (ch === "$") return accent ?? "#9099a1";
+  if (ch === "@") return accent ? shade(accent, 0.55) : "#495057";
+  if (ch === "%") return accent ? lighten(accent, 0.45) : "#e9ecef";
+  if (ch === "s") return SHADOW;
+  return legend[ch];
+}
 
 export interface PixelGrid {
   width: number;
@@ -40,7 +52,7 @@ export function drawGridOntoContext(
     for (let x = 0; x < grid.width; x += 1) {
       const ch = row[x];
       if (!ch || ch === ".") continue;
-      const color = ch === "$" ? accent ?? "#ffffff" : ch === "s" ? SHADOW : legend[ch];
+      const color = resolveColor(ch, legend, accent);
       if (!color) continue;
       ctx.fillStyle = color;
       ctx.fillRect((x + offsetX) * scale, (y + offsetY) * scale, scale, scale);

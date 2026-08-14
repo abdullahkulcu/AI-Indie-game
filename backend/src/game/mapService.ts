@@ -20,19 +20,24 @@ function terrainFor(x: number, y: number): TileTerrain {
   return "plains";
 }
 
-/** Starting corner positions for up to 8 players, spread toward the map edges. */
+const MARGIN = 2;
+const MAX_COORD = MAP_SIZE - 1 - MARGIN;
+
+/** Starting corner positions, one per player slot - MVP is scoped to a
+ * single shared map with a fixed number of starting corners. */
+const STARTING_CORNERS = [
+  { x: MARGIN, y: MARGIN },
+  { x: MAX_COORD, y: MAX_COORD },
+  { x: MARGIN, y: MAX_COORD },
+  { x: MAX_COORD, y: MARGIN },
+  { x: Math.floor(MAP_SIZE / 2), y: MARGIN },
+  { x: Math.floor(MAP_SIZE / 2), y: MAX_COORD },
+  { x: MARGIN, y: Math.floor(MAP_SIZE / 2) },
+  { x: MAX_COORD, y: Math.floor(MAP_SIZE / 2) },
+];
+
+export const MAX_PLAYERS = STARTING_CORNERS.length;
+
 export function startingPosition(slotIndex: number): { x: number; y: number } {
-  const margin = 2;
-  const max = MAP_SIZE - 1 - margin;
-  const corners = [
-    { x: margin, y: margin },
-    { x: max, y: max },
-    { x: margin, y: max },
-    { x: max, y: margin },
-    { x: Math.floor(MAP_SIZE / 2), y: margin },
-    { x: Math.floor(MAP_SIZE / 2), y: max },
-    { x: margin, y: Math.floor(MAP_SIZE / 2) },
-    { x: max, y: Math.floor(MAP_SIZE / 2) },
-  ];
-  return corners[slotIndex % corners.length];
+  return STARTING_CORNERS[slotIndex % STARTING_CORNERS.length];
 }
