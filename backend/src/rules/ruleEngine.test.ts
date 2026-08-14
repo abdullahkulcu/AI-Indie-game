@@ -413,3 +413,98 @@ describe("recruit validation", () => {
     expect(result.reason).toMatch(/Yetersiz/);
   });
 });
+
+describe("assign_task validation", () => {
+  it("accepts a patrol task with in-bounds coordinates on your own unit", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "patrol", targetX: 20, targetY: 20 },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts a raid task with in-bounds coordinates", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "raid", targetX: 30, targetY: 30 },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects assigning a task to a unit you do not own", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_B, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "patrol", targetX: 20, targetY: 20 },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/size ait degil/);
+  });
+
+  it("rejects a dead unit", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5, hp: 0 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "patrol", targetX: 20, targetY: 20 },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/savas disi/);
+  });
+
+  it("rejects a patrol/raid task missing target coordinates", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "raid" },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/hedef koordinat/);
+  });
+
+  it("rejects an out-of-bounds target coordinate", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "patrol", targetX: MAP_SIZE + 10, targetY: 0 },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/harita disinda/);
+  });
+
+  it("accepts hold_position with no coordinates", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "hold_position" },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects escort_trade without a valid target unit", () => {
+    const unit = makeUnit({ id: "u1", ownerPlayerId: PLAYER_A, x: 5, y: 5 });
+    const state = baseState({ units: [unit] });
+    const result = validateAction(state, PLAYER_A, {
+      type: "assign_task",
+      unitId: "u1",
+      task: { kind: "escort_trade" },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/target_unit_id/);
+  });
+});

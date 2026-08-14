@@ -106,7 +106,7 @@ export async function removeDeadUnits(unitIds: string[]): Promise<void> {
 
 export async function assignTask(unitId: string, task: AssignedTask | null): Promise<void> {
   await pool.query(
-    `UPDATE units SET assigned_task = $1, state = 'idle', updated_at = now() WHERE id = $2`,
-    [task ? JSON.stringify(task) : null, unitId],
+    `UPDATE units SET assigned_task = $1, state = $2, target_unit_id = NULL, updated_at = now() WHERE id = $3`,
+    [task ? JSON.stringify(task) : null, task ? "executing_task" : "idle", unitId],
   );
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GameAction } from "../models/types.js";
+import type { AssignedTask, GameAction } from "../models/types.js";
 
 /**
  * The complete, closed vocabulary the LLM is allowed to act through. These are
@@ -33,6 +33,16 @@ export const buildArgsSchema = z.object({
 
 export const recruitArgsSchema = z.object({
   structure_id: z.string().min(1),
+});
+
+const TASK_KIND_ENUM = ["patrol", "hold_position", "raid", "escort_trade"] as const;
+
+export const assignTaskArgsSchema = z.object({
+  unit_id: z.string().min(1),
+  kind: z.enum(TASK_KIND_ENUM),
+  target_x: z.number().int().min(0).optional(),
+  target_y: z.number().int().min(0).optional(),
+  target_unit_id: z.string().min(1).optional(),
 });
 
 export const OPENAI_TOOLS = [
@@ -107,6 +117,30 @@ export const OPENAI_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "assign_task",
+      description:
+        "Kendi biriminize bir gorev vererek onu haritada hareket ettirin - 'attack' iki birim zaten " +
+        "bitisikken kullanilir, birimler birbirinden uzaktaysa once bu fonksiyonla mesafeyi kapatmaniz " +
+        "gerekir. 'patrol': hedef kareye yuru ve orada bekle (yolda dusmana saldirmaz). 'raid': hedef " +
+        "kareye yuru, yol boyunca menzile giren herhangi bir dusman birimine otomatik saldir. " +
+        "'hold_position': bulundugu yerde kal. 'escort_trade': belirtilen (genelde kendi caravan) " +
+        "birimini takip et.",
+      parameters: {
+        type: "object",
+        properties: {
+          unit_id: { type: "string", description: "Gorev verilecek kendi biriminizin id'si." },
+          kind: { type: "string", enum: TASK_KIND_ENUM },
+          target_x: { type: "number", description: "patrol/raid/hold_position icin hedef X koordinati." },
+          target_y: { type: "number", description: "patrol/raid/hold_position icin hedef Y koordinati." },
+          target_unit_id: { type: "string", description: "escort_trade icin takip edilecek birimin id'si." },
+        },
+        required: ["unit_id", "kind"],
+      },
+    },
+  },
 ];
 
 export interface ToolCall {
@@ -176,6 +210,20 @@ export function parseToolCall(call: ToolCall): ParsedAction {
       if (!parsed.success) return { action: null, error: parsed.error.message };
       return {
         action: { type: "recruit", structureId: parsed.data.structure_id },
+        error: null,
+      };
+    }
+    case "assign_task": {
+      const parsed = assignTaskArgsSchema.safeParse(raw);
+      if (!parsed.success) return { action: null, error: parsed.error.message };
+      const task: AssignedTask = {
+        kind: parsed.data.kind,
+        targetX: parsed.data.target_x,
+        targetY: parsed.data.target_y,
+        targetUnitId: parsed.data.target_unit_id,
+      };
+      return {
+        action: { type: "assign_task", unitId: parsed.data.unit_id, task },
         error: null,
       };
     }

@@ -10,7 +10,7 @@ import { applyCombat, advanceAutonomousUnits } from "./stateMachine.js";
 import { depositFor, terrainFor } from "./mapService.js";
 import { loadSnapshot, cacheSnapshot, setCurrentTickNumber } from "./gameStateService.js";
 import { nextTickNumber, recordTick } from "../repositories/tickLogRepository.js";
-import { saveUnits, removeDeadUnits, spawnUnit } from "../repositories/unitRepository.js";
+import { saveUnits, removeDeadUnits, spawnUnit, assignTask } from "../repositories/unitRepository.js";
 import { adjustResources } from "../repositories/playerRepository.js";
 import { claimTile, insertStructure } from "../repositories/mapRepository.js";
 import { listRecentChat, saveChatMessage } from "../repositories/chatRepository.js";
@@ -71,6 +71,16 @@ export async function applyAction(
       return r;
     });
     return { ...snapshot, resources };
+  }
+
+  if (action.type === "assign_task") {
+    await assignTask(action.unitId, action.task);
+    const units = snapshot.units.map((u) =>
+      u.id === action.unitId
+        ? { ...u, assignedTask: action.task, state: "executing_task" as const, targetUnitId: null }
+        : u,
+    );
+    return { ...snapshot, units };
   }
 
   if (action.type === "recruit") {

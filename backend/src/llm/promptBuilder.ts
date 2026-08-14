@@ -8,20 +8,27 @@ import { findNearbyDeposits } from "../game/mapService.js";
  * the model's role (advisor whose decisions are executed by the game, not a
  * chatbot) and reminds it that only the four provided tools can affect state.
  */
-const SYSTEM_PROMPT = `Sen bir 2D strateji savas oyununda bir oyuncunun ozel yapay zeka "generali"sin.
+const SYSTEM_PROMPT_TEMPLATE = `Sen bir 2D strateji savas oyununda bir oyuncunun ozel yapay zeka "generali"sin.
 Oyuncu sana dogal dille strateji/talimat anlatir; sen bu talimatlari degerlendirip
-saglanan fonksiyonlar (attack, trade, build, recruit) araciligiyla somut kararlar alirsin.
+saglanan fonksiyonlar (attack, trade, build, recruit, assign_task) araciligiyla
+somut kararlar alirsin.
 Ekonomi: gold/wood/food'a ek olarak stone ve iron var. Bunlari kazanmanin yolu
 maden yataklarinin (dag karolari) uzerine 'mine' tipi yapi insa etmek - o zaman
 o kaynak her tick otomatik uretilir. Kazandigin kaynaklarla ticaret yapip
 altin biriktirebilir, altin+yiyecekle kislanda 'recruit' fonksiyonuyla yeni
 asker egitebilirsin.
-Harita cok buyuk (300x300); sadece kendi birimlerine/yapilarina yakin
-bolgeyi ve orada bilinen maden yataklarini goruyorsun - butun haritayi degil.
+Savas: 'attack' fonksiyonu SADECE iki birim zaten bitisik karedeyken calisir.
+Birimler birbirinden uzaktaysa (cogunlukla oyle olur, harita cok buyuk) once
+'assign_task' ile birimi hedefe dogru yurutmen gerekir - 'raid' gorevi yol
+uzerinde menzile giren dusmana otomatik saldirir, 'patrol' sadece hedefe gidip
+bekler. Bir birim yurumeden asla dusmana ulasamaz.
+Harita cok buyuk (__MAP_SIZE__x__MAP_SIZE__); sadece kendi birimlerine/yapilarina
+yakin bolgeyi ve orada bilinen maden yataklarini goruyorsun - butun haritayi
+degil.
 Kurallar:
 - Oyun durumunu asla serbest metinle degistiremezsin; sadece attack/trade/build/
-  recruit fonksiyon caGrilariyla aksiyon alabilirsin. Bu cagrilar sunucuda ayrica
-  dogrulanir; gecersiz bir cagri reddedilir.
+  recruit/assign_task fonksiyon cagrilariyla aksiyon alabilirsin. Bu cagrilar
+  sunucuda ayrica dogrulanir; gecersiz bir cagri reddedilir.
 - Sadece sana verilen JSON durumundaki gercek id'leri (unit_id, target_unit_id,
   target_player_id, structure_id) kullan; id uydurma.
 - Sadece oyuncunun kendi birimlerini/kaynaklarini yonetebilirsin.
@@ -74,8 +81,9 @@ export function buildMessages(
   recentChat: ChatMessage[],
   triggerMessage: string | null,
 ): ChatCompletionMessageParam[] {
+  const systemPrompt = SYSTEM_PROMPT_TEMPLATE.replaceAll("__MAP_SIZE__", String(state.mapSize));
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "system", content: playerContext(state, playerId) },
   ];
 

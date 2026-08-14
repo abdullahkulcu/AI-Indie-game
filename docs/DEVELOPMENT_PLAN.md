@@ -152,3 +152,44 @@ yonlendirmesine cevaben:
   yerine `canvasTexture.ts` (texture cache) ve `shapes.ts` (paylasilan
   golge/blob/bayrak yardimcilari) geldi. Hicbir dis asset dosyasi
   kullanilmiyor - her sey hala versiyon kontrolundeki kod.
+
+## 6. Kritik oyun ici bulgu ve duzeltme: birimler hic hareket edemiyordu
+
+Kullanicinin asil onceligi ("asker basabildigin, savasa bildigin oynanabilir
+bir strateji oyunu") dogrultusunda savas dongusunu incelerken, MVP'nin ilk
+gunden beri var olan yapisal bir bosluk bulundu: `attack` fonksiyonu sadece
+iki birim ZATEN bitisik karedeyken calisiyor, ama LLM'e birimi haritada
+hareket ettirecek hicbir fonksiyon saglanmiyordu. `AssignedTask`/otonom FSM
+(patrol/raid/hold_position/escort_trade) veri modeli ve `stateMachine.ts`
+zaten mevcuttu, hatta `unitRepository.assignTask` fonksiyonu bile yazilmisti
+- ama hicbir yerden cagrilmiyordu. Sonuc: oyuncular sinirsiz asker
+basabilirdi ama o askerler dogdugu kareden asla ayrilamiyordu, yani rakiple
+karsilasmak/savasmak fiilen imkansizdi (haritanin 500x500 buyuklugu ve
+oyuncular arasi rastgele baslangic mesafesi dusunulunce).
+
+Duzeltme:
+- Yeni `assign_task` GameAction/LLM fonksiyonu eklendi (`types.ts`,
+  `ruleEngine.ts::validateAssignTask`, `actionSchema.ts`, `tickService.ts`) -
+  LLM artik bir birimi hedef bir kareye yurutebilir ('patrol': git ve bekle,
+  saldirmaz; 'raid': git, yol uzerinde menzile giren dusmana otomatik
+  saldir; 'hold_position': oldugu yerde kal; 'escort_trade': bir birimi
+  takip et).
+- `unitRepository.assignTask` duzeltildi: onceden state'i her zaman 'idle'
+  yapiyordu (bu yuzden `advanceAutonomousUnits` gorevi hic islemezdi, cunku
+  o fonksiyon sadece state === 'executing_task' oldugunda gorev calistirir);
+  artik gorev atanirken state 'executing_task' oluyor.
+- Hareket hizi (`geometry.ts::UNIT_MOVE_SPEED`) tick basina 1 kareden 4
+  kareye cikarildi - 500x500'luk haritada oyuncular onlarca-yuzlerce kare
+  uzakta baslayabildigi icin 1 kare/tick'te bir catismaya ulasmak
+  pratikte saatler surerdi.
+- Sistem promptu (`promptBuilder.ts`) guncellendi: LLM'e `attack`'in sadece
+  bitisik birimlerde calistigi ve once `assign_task` ile mesafe kapatilmasi
+  gerektigi acikca anlatiliyor; ayrica hardcoded "300x300" yerine gercek
+  `state.mapSize` kullanilacak sekilde duzeltildi.
+- Doğrulama: `ruleEngine.test.ts`'e `assign_task` icin 8 yeni test eklendi
+  (29 test toplam, hepsi gecti); ayrica gercek `stateMachine.ts` kodu
+  dogrudan calistirilarak (LLM'e ihtiyac duymadan) bir birimin raid
+  gorevinden hedefe yurudugu, menzile girince otomatik dovuse basladigi ve
+  dovusun bir tarafin olumune kadar dogru ilerledigi uctan uca dogrulandi;
+  `unitRepository.assignTask`'in gercek Postgres'e dogru persist ettigi
+  (state/assigned_task/target_unit_id) ayrica test edildi.

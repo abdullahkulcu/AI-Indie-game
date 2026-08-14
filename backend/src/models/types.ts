@@ -129,7 +129,19 @@ export type RecruitAction = {
   structureId: string;
 };
 
-export type GameAction = AttackAction | TradeAction | BuildAction | RecruitAction;
+/** Orders one of the player's own units to march toward a tile (and, for
+ * "raid", to engage any enemy it comes into range of along the way) - the
+ * only way a unit ever crosses more than one tile, since the autonomous FSM
+ * only re-executes an already-assigned task, it never invents one. Without
+ * this, recruited soldiers can never close distance to reach an enemy: the
+ * `attack` action alone requires the two units already be adjacent. */
+export type AssignTaskAction = {
+  type: "assign_task";
+  unitId: string;
+  task: AssignedTask;
+};
+
+export type GameAction = AttackAction | TradeAction | BuildAction | RecruitAction | AssignTaskAction;
 
 export type ActionStatus = "accepted" | "rejected";
 

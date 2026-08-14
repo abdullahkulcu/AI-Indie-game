@@ -5,9 +5,13 @@ kanal/oda destekli multiplayer strateji oyunu (Stronghold Crusader'a yakin bir
 mantik hedefleniyor). Oyuncular sabit sayida kanaldan (lobiden) birine katilir,
 haritada rastgele bir bolgede baslar; birimleri dogrudan yonetmez, kendi
 OpenAI API anahtarlariyla (BYOK) baglanan bir "general" AI'ya sohbet yoluyla
-strateji anlatir. AI, saglanan `attack` / `trade` / `build` / `recruit`
-fonksiyonlarindan birini cagirarak karar verir; her cagri sunucudaki bagimsiz
-kural motorundan (rule engine) gecmeden asla oyun durumuna uygulanmaz.
+strateji anlatir. AI, saglanan `attack` / `trade` / `build` / `recruit` /
+`assign_task` fonksiyonlarindan birini cagirarak karar verir; her cagri
+sunucudaki bagimsiz kural motorundan (rule engine) gecmeden asla oyun
+durumuna uygulanmaz. `attack` sadece bitisik birimlerde calisir - bir
+birimin haritada hareket edip rakiple karsilasmasi icin `assign_task`
+('raid' gorevi hedefe yururken yol uzerindeki dusmana otomatik saldirir)
+gerekir.
 
 Ekonomi: dag karolarindaki maden yataklarina (`stone`/`iron`/`gold`) `mine`
 insa edip pasif kaynak uretimi baslatabilir, kazandiklariyla ticaret yapip
@@ -52,7 +56,7 @@ frontend/  React + TypeScript + Vite + PixiJS (2D grid render)
   sohbet mesaji gonderdiginde tick'i beklemeden aninda calisir (websocket
   `chat:send` veya `POST /chat/send`).
 - **Kural motoru** (`backend/src/rules/ruleEngine.ts`): LLM'den gelen HER
-  aksiyonu (attack/trade/build/recruit) bagimsiz olarak dogrular - sahiplik,
+  aksiyonu (attack/trade/build/recruit/assign_task) bagimsiz olarak dogrular - sahiplik,
   menzil, kaynak yeterliligi, harita sinirlari, maden yatagi kontrolu vb.
   LLM'e hicbir zaman guvenilmez. `npm run test --workspace backend` ile
   calisan birim testleri burada.

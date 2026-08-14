@@ -181,6 +181,42 @@ export function validateRecruit(
   return ok();
 }
 
+const TASK_KINDS_NEEDING_COORDS = new Set(["patrol", "raid"]);
+
+export function validateAssignTask(
+  state: GameStateSnapshot,
+  playerId: string,
+  action: Extract<GameAction, { type: "assign_task" }>,
+): ValidationResult {
+  const unit = state.units.find((u) => u.id === action.unitId);
+  if (!unit) return reject(`Birim bulunamadi: ${action.unitId}`);
+  if (unit.ownerPlayerId !== playerId) return reject("Bu birim size ait degil.");
+  if (unit.hp <= 0) return reject("Birim savas disi (hp <= 0).");
+
+  const { task } = action;
+  if (TASK_KINDS_NEEDING_COORDS.has(task.kind)) {
+    if (task.targetX === undefined || task.targetY === undefined) {
+      return reject(`'${task.kind}' gorevi icin hedef koordinat (target_x, target_y) gerekli.`);
+    }
+    if (
+      task.targetX < 0 ||
+      task.targetX >= state.mapSize ||
+      task.targetY < 0 ||
+      task.targetY >= state.mapSize
+    ) {
+      return reject(`Hedef koordinat harita disinda: (${task.targetX}, ${task.targetY})`);
+    }
+  }
+  if (task.kind === "escort_trade") {
+    if (!task.targetUnitId) return reject("'escort_trade' gorevi icin target_unit_id gerekli.");
+    if (!state.units.some((u) => u.id === task.targetUnitId)) {
+      return reject(`Eskortlanacak birim bulunamadi: ${task.targetUnitId}`);
+    }
+  }
+
+  return ok();
+}
+
 export function validateAction(
   state: GameStateSnapshot,
   playerId: string,
@@ -195,6 +231,8 @@ export function validateAction(
       return validateBuild(state, playerId, action);
     case "recruit":
       return validateRecruit(state, playerId, action);
+    case "assign_task":
+      return validateAssignTask(state, playerId, action);
     default: {
       const exhaustiveCheck: never = action;
       return reject(`Bilinmeyen aksiyon tipi: ${JSON.stringify(exhaustiveCheck)}`);
