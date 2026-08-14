@@ -9,5 +9,6 @@ build/
 coverage/
 .turbo/
 *.tsbuildinfo
+*.rdb
 /frontend/vite.config.js
 /frontend/vite.config.d.ts

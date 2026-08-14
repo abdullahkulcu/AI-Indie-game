@@ -2,10 +2,20 @@ import { useEffect, useRef } from "react";
 import { Application, Container, Graphics, Sprite } from "pixi.js";
 import type { GameStateSnapshot } from "../types";
 import { colorForPlayer } from "../pixelart/palette";
-import { TILE_PX, getTileTexture } from "../pixelart/tiles";
+import { TILE_PX_H, TILE_PX_W, getTileTexture } from "../pixelart/tiles";
 import { getBuildingTexture, getUnitTexture } from "../pixelart/sprites";
 
-const TILE = TILE_PX;
+const TILE_W = TILE_PX_W;
+const TILE_H = TILE_PX_H;
+const TOP_MARGIN = 90; // room for buildings/units poking up above row 0
+
+function isoX(x: number, y: number): number {
+  return (x - y) * (TILE_W / 2);
+}
+
+function isoY(x: number, y: number): number {
+  return (x + y) * (TILE_H / 2);
+}
 
 /** Deterministic small per-id offset so multiple units standing on the exact
  * same tile (e.g. a fresh player's starting army + caravan) don't render
@@ -22,11 +32,11 @@ interface MapGridProps {
   onTileClick?: (x: number, y: number) => void;
 }
 
-/** Flat top-down, pixel-art map renderer (sandbox-sim style, e.g. WorldBox -
- * a plain square grid, not an isometric diamond one) built from procedurally
- * generated PixiJS textures - see `src/pixelart/`. No image assets are
- * loaded from disk; every sprite is rasterized from ASCII pixel-art
- * definitions the first time it's needed and cached after that. */
+/** Isometric, pixel-art 2D map renderer (Age of Empires 1/2-style diamond
+ * tiles) built from procedurally generated PixiJS textures - see
+ * `src/pixelart/`. No image assets are loaded from disk; every sprite is
+ * rasterized from ASCII pixel-art definitions the first time it's needed and
+ * cached after that. */
 export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -38,10 +48,11 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
     let disposed = false;
     const app = new Application();
     const mapSize = snapshot?.mapSize ?? 20;
-    const size = mapSize * TILE;
+    const width = mapSize * TILE_W;
+    const height = mapSize * TILE_H + TOP_MARGIN + TILE_H;
 
     app
-      .init({ width: size, height: size, backgroundColor: 0x0d1b2a, antialias: false })
+      .init({ width, height, backgroundColor: 0x0d1b2a, antialias: false })
       .then(() => {
         if (disposed || !containerRef.current) {
           app.destroy(true, { children: true });
@@ -68,32 +79,40 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
     if (!board || !snapshot) return;
     board.removeChildren().forEach((child) => child.destroy());
 
+    const mapSize = snapshot.mapSize;
+    const originX = (mapSize * TILE_W) / 2;
+    const originY = TOP_MARGIN;
     const playerIds = snapshot.players.map((p) => p.id);
 
     const groundLayer = new Container();
     const entityLayer = new Container();
     board.addChild(groundLayer, entityLayer);
 
-    // Ground: a plain square grid, tiles tile seamlessly so draw order
-    // doesn't matter here.
+    // Ground: draw order doesn't matter, each diamond's outside-shape pixels
+    // are fully transparent so overlapping bounding boxes never clash.
     for (const tile of snapshot.tiles) {
       const texture = getTileTexture(tile.terrain);
       const tileSprite = new Sprite(texture);
-      tileSprite.x = tile.x * TILE;
-      tileSprite.y = tile.y * TILE;
+      tileSprite.anchor.set(0.5, 0);
+      tileSprite.x = originX + isoX(tile.x, tile.y);
+      tileSprite.y = originY + isoY(tile.x, tile.y);
       groundLayer.addChild(tileSprite);
 
       if (tile.ownerPlayerId) {
-        const accent = colorForPlayer(tile.ownerPlayerId, playerIds);
         const claimMark = new Graphics();
-        claimMark.rect(0, 0, TILE, TILE).fill({ color: accent, alpha: 0.22 });
+        const accent = colorForPlayer(tile.ownerPlayerId, playerIds);
+        claimMark
+          .poly([0, TILE_H * 0.32, TILE_W * 0.12, TILE_H * 0.5, 0, TILE_H * 0.68, -TILE_W * 0.12, TILE_H * 0.5])
+          .fill({ color: accent, alpha: 0.35 });
         claimMark.x = tileSprite.x;
         claimMark.y = tileSprite.y;
         groundLayer.addChild(claimMark);
       }
 
       const hit = new Graphics();
-      hit.rect(0, 0, TILE, TILE).fill({ color: 0xffffff, alpha: 0.001 });
+      hit
+        .poly([0, 0, TILE_W / 2, TILE_H / 2, 0, TILE_H, -TILE_W / 2, TILE_H / 2])
+        .fill({ color: 0xffffff, alpha: 0.001 });
       hit.x = tileSprite.x;
       hit.y = tileSprite.y;
       hit.eventMode = "static";
@@ -102,23 +121,22 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
       groundLayer.addChild(hit);
     }
 
-    // Entities (buildings + units), row-sorted so anything tall enough to
-    // poke above its own tile still overlaps correctly with the row below it.
+    // Entities (buildings + units) painter's-algorithm sorted back-to-front.
     type Entity = { depth: number; build: () => void };
     const entities: Entity[] = [];
 
     for (const structure of snapshot.structures) {
-      const centerX = structure.x * TILE + TILE / 2;
-      const centerY = structure.y * TILE + TILE / 2;
+      const groundX = originX + isoX(structure.x, structure.y);
+      const groundY = originY + isoY(structure.x, structure.y) + TILE_H * 0.5;
       entities.push({
-        depth: structure.y,
+        depth: structure.x + structure.y,
         build: () => {
           const accent = colorForPlayer(structure.ownerPlayerId, playerIds);
           const texture = getBuildingTexture(structure.type, accent);
           const buildingSprite = new Sprite(texture);
-          buildingSprite.anchor.set(0.5, 0.5);
-          buildingSprite.x = centerX;
-          buildingSprite.y = centerY;
+          buildingSprite.anchor.set(0.5, 1);
+          buildingSprite.x = groundX;
+          buildingSprite.y = groundY;
           entityLayer.addChild(buildingSprite);
         },
       });
@@ -128,37 +146,37 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
       if (unit.hp <= 0) continue;
       // Small deterministic jitter so multiple units sharing a tile (e.g. two
       // idle units guarding the same spot) don't render perfectly stacked.
-      const jitter = jitterFor(unit.id) * 5;
-      const centerX = unit.x * TILE + TILE / 2 + jitter;
-      const centerY = unit.y * TILE + TILE / 2;
+      const jitter = jitterFor(unit.id) * 6;
+      const groundX = originX + isoX(unit.x, unit.y) + jitter;
+      const groundY = originY + isoY(unit.x, unit.y) + TILE_H * 0.6;
       entities.push({
-        depth: unit.y + 0.5, // units render just in front of a building on the same tile
+        depth: unit.x + unit.y + 0.5, // units render just in front of a building on the same tile
         build: () => {
           const accent = colorForPlayer(unit.ownerPlayerId, playerIds);
           const texture = getUnitTexture(unit.type, accent);
           const unitSprite = new Sprite(texture);
-          unitSprite.anchor.set(0.5, 0.5);
-          unitSprite.x = centerX;
-          unitSprite.y = centerY;
+          unitSprite.anchor.set(0.5, 1);
+          unitSprite.x = groundX;
+          unitSprite.y = groundY;
           entityLayer.addChild(unitSprite);
 
           if (unit.ownerPlayerId === selfPlayerId) {
             const marker = new Graphics();
             marker.poly([-5, -4, 5, -4, 0, 4]).fill({ color: 0xfee440 });
-            marker.x = centerX;
-            marker.y = centerY - unitSprite.height / 2 - 8;
+            marker.x = groundX;
+            marker.y = groundY - unitSprite.height - 6;
             entityLayer.addChild(marker);
           }
 
           if (unit.hp < unit.maxHp) {
-            const barWidth = 22;
+            const barWidth = 24;
             const barBack = new Graphics();
             barBack.rect(-barWidth / 2, 0, barWidth, 4).fill({ color: 0x10141a });
             const barFront = new Graphics();
             const ratio = Math.max(0, unit.hp / unit.maxHp);
             barFront.rect(-barWidth / 2, 0, barWidth * ratio, 4).fill({ color: ratio > 0.4 ? 0x2a9d8f : 0xe63946 });
-            barBack.x = centerX;
-            barBack.y = centerY - unitSprite.height / 2 - 10;
+            barBack.x = groundX;
+            barBack.y = groundY - unitSprite.height - 12;
             barFront.x = barBack.x;
             barFront.y = barBack.y;
             entityLayer.addChild(barBack, barFront);
