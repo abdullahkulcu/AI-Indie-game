@@ -2,18 +2,17 @@ import type { Texture } from "pixi.js";
 import { getSpriteTexture, sprite, type Legend } from "./asciiSprite";
 import { CROP, METAL, OUTLINE, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./palette";
 
-/** Building and unit art, defined as compact ASCII pixel-art ("big pixel" per
+/** Building and unit art: a top-down, flat "sandbox sim" look (WorldBox-style)
+ * rather than an isometric RTS one - simple square buildings and small
+ * round-headed chibi units, all with a thick dark outline and few internal
+ * shading tones. Defined as compact ASCII pixel-art ("big pixel" per
  * character) and rasterized on demand. "$"/"@"/"%" are reserved for the
  * owning player's accent color and its auto-derived dark/light shades (see
  * asciiSprite.ts) - buildings stay in neutral materials with a colored
- * flag/banner or decoration, units wear the accent (with real shading) as
- * their tunic/cart color, matching how Age of Empires-era games showed
- * ownership without recoloring the whole sprite. */
+ * flag, units wear the accent as their tunic/cart color. */
 
-// Buildings render noticeably larger than units (a town center should dwarf a
-// soldier standing next to it) - using a smaller scale for units, on top of
-// their already-shorter ASCII art, keeps that size hierarchy readable even
-// when a unit is standing right on its owner's building tile.
+// Buildings render larger than units so a town center still reads as bigger
+// than the little people standing near it.
 const BUILDING_SCALE = 4;
 const UNIT_SCALE = 3;
 
@@ -23,14 +22,11 @@ export type UnitType = "army" | "caravan";
 const BUILDING_LEGEND: Legend = {
   O: OUTLINE,
   R: THATCH.mid,
-  r: THATCH.light,
   W: WALL.mid,
-  w: WALL.light,
   D: WOOD.dark,
   F: CROP.mid,
   f: CROP.light,
   L: WOOD.mid,
-  l: WOOD.light,
   S: STONE.dark,
   M: STONE.mid,
   n: STONE.light,
@@ -39,91 +35,75 @@ const BUILDING_LEGEND: Legend = {
 };
 
 const BUILDINGS: Record<StructureType, string[]> = {
-  // Town center: a stone-footed cottage with a tapered thatch roof, a proud
-  // flag, and a small (not cavernous) doorway.
+  // Town center: a simple flat-topped cottage with a proud little flag.
   base: [
-    "........$........",
-    "........O........",
-    ".......OOO.......",
-    "......ORrRO......",
-    ".....ORrRRRO.....",
-    "....ORrRRRRRO....",
-    "...OWWWWWWWWWO...",
-    "..OWwWWWWWWWwWO..",
-    ".OWWWWWWWWWWWWWO.",
-    "OWWWWWWODDOWWWWWO",
-    "OwWWWWWDDWWwWWWWO",
-    "OWWWWWWWWWWWWWWWO",
-    ".OOOOOOOOOOOOOOO.",
-    "..SSSSSSSSSSSSS..",
+    ".....$.....",
+    ".....O.....",
+    "....OOO....",
+    "...ORRRO...",
+    "..ORRRRRO..",
+    ".OWWWWWWWO.",
+    "OWWWWWWWWWO",
+    "OWWWWDDWWWO",
+    "OWWWWDDWWWO",
+    "OWWWWWWWWWO",
+    ".OOOOOOOOO.",
   ],
-  // Farm: fenced crop rows with a small accent-colored scarecrow watching.
+  // Farm: a small fenced crop plot with a flag post.
   farm: [
-    ".......$.......",
-    ".......O.......",
-    "......OOO......",
-    ".....O$$$O.....",
-    ".OOOOO...OOOOO.",
-    "OFFFfFFFfFFFFFO",
-    "OfFFFfFFFfFFFfO",
-    "OFFFfFFFfFFFFFO",
-    "OfFFFfFFFfFFFfO",
-    "OFFFfFFFfFFFFFO",
-    ".OOOOOOOOOOOOO.",
+    "....$....",
+    "....O....",
+    ".OOOOOOO.",
+    "OFFfFFfFO",
+    "OfFFfFFfO",
+    "OFFfFFfFO",
+    "OfFFfFFfO",
+    ".OOOOOOO.",
   ],
-  // Sawmill: circular saw blade between a work shed and a stacked log pile.
+  // Sawmill: a circular saw blade between a small shed and a log pile.
   sawmill: [
-    "........$......",
-    "........O......",
-    ".......OWO.....",
-    "......OWWWO....",
-    ".OOOOOOWWWOOOO.",
-    "OWWWWWWWWWWWWWO",
-    "OwWWW.nSn.WWWwO",
-    "OWWWW.SMS.WWWWO",
-    "OwWWW.nSn.WWWwO",
-    "OWWWWWWWWWWWWWO",
-    "OLLLLLLLLLLLLLO",
-    "OlLlLlLlLlLlLlO",
-    ".OOOOOOOOOOOOO.",
+    "....$....",
+    "....O....",
+    "...OWO...",
+    "..OWWWO..",
+    ".OWWWWWO.",
+    "OW.nSn.WO",
+    "OW.SMS.WO",
+    "OW.nSn.WO",
+    "OWWWWWWWO",
+    "OLLLLLLLO",
+    ".OOOOOOO.",
   ],
-  // Barracks: twin-towered fort, a banner flying from each tower, one small
-  // reinforced doorway (not a full black archway).
+  // Barracks: a small fort with two corner towers, each flying a banner.
   barracks: [
-    ".....$...$.....",
-    ".....O...O.....",
-    "....OOO.OOO....",
-    "....OMSO.OSMO..",
-    "...OOMOOOOMOO..",
-    "..OWWWWWWWWWO..",
-    ".OWwWWWWWWWwWO.",
-    "OWWWWWWWWWWWWWO",
-    "OwWWWWWDDWWWwWO",
-    "OWWWWWWWWWWWWWO",
-    ".OOOOOOOOOOOOO.",
+    "..$...$..",
+    "..O...O..",
+    ".OOO.OOO.",
+    ".OSO.OSO.",
+    "OOWWWWWOO",
+    "OWWWWWWWO",
+    "OWWWDDWWO",
+    "OWWWWWWWO",
+    ".OOOOOOO.",
   ],
-  // Market: an open trade-post tent with a striped awning, visible wooden
-  // support poles (not the near-invisible dark outline color), and goods on
-  // display at the counter - deliberately the most "busy" building so it
-  // reads as a place of commerce rather than another house. The poles are a
-  // clearly-colored material so the tent and counter read as one structure
-  // instead of two floating pieces against the dark background.
+  // Market: an open trade-post tent with a striped awning on visible posts
+  // over a goods counter - the busiest-looking building, for commerce.
   market: [
-    ".OOOOOOOOOOOO.",
-    "O$W$W$W$W$WWO.",
-    "O$W$W$W$W$WWO.",
-    "OWWWWWWWWWWWWO",
-    "P............P",
-    "P.CCCCCCCCCC.P",
-    "P.CfFfFfFfFC.P",
-    "P.CCCCCCCCCC.P",
-    "P............P",
-    "PPPPPPPPPPPPPP",
+    ".OOOOOOO.",
+    "O$W$W$WO.",
+    "OWWWWWWWO",
+    "P.......P",
+    "P.CCCCC.P",
+    "P.CfFfC.P",
+    "P.CCCCC.P",
+    "P.......P",
+    "PPPPPPPPP",
   ],
 };
 
 const UNIT_LEGEND: Legend = {
   O: OUTLINE,
+  e: OUTLINE,
   W: METAL,
   H: SKIN,
   h: SKIN_SHADOW,
@@ -131,39 +111,33 @@ const UNIT_LEGEND: Legend = {
 };
 
 const UNITS: Record<UnitType, string[]> = {
-  // Soldier: rounded helmet, shaded tunic (accent + accent-shadow fold +
-  // accent-highlight belt), and booted legs.
+  // A small chibi soldier: big round head with two dot eyes, a shaded tunic,
+  // and stubby legs - a tiny spear tip on top marks it as military.
   army: [
-    ".....OO....",
-    ".....OW....",
-    ".....OW....",
-    "....OOOO...",
-    "...OHHHHO..",
-    "...OHhhHO..",
-    "...OOHHOO..",
-    "..O$$$$$O..",
-    ".O$@@$@@$O.",
+    "....OWO....",
+    "...OOOOO...",
+    "..OHHHHHO..",
+    "..OHeHeHO..",
+    "..OHHHHHO..",
+    "..OOOOOOO..",
+    ".O$$$$$$$O.",
+    "O$$@@@@@$$O",
     "O$$$%%%$$$O",
-    ".O$$OOO$$O.",
+    ".O$$O.O$$O.",
     "..OBO.OBO..",
-    "..OBO.OBO..",
-    "...........",
     ".sssssssss.",
   ],
-  // Covered wagon: light canopy top, shaded accent body, and two wheels on
-  // an axle - a trader's cart rather than a plain box.
+  // A small covered wagon: light canopy dome, shaded accent body, two round
+  // wheels.
   caravan: [
     "....OOOOO....",
     "...O%%%%%O...",
     "..O$$$$$$$O..",
     "..O$@@@@@$O..",
     "..OOOOOOOOO..",
-    ".O..O...O..O.",
-    "O.O.O...O.O.O",
-    "O..OOO.OOO..O",
-    ".O.........O.",
-    "..O.......O..",
-    "...........",
+    "....O...O....",
+    "...OOO.OOO...",
+    "....O...O....",
     ".sssssssssss.",
   ],
 };

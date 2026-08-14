@@ -1,14 +1,16 @@
-/** Shared color palette for the procedural pixel-art renderer. Kept small and
- * muted on purpose - old isometric strategy games (Age of Empires 1/2) leaned
- * on a handful of earthy tones plus one bright "ownership" accent per player. */
+/** Shared color palette for the procedural pixel-art renderer. Bright and
+ * cheerful, top-down sandbox-sim style (WorldBox) rather than a muted
+ * historical RTS: flat, saturated terrain plus one bold "ownership" accent
+ * per player, thick dark outlines on every character/building. */
 
 export const OUTLINE = "#10141a";
 export const SHADOW = "rgba(6, 10, 16, 0.4)";
 
-export const GRASS = { dark: "#2f4a34", mid: "#3a5a40", light: "#4f7452" };
+export const GRASS = { dark: "#3f8a4c", mid: "#4fae5e", light: "#6bc471" };
 export const DIRT = { dark: "#4a3623", mid: "#6b4f3a", light: "#84654a" };
-export const STONE = { dark: "#495057", mid: "#6c757d", light: "#9099a1" };
-export const WATER = { dark: "#16294a", mid: "#1d3557", light: "#2a4d7a", foam: "#6ea8d8" };
+export const STONE = { dark: "#5a6672", mid: "#7d8a97", light: "#a3b0bb" };
+export const SNOW = "#f1f6f9";
+export const WATER = { dark: "#1b5fa8", mid: "#2f8ce0", light: "#57aaf0", foam: "#bfe6ff" };
 
 export const WOOD = { dark: "#5c3a1a", mid: "#8b5a2b", light: "#a97844" };
 export const THATCH = { dark: "#6e4b1f", mid: "#9c7124", light: "#c79a3d" };
