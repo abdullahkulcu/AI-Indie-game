@@ -4,6 +4,7 @@ import type { AssignedTask, Unit, UnitState, UnitType } from "../models/types.js
 interface UnitRow {
   id: string;
   owner_player_id: string;
+  channel_id: string;
   type: UnitType;
   x: number;
   y: number;
@@ -17,10 +18,14 @@ interface UnitRow {
   updated_at: string;
 }
 
+const UNIT_COLUMNS = `id, owner_player_id, channel_id, type, x, y, hp, max_hp, attack, state,
+            target_unit_id, assigned_task, cooldown_until_tick, updated_at`;
+
 function toUnit(row: UnitRow): Unit {
   return {
     id: row.id,
     ownerPlayerId: row.owner_player_id,
+    channelId: row.channel_id,
     type: row.type,
     x: row.x,
     y: row.y,
@@ -35,17 +40,16 @@ function toUnit(row: UnitRow): Unit {
   };
 }
 
-export async function listUnits(): Promise<Unit[]> {
-  const result = await pool.query<UnitRow>(
-    `SELECT id, owner_player_id, type, x, y, hp, max_hp, attack, state,
-            target_unit_id, assigned_task, cooldown_until_tick, updated_at
-     FROM units`,
-  );
+export async function listUnits(channelId: string): Promise<Unit[]> {
+  const result = await pool.query<UnitRow>(`SELECT ${UNIT_COLUMNS} FROM units WHERE channel_id = $1`, [
+    channelId,
+  ]);
   return result.rows.map(toUnit);
 }
 
 export async function spawnUnit(
   ownerPlayerId: string,
+  channelId: string,
   type: UnitType,
   x: number,
   y: number,
@@ -53,11 +57,10 @@ export async function spawnUnit(
   attack = 4,
 ): Promise<Unit> {
   const result = await pool.query<UnitRow>(
-    `INSERT INTO units (owner_player_id, type, x, y, hp, max_hp, attack)
-     VALUES ($1, $2, $3, $4, $5, $5, $6)
-     RETURNING id, owner_player_id, type, x, y, hp, max_hp, attack, state,
-               target_unit_id, assigned_task, cooldown_until_tick, updated_at`,
-    [ownerPlayerId, type, x, y, hp, attack],
+    `INSERT INTO units (owner_player_id, channel_id, type, x, y, hp, max_hp, attack)
+     VALUES ($1, $2, $3, $4, $5, $6, $6, $7)
+     RETURNING ${UNIT_COLUMNS}`,
+    [ownerPlayerId, channelId, type, x, y, hp, attack],
   );
   return toUnit(result.rows[0]);
 }

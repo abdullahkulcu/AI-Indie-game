@@ -3,6 +3,7 @@ import type { Socket } from "socket.io-client";
 import { api } from "./api/client";
 import { connectSocket } from "./api/socket";
 import { AuthForm } from "./components/AuthForm";
+import { ChannelPicker } from "./components/ChannelPicker";
 import { ApiKeyModal } from "./components/ApiKeyModal";
 import { MapGrid } from "./components/MapGrid";
 import { ChatPanel } from "./components/ChatPanel";
@@ -13,6 +14,8 @@ const TOKEN_STORAGE_KEY = "ai-indie-game:token";
 
 export function App() {
   const [session, setSession] = useState<AuthResult | null>(null);
+  // undefined = not yet resolved from the server; null = resolved, no channel joined yet.
+  const [channelId, setChannelId] = useState<string | null | undefined>(undefined);
   const [snapshot, setSnapshot] = useState<GameStateSnapshot | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [resources, setResources] = useState<Resources | null>(null);
@@ -27,9 +30,17 @@ export function App() {
     setSession(player);
   }, []);
 
+  // Once a session exists, resolve its current channel from the server (not
+  // just the stale value captured at login/register time) before deciding
+  // whether to show the channel picker or connect into a game.
   useEffect(() => {
     if (!session) return;
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(session));
+    api.me(session.token).then((me) => setChannelId(me.channelId));
+  }, [session]);
+
+  useEffect(() => {
+    if (!session || !channelId) return;
 
     const s = connectSocket(session.token);
     setSocket(s);
@@ -54,7 +65,7 @@ export function App() {
     return () => {
       s.disconnect();
     };
-  }, [session]);
+  }, [session, channelId]);
 
   useEffect(() => {
     if (!snapshot || !session) return;
@@ -90,12 +101,21 @@ export function App() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     socket?.disconnect();
     setSession(null);
+    setChannelId(undefined);
     setSnapshot(null);
     setMessages([]);
   }
 
   if (!session) {
     return <AuthForm onAuthenticated={setSession} />;
+  }
+
+  if (channelId === undefined) {
+    return null; // resolving the player's channel membership
+  }
+
+  if (channelId === null) {
+    return <ChannelPicker token={session.token} onJoined={setChannelId} />;
   }
 
   return (

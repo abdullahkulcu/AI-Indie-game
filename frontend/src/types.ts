@@ -1,13 +1,23 @@
-export type ResourceType = "gold" | "wood" | "food";
+export type ResourceType = "gold" | "wood" | "food" | "stone" | "iron";
 export type TileTerrain = "plains" | "forest" | "mountain" | "water";
-export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market";
+export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market" | "mine";
 export type UnitState = "idle" | "moving" | "attacking" | "retaliating" | "executing_task";
 export type UnitType = "army" | "caravan";
+
+export interface Channel {
+  id: string;
+  name: string;
+  mapSize: number;
+  maxPlayers: number;
+  seed: number;
+  playerCount: number;
+}
 
 export interface Player {
   id: string;
   username: string;
   email: string;
+  channelId: string | null;
   createdAt: string;
 }
 
@@ -16,6 +26,8 @@ export interface Resources {
   gold: number;
   wood: number;
   food: number;
+  stone: number;
+  iron: number;
 }
 
 export interface Tile {
@@ -46,6 +58,8 @@ export interface Unit {
 }
 
 export interface GameStateSnapshot {
+  channelId: string;
+  seed: number;
   tickNumber: number;
   mapSize: number;
   tiles: Tile[];

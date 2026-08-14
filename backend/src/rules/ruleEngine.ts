@@ -1,4 +1,3 @@
-import { MAP_SIZE } from "../models/types.js";
 import type {
   GameAction,
   GameStateSnapshot,
@@ -6,12 +5,15 @@ import type {
   StructureType,
 } from "../models/types.js";
 import { chebyshevDistance } from "../game/geometry.js";
+import { depositFor, terrainFor } from "../game/mapService.js";
 
 /**
  * Independent, deterministic validation layer. This is the ONLY gate an LLM-produced
  * (or player-triggered) action passes through before it can mutate game state.
  * It never trusts the LLM: every fact it needs (ownership, position, resources,
- * cooldowns) is re-derived from the authoritative game state snapshot.
+ * cooldowns, terrain) is re-derived from the authoritative game state snapshot
+ * or computed straight from the channel's seed - never taken from the action
+ * payload itself.
  */
 
 export interface ValidationResult {
@@ -25,9 +27,16 @@ export const BUILD_COSTS: Record<StructureType, Partial<Record<ResourceType, num
   base: { wood: 50, gold: 50 },
   farm: { wood: 30 },
   sawmill: { wood: 20, gold: 10 },
-  barracks: { wood: 40, gold: 30 },
+  barracks: { wood: 40, gold: 30, stone: 20 },
   market: { gold: 40 },
+  // Deliberately no stone/iron cost - a mine has to be buildable before the
+  // player has any stone/iron income to bootstrap from.
+  mine: { wood: 30 },
 };
+
+/** Recruiting a soldier at a barracks - the "spend your trade earnings on an
+ * army" mechanic. */
+export const RECRUIT_COST: Partial<Record<ResourceType, number>> = { gold: 40, food: 20 };
 
 function ok(): ValidationResult {
   return { valid: true };
@@ -112,16 +121,24 @@ export function validateBuild(
   playerId: string,
   action: Extract<GameAction, { type: "build" }>,
 ): ValidationResult {
-  if (action.x < 0 || action.x >= MAP_SIZE || action.y < 0 || action.y >= MAP_SIZE) {
+  if (action.x < 0 || action.x >= state.mapSize || action.y < 0 || action.y >= state.mapSize) {
     return reject(`Koordinat harita disinda: (${action.x}, ${action.y})`);
   }
   const cost = BUILD_COSTS[action.structureType];
   if (!cost) return reject(`Bilinmeyen yapi tipi: ${action.structureType}`);
 
-  const tile = state.tiles.find((t) => t.x === action.x && t.y === action.y);
-  if (!tile) return reject(`Tile bulunamadi: (${action.x}, ${action.y})`);
-  if (tile.terrain === "water") return reject("Su uzerine insa edilemez.");
-  if (tile.ownerPlayerId && tile.ownerPlayerId !== playerId) {
+  const terrain = terrainFor(state.seed, action.x, action.y);
+  if (terrain === "water") return reject("Su uzerine insa edilemez.");
+
+  if (action.structureType === "mine") {
+    const deposit = depositFor(state.seed, action.x, action.y);
+    if (!deposit) {
+      return reject("Maden ancak bir maden yatagi (dag karosu) uzerine kurulabilir.");
+    }
+  }
+
+  const claim = state.tiles.find((t) => t.x === action.x && t.y === action.y);
+  if (claim?.ownerPlayerId && claim.ownerPlayerId !== playerId) {
     return reject("Bu tile baska bir oyuncuya ait.");
   }
 
@@ -131,6 +148,29 @@ export function validateBuild(
   const ownResources = state.resources.find((r) => r.playerId === playerId);
   if (!ownResources) return reject("Kaynak kaydi bulunamadi.");
   for (const [resource, amount] of Object.entries(cost) as Array<[ResourceType, number]>) {
+    if (ownResources[resource] < amount) {
+      return reject(
+        `Yetersiz ${resource}: elinizde ${ownResources[resource]}, gereken ${amount}.`,
+      );
+    }
+  }
+
+  return ok();
+}
+
+export function validateRecruit(
+  state: GameStateSnapshot,
+  playerId: string,
+  action: Extract<GameAction, { type: "recruit" }>,
+): ValidationResult {
+  const barracks = state.structures.find((s) => s.id === action.structureId);
+  if (!barracks) return reject(`Yapi bulunamadi: ${action.structureId}`);
+  if (barracks.ownerPlayerId !== playerId) return reject("Bu yapi size ait degil.");
+  if (barracks.type !== "barracks") return reject("Sadece kislada asker egitilebilir.");
+
+  const ownResources = state.resources.find((r) => r.playerId === playerId);
+  if (!ownResources) return reject("Kaynak kaydi bulunamadi.");
+  for (const [resource, amount] of Object.entries(RECRUIT_COST) as Array<[ResourceType, number]>) {
     if (ownResources[resource] < amount) {
       return reject(
         `Yetersiz ${resource}: elinizde ${ownResources[resource]}, gereken ${amount}.`,
@@ -153,6 +193,8 @@ export function validateAction(
       return validateTrade(state, playerId, action);
     case "build":
       return validateBuild(state, playerId, action);
+    case "recruit":
+      return validateRecruit(state, playerId, action);
     default: {
       const exhaustiveCheck: never = action;
       return reject(`Bilinmeyen aksiyon tipi: ${JSON.stringify(exhaustiveCheck)}`);

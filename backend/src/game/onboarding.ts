@@ -1,37 +1,36 @@
-import { MAP_SIZE } from "../models/types.js";
-import { listPlayers } from "../repositories/playerRepository.js";
-import { claimTile, insertStructure } from "../repositories/mapRepository.js";
+import { getChannel, countPlayersInChannel } from "../repositories/channelRepository.js";
+import { setPlayerChannel, createResources } from "../repositories/playerRepository.js";
+import { claimTile, insertStructure, listStructures } from "../repositories/mapRepository.js";
 import { spawnUnit } from "../repositories/unitRepository.js";
-import { startingPosition, MAX_PLAYERS } from "./mapService.js";
+import { randomStartingPosition } from "./mapService.js";
+import { MAP_SIZE } from "../models/types.js";
 
-function clampToMap(value: number): number {
-  return Math.max(0, Math.min(MAP_SIZE - 1, value));
-}
+export class ChannelJoinError extends Error {}
 
-export { MAX_PLAYERS };
+/** Assigns a player to a channel and gives them their first foothold on that
+ * channel's map: a random starting tile (far from other players already
+ * there), a free base, and a starting army + caravan unit beside it. */
+export async function joinChannel(playerId: string, channelId: string): Promise<void> {
+  const channel = await getChannel(channelId);
+  if (!channel) throw new ChannelJoinError("Kanal bulunamadi.");
 
-export async function isGameFull(): Promise<boolean> {
-  const players = await listPlayers();
-  return players.length >= MAX_PLAYERS;
-}
-
-/** Gives a freshly registered player their first foothold on the shared map:
- * a claimed starting tile, a free base, and a starting army + caravan unit.
- * Callers must check `isGameFull()` before creating the player row - this MVP
- * has a single shared map with a fixed number of starting corners. */
-export async function joinGame(playerId: string): Promise<void> {
-  const players = await listPlayers();
-  const slotIndex = players.findIndex((p) => p.id === playerId);
-  if (slotIndex === -1 || slotIndex >= MAX_PLAYERS) {
-    throw new Error("Oyun dolu: maksimum oyuncu sayisina ulasildi.");
+  const playerCount = await countPlayersInChannel(channelId);
+  if (playerCount >= channel.maxPlayers) {
+    throw new ChannelJoinError(`Kanal dolu: en fazla ${channel.maxPlayers} oyuncu.`);
   }
-  const { x, y } = startingPosition(slotIndex);
 
-  await claimTile(x, y, playerId);
-  await insertStructure(playerId, "base", x, y);
+  const existingBases = (await listStructures(channelId))
+    .filter((s) => s.type === "base")
+    .map((s) => ({ x: s.x, y: s.y }));
+  const { x, y } = randomStartingPosition(channel.seed, existingBases, channel.mapSize ?? MAP_SIZE);
+
+  await setPlayerChannel(playerId, channelId);
+  await createResources(playerId, channelId);
+  await claimTile(channelId, x, y, playerId);
+  await insertStructure(playerId, channelId, "base", x, y);
   // Units spawn beside the base rather than on top of it - both for
   // gameplay sense (a town center's garrison isn't standing inside it) and
-  // so the map doesn't render three sprites stacked on one tile.
-  await spawnUnit(playerId, "army", clampToMap(x + 1), y);
-  await spawnUnit(playerId, "caravan", x, clampToMap(y + 1));
+  // so the map doesn't render multiple sprites stacked on one tile.
+  await spawnUnit(playerId, channelId, "army", x + 1, y);
+  await spawnUnit(playerId, channelId, "caravan", x, y + 1);
 }

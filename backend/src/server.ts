@@ -5,6 +5,7 @@ import { authRoutes } from "./auth/authRoutes.js";
 import { mapRoutes } from "./routes/mapRoutes.js";
 import { playerRoutes } from "./routes/playerRoutes.js";
 import { chatRoutes } from "./routes/chatRoutes.js";
+import { channelRoutes } from "./routes/channelRoutes.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -17,6 +18,7 @@ export async function buildServer() {
   await app.register(mapRoutes);
   await app.register(playerRoutes);
   await app.register(chatRoutes);
+  await app.register(channelRoutes);
 
   return app;
 }

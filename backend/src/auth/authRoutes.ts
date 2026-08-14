@@ -3,8 +3,7 @@ import { z } from "zod";
 import { AuthError, login, register } from "./authService.js";
 import { requireAuth } from "./authPlugin.js";
 import { encryptSecret } from "../crypto/keyVault.js";
-import { getResources, hasApiKey, upsertApiKey } from "../repositories/playerRepository.js";
-import { isGameFull, joinGame, MAX_PLAYERS } from "../game/onboarding.js";
+import { findPlayerById, getResources, hasApiKey, upsertApiKey } from "../repositories/playerRepository.js";
 
 const registerSchema = z.object({
   username: z.string().min(3).max(32),
@@ -27,14 +26,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!body.success) {
       return reply.code(400).send({ error: body.error.flatten() });
     }
-    if (await isGameFull()) {
-      return reply
-        .code(409)
-        .send({ error: `Oyun dolu: bu MVP en fazla ${MAX_PLAYERS} oyuncuyu destekliyor.` });
-    }
     try {
       const result = await register(body.data.username, body.data.email, body.data.password);
-      await joinGame(result.player.id);
       return reply.code(201).send(result);
     } catch (err) {
       if (err instanceof AuthError) {
@@ -74,10 +67,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/auth/me", { preHandler: requireAuth }, async (request, reply) => {
     const playerId = request.playerId as string;
-    const [resources, keyConnected] = await Promise.all([
+    const [player, resources, keyConnected] = await Promise.all([
+      findPlayerById(playerId),
       getResources(playerId),
       hasApiKey(playerId),
     ]);
-    return reply.send({ playerId, resources, apiKeyConnected: keyConnected });
+    return reply.send({
+      playerId,
+      channelId: player?.channelId ?? null,
+      resources,
+      apiKeyConnected: keyConnected,
+    });
   });
 }

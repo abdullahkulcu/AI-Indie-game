@@ -1,9 +1,16 @@
-import type { ActionStatus, GameAction, GameStateSnapshot, ResourceType } from "../models/types.js";
-import { validateAction, BUILD_COSTS } from "../rules/ruleEngine.js";
+import type {
+  ActionStatus,
+  Channel,
+  GameAction,
+  GameStateSnapshot,
+  ResourceType,
+} from "../models/types.js";
+import { validateAction, BUILD_COSTS, RECRUIT_COST } from "../rules/ruleEngine.js";
 import { applyCombat, advanceAutonomousUnits } from "./stateMachine.js";
+import { depositFor, terrainFor } from "./mapService.js";
 import { loadSnapshot, cacheSnapshot, setCurrentTickNumber } from "./gameStateService.js";
 import { nextTickNumber, recordTick } from "../repositories/tickLogRepository.js";
-import { saveUnits, removeDeadUnits } from "../repositories/unitRepository.js";
+import { saveUnits, removeDeadUnits, spawnUnit } from "../repositories/unitRepository.js";
 import { adjustResources } from "../repositories/playerRepository.js";
 import { claimTile, insertStructure } from "../repositories/mapRepository.js";
 import { listRecentChat, saveChatMessage } from "../repositories/chatRepository.js";
@@ -15,6 +22,10 @@ interface AppliedActionLogEntry {
   status: ActionStatus;
   reason: string | null;
 }
+
+/** How much of its deposit's resource a mine yields per tick - the passive
+ * "your economy grows on its own" income the recruit/trade loop is funded by. */
+const MINE_YIELD_PER_TICK = 5;
 
 /** Applies one already-validated action's effects on top of the in-memory
  * snapshot, and persists the side effects (resources/tiles/structures) that
@@ -62,20 +73,51 @@ export async function applyAction(
     return { ...snapshot, resources };
   }
 
+  if (action.type === "recruit") {
+    await Promise.all([
+      adjustResources(
+        playerId,
+        Object.fromEntries(
+          Object.entries(RECRUIT_COST).map(([resource, amount]) => [resource, -amount]),
+        ),
+      ),
+    ]);
+    const barracks = snapshot.structures.find((s) => s.id === action.structureId);
+    if (!barracks) return snapshot; // already validated to exist; defensive no-op
+    const unit = await spawnUnit(playerId, snapshot.channelId, "army", barracks.x, barracks.y);
+    const resources = snapshot.resources.map((r) => {
+      if (r.playerId !== playerId) return r;
+      const updated = { ...r };
+      for (const [resource, amount] of Object.entries(RECRUIT_COST) as Array<[ResourceType, number]>) {
+        updated[resource] = updated[resource] - amount;
+      }
+      return updated;
+    });
+    return { ...snapshot, resources, units: [...snapshot.units, unit] };
+  }
+
   // build
   const cost = BUILD_COSTS[action.structureType];
   await Promise.all([
-    claimTile(action.x, action.y, playerId),
+    claimTile(snapshot.channelId, action.x, action.y, playerId),
     adjustResources(
       playerId,
       Object.fromEntries(Object.entries(cost).map(([resource, amount]) => [resource, -amount])),
     ),
   ]);
-  const structure = await insertStructure(playerId, action.structureType, action.x, action.y);
+  const structure = await insertStructure(playerId, snapshot.channelId, action.structureType, action.x, action.y);
 
-  const tiles = snapshot.tiles.map((t) =>
-    t.x === action.x && t.y === action.y ? { ...t, ownerPlayerId: playerId } : t,
-  );
+  const tiles = snapshot.tiles.some((t) => t.x === action.x && t.y === action.y)
+    ? snapshot.tiles.map((t) => (t.x === action.x && t.y === action.y ? { ...t, ownerPlayerId: playerId } : t))
+    : [
+        ...snapshot.tiles,
+        {
+          x: action.x,
+          y: action.y,
+          terrain: terrainFor(snapshot.seed, action.x, action.y),
+          ownerPlayerId: playerId,
+        },
+      ];
   const resources = snapshot.resources.map((r) => {
     if (r.playerId !== playerId) return r;
     const updated = { ...r };
@@ -88,6 +130,24 @@ export async function applyAction(
   return { ...snapshot, tiles, resources, structures: [...snapshot.structures, structure] };
 }
 
+/** Passive per-tick income from every mine, independent of any LLM decision -
+ * the automatic quarry/mine trickle a Stronghold-style economy runs on. */
+async function applyMiningIncome(snapshot: GameStateSnapshot): Promise<GameStateSnapshot> {
+  let resources = snapshot.resources;
+  for (const structure of snapshot.structures) {
+    if (structure.type !== "mine") continue;
+    const deposit = depositFor(snapshot.seed, structure.x, structure.y);
+    if (!deposit) continue;
+    await adjustResources(structure.ownerPlayerId, { [deposit]: MINE_YIELD_PER_TICK });
+    resources = resources.map((r) =>
+      r.playerId === structure.ownerPlayerId
+        ? { ...r, [deposit]: r[deposit] + MINE_YIELD_PER_TICK }
+        : r,
+    );
+  }
+  return { ...snapshot, resources };
+}
+
 export interface TickResult {
   tickNumber: number;
   snapshot: GameStateSnapshot;
@@ -95,18 +155,20 @@ export interface TickResult {
   replies: Array<{ playerId: string; reply: string }>;
 }
 
-/** Runs one full simulation tick:
+/** Runs one full simulation tick for one channel:
  *  1) autonomous FSM step (retaliation, task repetition) for every unit
- *  2) one LLM strategic evaluation per player (periodic - not a continuous loop)
- *  3) every candidate action re-validated by the rule engine before it is applied
- *  4) persist + return the resulting snapshot for broadcast
+ *  2) passive mining income
+ *  3) one LLM strategic evaluation per player (periodic - not a continuous loop)
+ *  4) every candidate action re-validated by the rule engine before it is applied
+ *  5) persist + return the resulting snapshot for broadcast
  */
-export async function runTick(): Promise<TickResult> {
-  const tickNumber = await nextTickNumber();
-  let snapshot = await loadSnapshot(tickNumber);
+export async function runTick(channel: Channel): Promise<TickResult> {
+  const tickNumber = await nextTickNumber(channel.id);
+  let snapshot = await loadSnapshot(channel, tickNumber);
 
   const autonomous = advanceAutonomousUnits(snapshot.units, tickNumber);
   snapshot = { ...snapshot, units: autonomous.units };
+  snapshot = await applyMiningIncome(snapshot);
 
   const actionLog: AppliedActionLogEntry[] = [];
   const replies: Array<{ playerId: string; reply: string }> = [];
@@ -148,7 +210,7 @@ export async function runTick(): Promise<TickResult> {
     }
 
     if (reply) {
-      await saveChatMessage(player.id, "assistant", reply);
+      await saveChatMessage(player.id, channel.id, "assistant", reply);
       replies.push({ playerId: player.id, reply });
     }
   }
@@ -159,8 +221,8 @@ export async function runTick(): Promise<TickResult> {
 
   await saveUnits(aliveUnits);
   await removeDeadUnits(deadUnitIds);
-  await recordTick(tickNumber, actionLog);
-  await setCurrentTickNumber(tickNumber);
+  await recordTick(channel.id, tickNumber, actionLog);
+  await setCurrentTickNumber(channel.id, tickNumber);
   await cacheSnapshot(snapshot);
 
   return { tickNumber, snapshot, actionLog, replies };

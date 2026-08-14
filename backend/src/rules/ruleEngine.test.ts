@@ -1,14 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { validateAction } from "./ruleEngine.js";
+import { depositFor, terrainFor } from "../game/mapService.js";
 import type { GameStateSnapshot, Unit } from "../models/types.js";
 
 const PLAYER_A = "player-a";
 const PLAYER_B = "player-b";
+const SEED = 1;
+const MAP_SIZE = 300;
+
+/** Terrain/deposits are a pure function of (seed, x, y) now (see
+ * mapService.ts) rather than fixtures we can just declare - so tests find
+ * real coordinates on the seed-1 map that match the terrain they need. */
+function findCoord(predicate: (x: number, y: number) => boolean): { x: number; y: number } {
+  for (let x = 0; x < MAP_SIZE; x += 1) {
+    for (let y = 0; y < MAP_SIZE; y += 1) {
+      if (predicate(x, y)) return { x, y };
+    }
+  }
+  throw new Error("no matching coordinate found for seed " + SEED);
+}
+
+const PLAINS_A = findCoord((x, y) => terrainFor(SEED, x, y) === "plains");
+const PLAINS_B = findCoord(
+  (x, y) => terrainFor(SEED, x, y) === "plains" && (x !== PLAINS_A.x || y !== PLAINS_A.y),
+);
+const WATER = findCoord((x, y) => terrainFor(SEED, x, y) === "water");
+const DEPOSIT = findCoord((x, y) => depositFor(SEED, x, y) !== null);
 
 function makeUnit(overrides: Partial<Unit>): Unit {
   return {
     id: "unit-1",
     ownerPlayerId: PLAYER_A,
+    channelId: "channel-1",
     type: "army",
     x: 0,
     y: 0,
@@ -26,22 +49,32 @@ function makeUnit(overrides: Partial<Unit>): Unit {
 
 function baseState(overrides: Partial<GameStateSnapshot> = {}): GameStateSnapshot {
   return {
+    channelId: "channel-1",
+    seed: SEED,
     tickNumber: 10,
-    mapSize: 20,
-    tiles: [
-      { x: 0, y: 0, terrain: "plains", ownerPlayerId: PLAYER_A },
-      { x: 1, y: 0, terrain: "plains", ownerPlayerId: null },
-      { x: 19, y: 19, terrain: "water", ownerPlayerId: null },
-    ],
+    mapSize: MAP_SIZE,
+    tiles: [{ x: PLAINS_A.x, y: PLAINS_A.y, terrain: "plains", ownerPlayerId: PLAYER_A }],
     units: [],
     structures: [],
     resources: [
-      { playerId: PLAYER_A, gold: 100, wood: 100, food: 100 },
-      { playerId: PLAYER_B, gold: 100, wood: 100, food: 100 },
+      { playerId: PLAYER_A, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
+      { playerId: PLAYER_B, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
     ],
     players: [
-      { id: PLAYER_A, username: "a", email: "a@x.com", createdAt: new Date().toISOString() },
-      { id: PLAYER_B, username: "b", email: "b@x.com", createdAt: new Date().toISOString() },
+      {
+        id: PLAYER_A,
+        username: "a",
+        email: "a@x.com",
+        channelId: "channel-1",
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: PLAYER_B,
+        username: "b",
+        email: "b@x.com",
+        channelId: "channel-1",
+        createdAt: new Date().toISOString(),
+      },
     ],
     ...overrides,
   };
@@ -146,8 +179,8 @@ describe("trade validation", () => {
   it("rejects a trade the player cannot afford", () => {
     const state = baseState({
       resources: [
-        { playerId: PLAYER_A, gold: 5, wood: 5, food: 5 },
-        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100 },
+        { playerId: PLAYER_A, gold: 5, wood: 5, food: 5, stone: 0, iron: 0 },
+        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100, stone: 0, iron: 0 },
       ],
     });
     const result = validateAction(state, PLAYER_A, {
@@ -165,8 +198,8 @@ describe("trade validation", () => {
   it("rejects a trade the target player cannot fulfill", () => {
     const state = baseState({
       resources: [
-        { playerId: PLAYER_A, gold: 100, wood: 100, food: 100 },
-        { playerId: PLAYER_B, gold: 2, wood: 100, food: 100 },
+        { playerId: PLAYER_A, gold: 100, wood: 100, food: 100, stone: 0, iron: 0 },
+        { playerId: PLAYER_B, gold: 2, wood: 100, food: 100, stone: 0, iron: 0 },
       ],
     });
     const result = validateAction(state, PLAYER_A, {
@@ -201,8 +234,8 @@ describe("build validation", () => {
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "farm",
-      x: 0,
-      y: 0,
+      x: PLAINS_A.x,
+      y: PLAINS_A.y,
     });
     expect(result.valid).toBe(true);
   });
@@ -212,22 +245,22 @@ describe("build validation", () => {
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "farm",
-      x: 19,
-      y: 19,
+      x: WATER.x,
+      y: WATER.y,
     });
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/Su uzerine/);
   });
 
-  it("rejects building on another player's tile", () => {
+  it("rejects building on another player's claimed tile", () => {
     const state = baseState({
-      tiles: [{ x: 0, y: 0, terrain: "plains", ownerPlayerId: PLAYER_B }],
+      tiles: [{ x: PLAINS_A.x, y: PLAINS_A.y, terrain: "plains", ownerPlayerId: PLAYER_B }],
     });
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "farm",
-      x: 0,
-      y: 0,
+      x: PLAINS_A.x,
+      y: PLAINS_A.y,
     });
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/baska bir oyuncuya ait/);
@@ -236,15 +269,15 @@ describe("build validation", () => {
   it("rejects building without sufficient resources", () => {
     const state = baseState({
       resources: [
-        { playerId: PLAYER_A, gold: 0, wood: 0, food: 0 },
-        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100 },
+        { playerId: PLAYER_A, gold: 0, wood: 0, food: 0, stone: 0, iron: 0 },
+        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
       ],
     });
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "base",
-      x: 0,
-      y: 0,
+      x: PLAINS_A.x,
+      y: PLAINS_A.y,
     });
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/Yetersiz/);
@@ -256,9 +289,10 @@ describe("build validation", () => {
         {
           id: "s1",
           ownerPlayerId: PLAYER_A,
+          channelId: "channel-1",
           type: "farm",
-          x: 0,
-          y: 0,
+          x: PLAINS_A.x,
+          y: PLAINS_A.y,
           level: 1,
           createdAt: new Date().toISOString(),
         },
@@ -267,8 +301,8 @@ describe("build validation", () => {
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "sawmill",
-      x: 0,
-      y: 0,
+      x: PLAINS_A.x,
+      y: PLAINS_A.y,
     });
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/zaten bir yapi/);
@@ -279,10 +313,103 @@ describe("build validation", () => {
     const result = validateAction(state, PLAYER_A, {
       type: "build",
       structureType: "farm",
-      x: 100,
+      x: MAP_SIZE + 5,
       y: 0,
     });
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/harita disinda/);
+  });
+
+  it("accepts a mine on a resource deposit tile", () => {
+    const state = baseState({
+      resources: [
+        { playerId: PLAYER_A, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
+        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
+      ],
+    });
+    const result = validateAction(state, PLAYER_A, {
+      type: "build",
+      structureType: "mine",
+      x: DEPOSIT.x,
+      y: DEPOSIT.y,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a mine that isn't on a deposit", () => {
+    const state = baseState();
+    const result = validateAction(state, PLAYER_A, {
+      type: "build",
+      structureType: "mine",
+      x: PLAINS_B.x,
+      y: PLAINS_B.y,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/maden yatagi/);
+  });
+});
+
+describe("recruit validation", () => {
+  function barracksState(overrides: Partial<GameStateSnapshot> = {}) {
+    return baseState({
+      structures: [
+        {
+          id: "barracks-1",
+          ownerPlayerId: PLAYER_A,
+          channelId: "channel-1",
+          type: "barracks",
+          x: PLAINS_A.x,
+          y: PLAINS_A.y,
+          level: 1,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      ...overrides,
+    });
+  }
+
+  it("accepts recruiting at an owned barracks with enough resources", () => {
+    const state = barracksState();
+    const result = validateAction(state, PLAYER_A, { type: "recruit", structureId: "barracks-1" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects recruiting at a barracks you do not own", () => {
+    const state = barracksState();
+    const result = validateAction(state, PLAYER_B, { type: "recruit", structureId: "barracks-1" });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/size ait degil/);
+  });
+
+  it("rejects recruiting at a non-barracks structure", () => {
+    const state = baseState({
+      structures: [
+        {
+          id: "farm-1",
+          ownerPlayerId: PLAYER_A,
+          channelId: "channel-1",
+          type: "farm",
+          x: PLAINS_A.x,
+          y: PLAINS_A.y,
+          level: 1,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const result = validateAction(state, PLAYER_A, { type: "recruit", structureId: "farm-1" });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/kislada/);
+  });
+
+  it("rejects recruiting without enough resources", () => {
+    const state = barracksState({
+      resources: [
+        { playerId: PLAYER_A, gold: 0, wood: 0, food: 0, stone: 0, iron: 0 },
+        { playerId: PLAYER_B, gold: 100, wood: 100, food: 100, stone: 100, iron: 100 },
+      ],
+    });
+    const result = validateAction(state, PLAYER_A, { type: "recruit", structureId: "barracks-1" });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/Yetersiz/);
   });
 });

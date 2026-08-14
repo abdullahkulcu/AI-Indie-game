@@ -1,32 +1,45 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { ChatMessage, GameStateSnapshot } from "../models/types.js";
+import { findNearbyDeposits } from "../game/mapService.js";
 
 /**
  * The system prompt is never sent to the client - the UI only ever shows the
  * player's own chat turns and the assistant's natural-language reply. It fixes
  * the model's role (advisor whose decisions are executed by the game, not a
- * chatbot) and reminds it that only the three provided tools can affect state.
+ * chatbot) and reminds it that only the four provided tools can affect state.
  */
 const SYSTEM_PROMPT = `Sen bir 2D strateji savas oyununda bir oyuncunun ozel yapay zeka "generali"sin.
 Oyuncu sana dogal dille strateji/talimat anlatir; sen bu talimatlari degerlendirip
-saglanan fonksiyonlar (attack, trade, build) araciligiyla somut kararlar alirsin.
+saglanan fonksiyonlar (attack, trade, build, recruit) araciligiyla somut kararlar alirsin.
+Ekonomi: gold/wood/food'a ek olarak stone ve iron var. Bunlari kazanmanin yolu
+maden yataklarinin (dag karolari) uzerine 'mine' tipi yapi insa etmek - o zaman
+o kaynak her tick otomatik uretilir. Kazandigin kaynaklarla ticaret yapip
+altin biriktirebilir, altin+yiyecekle kislanda 'recruit' fonksiyonuyla yeni
+asker egitebilirsin.
+Harita cok buyuk (300x300); sadece kendi birimlerine/yapilarina yakin
+bolgeyi ve orada bilinen maden yataklarini goruyorsun - butun haritayi degil.
 Kurallar:
-- Oyun durumunu asla serbest metinle degistiremezsin; sadece attack/trade/build
-  fonksiyon caGrilariyla aksiyon alabilirsin. Bu cagrilar sunucuda ayrica
+- Oyun durumunu asla serbest metinle degistiremezsin; sadece attack/trade/build/
+  recruit fonksiyon caGrilariyla aksiyon alabilirsin. Bu cagrilar sunucuda ayrica
   dogrulanir; gecersiz bir cagri reddedilir.
 - Sadece sana verilen JSON durumundaki gercek id'leri (unit_id, target_unit_id,
-  target_player_id) kullan; id uydurma.
+  target_player_id, structure_id) kullan; id uydurma.
 - Sadece oyuncunun kendi birimlerini/kaynaklarini yonetebilirsin.
 - Her tur 0 veya daha fazla fonksiyon cagrisi yapabilirsin. Sadece fikir
   aliyor ya da bilgi veriyorsan fonksiyon cagirmadan kisa bir dogal dil yaniti
   yeterlidir.
 - Yanitlarin kisa ve oz olsun; oyuncuya bir general gibi rapor ver.`;
 
+const DEPOSIT_SCAN_RADIUS = 20;
+
 function playerContext(state: GameStateSnapshot, playerId: string): string {
   const ownUnits = state.units.filter((u) => u.ownerPlayerId === playerId);
   const enemyUnits = state.units.filter((u) => u.ownerPlayerId !== playerId);
   const ownStructures = state.structures.filter((s) => s.ownerPlayerId === playerId);
   const ownResources = state.resources.find((r) => r.playerId === playerId);
+
+  const anchors = [...ownUnits, ...ownStructures].map((a) => ({ x: a.x, y: a.y }));
+  const knownDeposits = findNearbyDeposits(state.seed, anchors, DEPOSIT_SCAN_RADIUS, state.mapSize);
 
   const summary = {
     tick: state.tickNumber,
@@ -41,6 +54,7 @@ function playerContext(state: GameStateSnapshot, playerId: string): string {
       state: u.state,
     })),
     yourStructures: ownStructures.map((s) => ({ id: s.id, type: s.type, x: s.x, y: s.y })),
+    knownDeposits,
     visibleEnemyUnits: enemyUnits.map((u) => ({
       id: u.id,
       ownerPlayerId: u.ownerPlayerId,

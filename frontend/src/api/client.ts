@@ -1,4 +1,4 @@
-import type { AuthResult, ChatMessage, GameStateSnapshot, Player, Resources } from "../types";
+import type { AuthResult, Channel, ChatMessage, GameStateSnapshot, Player, Resources } from "../types";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -23,6 +23,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export interface MeResponse {
   playerId: string;
+  channelId: string | null;
   resources: Resources | null;
   apiKeyConnected: boolean;
 }
@@ -49,6 +50,13 @@ export const api = {
       token,
     ),
   getMap: (token: string) => request<GameStateSnapshot>("/map", {}, token),
+  getChannels: (token: string) => request<Channel[]>("/channels", {}, token),
+  joinChannel: (token: string, channelId: string) =>
+    request<{ channelId: string }>(
+      `/channels/${channelId}/join`,
+      { method: "POST", body: "{}" },
+      token,
+    ),
   getPlayers: (token: string) => request<Player[]>("/players", {}, token),
   getChatHistory: (token: string) => request<ChatMessage[]>("/chat/history", {}, token),
   sendChat: (token: string, message: string) =>

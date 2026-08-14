@@ -4,10 +4,13 @@ import type { GameAction } from "../models/types.js";
 /**
  * The complete, closed vocabulary the LLM is allowed to act through. These are
  * exposed to the model as OpenAI function/tool definitions - the model can
- * never affect game state through free text, only through one of these three
+ * never affect game state through free text, only through one of these four
  * structured calls, and every call is re-validated by the rule engine
  * (src/rules/ruleEngine.ts) before anything is applied.
  */
+
+const RESOURCE_ENUM = ["gold", "wood", "food", "stone", "iron"] as const;
+const STRUCTURE_ENUM = ["base", "farm", "sawmill", "barracks", "market", "mine"] as const;
 
 export const attackArgsSchema = z.object({
   unit_id: z.string().min(1),
@@ -15,17 +18,21 @@ export const attackArgsSchema = z.object({
 });
 
 export const tradeArgsSchema = z.object({
-  offer_resource: z.enum(["gold", "wood", "food"]),
+  offer_resource: z.enum(RESOURCE_ENUM),
   offer_amount: z.number().int().positive(),
-  request_resource: z.enum(["gold", "wood", "food"]),
+  request_resource: z.enum(RESOURCE_ENUM),
   request_amount: z.number().int().positive(),
   target_player_id: z.string().min(1),
 });
 
 export const buildArgsSchema = z.object({
-  structure_type: z.enum(["base", "farm", "sawmill", "barracks", "market"]),
+  structure_type: z.enum(STRUCTURE_ENUM),
   x: z.number().int().min(0),
   y: z.number().int().min(0),
+});
+
+export const recruitArgsSchema = z.object({
+  structure_id: z.string().min(1),
 });
 
 export const OPENAI_TOOLS = [
@@ -52,9 +59,9 @@ export const OPENAI_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          offer_resource: { type: "string", enum: ["gold", "wood", "food"] },
+          offer_resource: { type: "string", enum: RESOURCE_ENUM },
           offer_amount: { type: "number" },
-          request_resource: { type: "string", enum: ["gold", "wood", "food"] },
+          request_resource: { type: "string", enum: RESOURCE_ENUM },
           request_amount: { type: "number" },
           target_player_id: { type: "string" },
         },
@@ -72,18 +79,31 @@ export const OPENAI_TOOLS = [
     type: "function" as const,
     function: {
       name: "build",
-      description: "Kendi bolgenizde yeni bir yapi insa edin.",
+      description:
+        "Kendi bolgenizde yeni bir yapi insa edin. 'mine' sadece bilinen bir maden yatagi " +
+        "(dag karosu) uzerine kurulabilir ve o kaynaktan otomatik uretim baslatir.",
       parameters: {
         type: "object",
         properties: {
-          structure_type: {
-            type: "string",
-            enum: ["base", "farm", "sawmill", "barracks", "market"],
-          },
+          structure_type: { type: "string", enum: STRUCTURE_ENUM },
           x: { type: "number" },
           y: { type: "number" },
         },
         required: ["structure_type", "x", "y"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "recruit",
+      description: "Sahip oldugunuz bir kislada altin ve yiyecek harcayarak yeni bir asker egitin.",
+      parameters: {
+        type: "object",
+        properties: {
+          structure_id: { type: "string", description: "Askerin egitilecegi kendi kislanizin id'si." },
+        },
+        required: ["structure_id"],
       },
     },
   },
@@ -148,6 +168,14 @@ export function parseToolCall(call: ToolCall): ParsedAction {
           x: parsed.data.x,
           y: parsed.data.y,
         },
+        error: null,
+      };
+    }
+    case "recruit": {
+      const parsed = recruitArgsSchema.safeParse(raw);
+      if (!parsed.success) return { action: null, error: parsed.error.message };
+      return {
+        action: { type: "recruit", structureId: parsed.data.structure_id },
         error: null,
       };
     }

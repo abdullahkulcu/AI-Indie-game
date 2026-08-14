@@ -14,6 +14,8 @@ export function PlayerHud({ username, resources, tickNumber, apiKeyConnected }: 
       <span>Altin: {resources?.gold ?? "-"}</span>
       <span>Odun: {resources?.wood ?? "-"}</span>
       <span>Yiyecek: {resources?.food ?? "-"}</span>
+      <span>Tas: {resources?.stone ?? "-"}</span>
+      <span>Demir: {resources?.iron ?? "-"}</span>
       <span>Tick: {tickNumber}</span>
       <span className={apiKeyConnected ? "hud-badge hud-badge--ok" : "hud-badge hud-badge--warn"}>
         {apiKeyConnected ? "API baglandi" : "API baglanmadi"}

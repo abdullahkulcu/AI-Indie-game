@@ -4,6 +4,7 @@ import type { ChatMessage, ChatRole } from "../models/types.js";
 interface ChatRow {
   id: string;
   player_id: string;
+  channel_id: string;
   role: ChatRole;
   content: string;
   created_at: string;
@@ -13,6 +14,7 @@ function toMessage(row: ChatRow): ChatMessage {
   return {
     id: row.id,
     playerId: row.player_id,
+    channelId: row.channel_id,
     role: row.role,
     content: row.content,
     createdAt: row.created_at,
@@ -21,14 +23,15 @@ function toMessage(row: ChatRow): ChatMessage {
 
 export async function saveChatMessage(
   playerId: string,
+  channelId: string,
   role: ChatRole,
   content: string,
 ): Promise<ChatMessage> {
   const result = await pool.query<ChatRow>(
-    `INSERT INTO chat_messages (player_id, role, content)
-     VALUES ($1, $2, $3)
-     RETURNING id, player_id, role, content, created_at`,
-    [playerId, role, content],
+    `INSERT INTO chat_messages (player_id, channel_id, role, content)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, player_id, channel_id, role, content, created_at`,
+    [playerId, channelId, role, content],
   );
   return toMessage(result.rows[0]);
 }
@@ -37,7 +40,7 @@ const RECENT_CHAT_LIMIT = 20;
 
 export async function listRecentChat(playerId: string): Promise<ChatMessage[]> {
   const result = await pool.query<ChatRow>(
-    `SELECT id, player_id, role, content, created_at FROM chat_messages
+    `SELECT id, player_id, channel_id, role, content, created_at FROM chat_messages
      WHERE player_id = $1
      ORDER BY created_at DESC
      LIMIT $2`,

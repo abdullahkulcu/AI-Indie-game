@@ -45,6 +45,45 @@ body {
   margin: 0 0 0.5rem;
 }
 
+.channel-picker {
+  background: #1b263b;
+  padding: 2rem;
+  border-radius: 12px;
+  width: 400px;
+}
+
+.channel-picker h1 {
+  margin-top: 0;
+}
+
+.channel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.channel-list__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #0d1b2a;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.channel-list__name {
+  font-weight: 700;
+  display: block;
+}
+
+.channel-list__count {
+  color: #9aa5b1;
+  font-size: 0.8rem;
+}
+
 input,
 button {
   padding: 0.5rem 0.75rem;
@@ -122,9 +161,56 @@ button:hover {
   align-items: flex-start;
 }
 
+.map-grid-wrap {
+  position: relative;
+}
+
 .map-grid canvas {
   border-radius: 8px;
   border: 1px solid #415a77;
+  cursor: grab;
+  touch-action: none;
+}
+
+.map-grid:active canvas {
+  cursor: grabbing;
+}
+
+.map-pan-controls {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(3, 2rem);
+  grid-template-rows: repeat(3, 2rem);
+  gap: 2px;
+}
+
+.map-pan-controls button {
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.map-pan-controls__n {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.map-pan-controls__w {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.map-pan-controls__e {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.map-pan-controls__s {
+  grid-column: 2;
+  grid-row: 3;
 }
 
 .chat-panel {

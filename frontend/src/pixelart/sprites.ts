@@ -17,7 +17,7 @@ import { CROP, METAL, OUTLINE, SKIN, STONE, THATCH, WALL, WOOD } from "./palette
 const BUILDING_SCALE = 4;
 const UNIT_SCALE = 3;
 
-export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market";
+export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market" | "mine";
 export type UnitType = "army" | "caravan";
 
 const BUILDING_LEGEND: Legend = {
@@ -36,6 +36,7 @@ const BUILDING_LEGEND: Legend = {
   n: STONE.light,
   C: WOOD.mid,
   P: WOOD.mid,
+  K: STONE.dark,
 };
 
 const BUILDINGS: Record<StructureType, string[]> = {
@@ -119,6 +120,24 @@ const BUILDINGS: Record<StructureType, string[]> = {
     "P.CCCCCCCCCC.P",
     "P............P",
     "PPPPPPPPPPPPPP",
+  ],
+  // Mine: a timber-shored shaft entrance under a small A-frame headframe -
+  // deliberately doesn't hint at which resource (stone/iron/gold) it works,
+  // since that's a property of the deposit tile it's built on, not the
+  // building itself.
+  mine: [
+    "........$......",
+    "........O......",
+    ".......OWO.....",
+    "......OW.WO....",
+    ".OOOOOOW.WOOOO.",
+    "OWWWWWWW.WWWWWO",
+    "OwWWWKKKKKWWWwO",
+    "OWWWWKKKKKWWWWO",
+    "OwWWWKKKKKWWWwO",
+    "OWWWWWWWWWWWWWO",
+    "OLLLLLLLLLLLLLO",
+    ".OOOOOOOOOOOOO.",
   ],
 };
 

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth/authPlugin.js";
 import { listRecentChat } from "../repositories/chatRepository.js";
-import { runPlayerTurn } from "../game/playerTurnService.js";
+import { runPlayerTurn, NoChannelError } from "../game/playerTurnService.js";
 
 const sendSchema = z.object({ message: z.string().min(1).max(2000) });
 
@@ -21,6 +21,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       const result = await runPlayerTurn(request.playerId as string, body.data.message);
       return reply.send(result);
     } catch (err) {
+      if (err instanceof NoChannelError) {
+        return reply.code(409).send({ error: err.message });
+      }
       request.log.error({ err }, "chat/send failed");
       return reply.code(502).send({ error: "Generaliniz su anda karar veremiyor, tekrar deneyin." });
     }

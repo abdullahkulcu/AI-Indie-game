@@ -1,12 +1,12 @@
 import { pool } from "../db/pool.js";
-import type { Player, Resources } from "../models/types.js";
+import type { Player, Resources, ResourceType } from "../models/types.js";
 import type { EncryptedSecret } from "../crypto/keyVault.js";
 
 interface PlayerRow {
   id: string;
   username: string;
   email: string;
-  password_hash: string;
+  channel_id: string | null;
   created_at: string;
 }
 
@@ -15,41 +15,32 @@ function toPlayer(row: PlayerRow): Player {
     id: row.id,
     username: row.username,
     email: row.email,
+    channelId: row.channel_id,
     createdAt: row.created_at,
   };
 }
+
+const PLAYER_COLUMNS = "id, username, email, channel_id, created_at";
 
 export async function createPlayer(
   username: string,
   email: string,
   passwordHash: string,
 ): Promise<Player> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<PlayerRow>(
-      `INSERT INTO players (username, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, username, email, created_at`,
-      [username, email, passwordHash],
-    );
-    const player = result.rows[0];
-    await client.query(`INSERT INTO resources (player_id) VALUES ($1)`, [player.id]);
-    await client.query("COMMIT");
-    return toPlayer(player);
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
+  const result = await pool.query<PlayerRow>(
+    `INSERT INTO players (username, email, password_hash)
+     VALUES ($1, $2, $3)
+     RETURNING ${PLAYER_COLUMNS}`,
+    [username, email, passwordHash],
+  );
+  return toPlayer(result.rows[0]);
 }
 
 export async function findPlayerByEmailWithHash(
   email: string,
 ): Promise<(Player & { passwordHash: string }) | null> {
-  const result = await pool.query<PlayerRow>(
-    `SELECT id, username, email, password_hash, created_at FROM players WHERE email = $1`,
+  const result = await pool.query<PlayerRow & { password_hash: string }>(
+    `SELECT ${PLAYER_COLUMNS}, password_hash FROM players WHERE email = $1`,
     [email],
   );
   const row = result.rows[0];
@@ -58,20 +49,53 @@ export async function findPlayerByEmailWithHash(
 }
 
 export async function findPlayerById(id: string): Promise<Player | null> {
-  const result = await pool.query<PlayerRow>(
-    `SELECT id, username, email, created_at FROM players WHERE id = $1`,
-    [id],
-  );
+  const result = await pool.query<PlayerRow>(`SELECT ${PLAYER_COLUMNS} FROM players WHERE id = $1`, [
+    id,
+  ]);
   const row = result.rows[0];
   return row ? toPlayer(row) : null;
 }
 
-export async function listPlayers(): Promise<Player[]> {
+export async function listPlayersInChannel(channelId: string): Promise<Player[]> {
   const result = await pool.query<PlayerRow>(
-    `SELECT id, username, email, created_at FROM players ORDER BY created_at ASC`,
+    `SELECT ${PLAYER_COLUMNS} FROM players WHERE channel_id = $1 ORDER BY created_at ASC`,
+    [channelId],
   );
   return result.rows.map(toPlayer);
 }
+
+/** Assigns a player to a channel - a one-way move for this MVP (no leaving
+ * or switching channels once joined). */
+export async function setPlayerChannel(playerId: string, channelId: string): Promise<void> {
+  await pool.query(`UPDATE players SET channel_id = $1 WHERE id = $2`, [channelId, playerId]);
+}
+
+export async function createResources(playerId: string, channelId: string): Promise<void> {
+  await pool.query(`INSERT INTO resources (player_id, channel_id) VALUES ($1, $2)`, [
+    playerId,
+    channelId,
+  ]);
+}
+
+function toResources(row: {
+  player_id: string;
+  gold: number;
+  wood: number;
+  food: number;
+  stone: number;
+  iron: number;
+}): Resources {
+  return {
+    playerId: row.player_id,
+    gold: row.gold,
+    wood: row.wood,
+    food: row.food,
+    stone: row.stone,
+    iron: row.iron,
+  };
+}
+
+const RESOURCE_COLUMNS = "player_id, gold, wood, food, stone, iron";
 
 export async function getResources(playerId: string): Promise<Resources | null> {
   const result = await pool.query<{
@@ -79,30 +103,28 @@ export async function getResources(playerId: string): Promise<Resources | null> 
     gold: number;
     wood: number;
     food: number;
-  }>(`SELECT player_id, gold, wood, food FROM resources WHERE player_id = $1`, [playerId]);
+    stone: number;
+    iron: number;
+  }>(`SELECT ${RESOURCE_COLUMNS} FROM resources WHERE player_id = $1`, [playerId]);
   const row = result.rows[0];
-  if (!row) return null;
-  return { playerId: row.player_id, gold: row.gold, wood: row.wood, food: row.food };
+  return row ? toResources(row) : null;
 }
 
-export async function listResources(): Promise<Resources[]> {
+export async function listResourcesInChannel(channelId: string): Promise<Resources[]> {
   const result = await pool.query<{
     player_id: string;
     gold: number;
     wood: number;
     food: number;
-  }>(`SELECT player_id, gold, wood, food FROM resources`);
-  return result.rows.map((row) => ({
-    playerId: row.player_id,
-    gold: row.gold,
-    wood: row.wood,
-    food: row.food,
-  }));
+    stone: number;
+    iron: number;
+  }>(`SELECT ${RESOURCE_COLUMNS} FROM resources WHERE channel_id = $1`, [channelId]);
+  return result.rows.map(toResources);
 }
 
 export async function adjustResources(
   playerId: string,
-  delta: Partial<Record<"gold" | "wood" | "food", number>>,
+  delta: Partial<Record<ResourceType, number>>,
 ): Promise<void> {
   const sets: string[] = [];
   const values: Array<number | string> = [];

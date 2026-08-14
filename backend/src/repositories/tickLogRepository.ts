@@ -1,14 +1,16 @@
 import { pool } from "../db/pool.js";
 import type { ActionLogEntry, ActionStatus, GameAction } from "../models/types.js";
 
-export async function nextTickNumber(): Promise<number> {
+export async function nextTickNumber(channelId: string): Promise<number> {
   const result = await pool.query<{ max: number | null }>(
-    `SELECT MAX(tick_number) as max FROM tick_logs`,
+    `SELECT MAX(tick_number) as max FROM tick_logs WHERE channel_id = $1`,
+    [channelId],
   );
   return (result.rows[0]?.max ?? 0) + 1;
 }
 
 export async function recordTick(
+  channelId: string,
   tickNumber: number,
   actions: Array<{ playerId: string; action: GameAction; status: ActionStatus; reason: string | null }>,
 ): Promise<void> {
@@ -16,14 +18,16 @@ export async function recordTick(
   try {
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO tick_logs (tick_number) VALUES ($1) ON CONFLICT (tick_number) DO NOTHING`,
-      [tickNumber],
+      `INSERT INTO tick_logs (channel_id, tick_number) VALUES ($1, $2)
+       ON CONFLICT (channel_id, tick_number) DO NOTHING`,
+      [channelId, tickNumber],
     );
     for (const entry of actions) {
       await client.query(
-        `INSERT INTO action_log_entries (tick_number, player_id, action_type, payload, status, reason)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO action_log_entries (channel_id, tick_number, player_id, action_type, payload, status, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
+          channelId,
           tickNumber,
           entry.playerId,
           entry.action.type,
@@ -42,7 +46,7 @@ export async function recordTick(
   }
 }
 
-export async function recentActionLog(limit = 50): Promise<ActionLogEntry[]> {
+export async function recentActionLog(channelId: string, limit = 50): Promise<ActionLogEntry[]> {
   const result = await pool.query<{
     id: string;
     tick_number: number;
@@ -54,8 +58,8 @@ export async function recentActionLog(limit = 50): Promise<ActionLogEntry[]> {
     created_at: string;
   }>(
     `SELECT id, tick_number, player_id, action_type, payload, status, reason, created_at
-     FROM action_log_entries ORDER BY created_at DESC LIMIT $1`,
-    [limit],
+     FROM action_log_entries WHERE channel_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [channelId, limit],
   );
   return result.rows.map((row) => ({
     id: row.id,

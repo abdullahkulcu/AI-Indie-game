@@ -47,14 +47,12 @@ olmayan bir seye bagimli olmaz.
 1. **Oyun ici geri bildirim dongusu**: birim olumu/saldiri/insa olaylarinin
    frontend'de gorsel/animasyonlu bildirimi (su an sadece state snapshot'i
    yeniden ciziliyor).
-2. **Coklu model/lig sistemi**: `src/llm/openaiProvider.ts` zaten tek bir
+2. **Coklu model sistemi**: `src/llm/openaiProvider.ts` zaten tek bir
    `requestStrategicDecision(apiKey, messages)` arayuzu etrafinda izole
    edildi. Ikinci bir saglayici eklemek icin:
    - Ayni imzaya sahip yeni bir `anthropicProvider.ts` (veya benzeri) yazin.
    - `llmOrchestrator.ts` icine `provider` parametresi ekleyip saglayiciyi
      `player_api_keys.provider` kolonuna gore secin (kolon zaten var).
-   - "Lig" kavrami icin oyuncu bazinda saglayici/model tercihini ayri bir
-     tabloya tasiyin; MVP'de bu bilgi zaten `player_api_keys.provider`'da.
 3. **Yeni aksiyon tipi eklemek** (orn. `scout` / `fortify`):
    - `src/models/types.ts`: `GameAction` union'ina yeni tip ekleyin.
    - `src/llm/actionSchema.ts`: zod semasi + OpenAI tool tanimi + parse dali.
@@ -63,22 +61,62 @@ olmayan bir seye bagimli olmaz.
    - `src/game/tickService.ts`: `applyAction` icine efekt.
 4. **Odeme/abonelik sistemi**: kapsam disi kalmaya devam eder; eklenecekse
    `players` tablosuna `plan` kolonu ve ayri bir billing servisi onerilir.
-5. **Fog of war / gorunurluk kisitlari**: su an tum birimler herkese
-   gorunuyor (`promptBuilder.ts` -> `playerContext`). Kisitlamak icin
-   Chebyshev mesafesine gore filtreleme eklemek yeterli.
-6. **Gelismis grafik/animasyon, mobil uyum**: kapsam disi (bkz. ana prompt).
-7. **Oyuncular arasi serbest chat/diplomasi**: kapsam disi; eklenirse ayri
+5. **Tam fog of war**: su an sadece maden yataklari "yakinlik" ile
+   kisitlaniyor (`mapService.findNearbyDeposits`); dusman birim/yapi
+   gorunurlugu de ayni mantikla (Chebyshev mesafesi) kisitlanabilir.
+6. **Otomatik acilan/kapanan kanallar**: su an sabit sayida kanal var
+   (`schema.sql`'deki INSERT). Dinamik acilis/kapanis icin `channels`
+   tablosuna bir `status` kolonu + kanal doluluk kontrolunde otomatik
+   olusturma mantigi eklenebilir.
+7. **Gelismis grafik/animasyon, mobil uyum**: kapsam disi (bkz. ana prompt).
+8. **Oyuncular arasi serbest chat/diplomasi**: kapsam disi; eklenirse ayri
    bir `player_messages` tablosu + moderasyon katmani gerekir.
 
 ## 3. Bilinen MVP kisitlamalari (bilinclidir, kapsam geregi)
 
-- Tek harita/instance, coklu oda yok.
+- Kanal sayisi sabit (3), otomatik acilip kapanmiyor - "coklu kanal" var ama
+  Discord tarzi dinamik degil (bkz. yukaridaki yol haritasi maddesi).
+- Harita 300x300 sabit boyutta, gercek anlamda sonsuz/chunk-bazli degil;
+  terrain'in `(seed, x, y)`'nin saf fonksiyonu olmasi (bkz. `mapService.ts`)
+  pratikte "sinira hicbir zaman ulasilamaz" hissini ucuza veriyor.
+- Maden yatagi yogunlugu ayarlanmadi (butun dag karolari bir yatak tasiyor);
+  Stronghold'daki gibi az sayida "kiymetli" maden yeri hissi icin
+  `depositFor`'daki olasiliklar/terrain esikleri ayarlanabilir.
 - Trade aksiyonu pazarlik icermez: iki tarafin da kaynagi varsa aninda
   gerceklesir (karsi tarafin onayi yok).
 - LLM cagrisi basarisiz olursa (rate limit, gecersiz anahtar, ag hatasi) o
   oyuncunun turu sessizce atlanir; diger oyuncular ve tick etkilenmez.
 - Redis, tick dongusunde tam bir Postgres-yerine-gecen state store degil;
-  sadece "guncel tick numarasi" ve kisa sureli snapshot cache'i icin
-  kullanilir (bkz. `src/game/gameStateService.ts`). Bu olcekte (<=8 oyuncu,
-  20x20 harita) her tick'te Postgres'ten tam yeniden yukleme yeterince
-  ucuzdur; ölçek buyudukce Redis'in rolu genisletilebilir.
+  sadece kanal basina "guncel tick numarasi" ve kisa sureli snapshot cache'i
+  icin kullanilir (bkz. `src/game/gameStateService.ts`). Bu olcekte (kanal
+  basina <=8 oyuncu) her tick'te Postgres'ten tam yeniden yukleme yeterince
+  ucuzdur.
+
+## 4. Ikinci tur degisiklikler (izometrik + buyuk harita + ekonomi)
+
+Ilk MVP'den sonra, kullanici talebiyle asagidakiler eklendi - bu, "harita
+sinirsiz olsun, kanallara giren oyuncular rastgele baslasin, madencilik +
+ticaretle asker basma, Stronghold Crusader'a yakin bir his" istegine cevaben
+yapildi:
+
+- **Kanallar** (`channels` tablosu, `channelRepository.ts`,
+  `routes/channelRoutes.ts`): sabit sayida lobi, her biri kendi haritasi
+  (farkli seed) ve tick dongusuyle.
+- **Buyuk harita, sifir bulk depolama**: `tiles` tablosu kaldirildi, yerine
+  sadece sahiplik iddialarini tutan `tile_claims` geldi; terrain/maden
+  `mapService.terrainFor`/`depositFor` ile hesaplanir - hem backend hem
+  frontend (`frontend/src/game/terrainMap.ts`) ayni algoritmayi calistirir.
+  Bu yuzden harita boyutu (300x300) network/DB maliyetine hemen hemen hic
+  yansimaz.
+- **Rastgele baslangic konumu**: `mapService.randomStartingPosition` -
+  diger oyunculardan en az bir minimum mesafede rastgele bir duz arazi
+  karosu secer (mesafe gereksinimini kademeli gevseterek).
+- **Madencilik**: `mine` yapi tipi, sadece bir maden yatagi (dag karosu)
+  uzerine kurulabilir; her tick otomatik olarak o kaynaktan uretim yapar
+  (`tickService.applyMiningIncome`).
+- **Asker basma**: `recruit` aksiyonu - sahip olunan bir kislada altin+yiyecek
+  harcayarak yeni bir army birimi egitir.
+- **Kamera/viewport**: `MapGrid.tsx` artik butun haritayi degil, oyuncunun
+  konumu etrafinda pannable (surukle-birak + yon butonlari) bir pencere
+  render ediyor - 300x300'luk bir izometrik haritayi tek seferde cizmek
+  pratik olmadigi icin.
