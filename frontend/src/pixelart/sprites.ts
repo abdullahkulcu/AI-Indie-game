@@ -15,7 +15,12 @@ import { CROP, METAL, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./pal
  * dwarfs a soldier standing next to it. */
 
 export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market" | "mine";
-export type UnitType = "army" | "caravan";
+export type UnitType = "army" | "caravan" | "mob";
+
+/** Wild mobs have no owner/accent color - a fixed, dull, hostile tone marks
+ * them as neutral wildlife/bandits rather than a recolorable player unit. */
+const MOB_TONE = { dark: "#3a2e22", mid: "#5a4636", light: "#7a5f42" };
+const MOB_EYE = "#e63946";
 
 const BUILDING_W = 116;
 const BUILDING_H = 138;
@@ -402,9 +407,54 @@ function drawCaravan(ctx: CanvasRenderingContext2D, accent: string): void {
   ctx.fill();
 }
 
+function drawMob(ctx: CanvasRenderingContext2D): void {
+  const cx = UNIT_W / 2;
+  const bottomY = UNIT_H - 6;
+
+  groundShadow(ctx, cx, bottomY, 14, 4.5);
+
+  ctx.fillStyle = "#1a140e";
+  roundRect(ctx, cx - 8, bottomY - 18, 6, 18, 2);
+  ctx.fill();
+  roundRect(ctx, cx + 2, bottomY - 18, 6, 18, 2);
+  ctx.fill();
+
+  const bodyTop = bottomY - 44;
+  const bodyH = 28;
+  roundRect(ctx, cx - 12, bodyTop, 24, bodyH, 6);
+  ctx.fillStyle = verticalFill(ctx, 0, bodyTop, bodyH, MOB_TONE.mid, MOB_TONE.dark);
+  ctx.fill();
+
+  // Hooded head with glowing eyes - reads as a hostile silhouette at a
+  // glance, distinct from the helmeted player soldier.
+  ctx.fillStyle = MOB_TONE.dark;
+  ctx.beginPath();
+  ctx.arc(cx, bodyTop - 9, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = MOB_EYE;
+  ctx.beginPath();
+  ctx.arc(cx - 3, bodyTop - 9, 1.6, 0, Math.PI * 2);
+  ctx.arc(cx + 3, bodyTop - 9, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  const clubX = cx + 15;
+  ctx.strokeStyle = WOOD.dark;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(clubX, bodyTop + 4);
+  ctx.lineTo(clubX + 2, bodyTop - 14);
+  ctx.stroke();
+  ctx.fillStyle = STONE.dark;
+  ctx.beginPath();
+  ctx.arc(clubX + 2, bodyTop - 17, 5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 const UNIT_PAINTERS: Record<UnitType, (ctx: CanvasRenderingContext2D, accent: string) => void> = {
   army: drawArmy,
   caravan: drawCaravan,
+  mob: drawMob,
 };
 
 export function getBuildingTexture(type: StructureType, accent: string): Texture {

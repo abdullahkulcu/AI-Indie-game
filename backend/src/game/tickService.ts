@@ -7,6 +7,7 @@ import type {
 } from "../models/types.js";
 import { validateAction, BUILD_COSTS, RECRUIT_COST } from "../rules/ruleEngine.js";
 import { applyCombat, advanceAutonomousUnits } from "./stateMachine.js";
+import { ensureChannelMobs } from "./mobService.js";
 import { depositFor, terrainFor } from "./mapService.js";
 import { loadSnapshot, cacheSnapshot, setCurrentTickNumber } from "./gameStateService.js";
 import { nextTickNumber, recordTick } from "../repositories/tickLogRepository.js";
@@ -166,14 +167,16 @@ export interface TickResult {
 }
 
 /** Runs one full simulation tick for one channel:
- *  1) autonomous FSM step (retaliation, task repetition) for every unit
- *  2) passive mining income
- *  3) one LLM strategic evaluation per player (periodic - not a continuous loop)
- *  4) every candidate action re-validated by the rule engine before it is applied
- *  5) persist + return the resulting snapshot for broadcast
+ *  1) top the channel's wild mob population back up to its target count
+ *  2) autonomous FSM step (retaliation, task repetition) for every unit
+ *  3) passive mining income
+ *  4) one LLM strategic evaluation per player (periodic - not a continuous loop)
+ *  5) every candidate action re-validated by the rule engine before it is applied
+ *  6) persist + return the resulting snapshot for broadcast
  */
 export async function runTick(channel: Channel): Promise<TickResult> {
   const tickNumber = await nextTickNumber(channel.id);
+  await ensureChannelMobs(channel);
   let snapshot = await loadSnapshot(channel, tickNumber);
 
   const autonomous = advanceAutonomousUnits(snapshot.units, tickNumber);

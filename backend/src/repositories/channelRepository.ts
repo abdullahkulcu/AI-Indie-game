@@ -34,3 +34,13 @@ export async function countPlayersInChannel(channelId: string): Promise<number> 
   return Number(result.rows[0]?.count ?? 0);
 }
 
+/** Grows a channel's map as its population grows (never shrinks - GREATEST
+ * guards against this being called with a smaller size than what's already
+ * stored, e.g. out-of-order concurrent joins). */
+export async function growMapSize(channelId: string, newSize: number): Promise<void> {
+  await pool.query(`UPDATE channels SET map_size = GREATEST(map_size, $1) WHERE id = $2`, [
+    newSize,
+    channelId,
+  ]);
+}
+

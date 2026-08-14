@@ -193,3 +193,35 @@ Duzeltme:
   dovusun bir tarafin olumune kadar dogru ilerledigi uctan uca dogrulandi;
   `unitRepository.assignTask`'in gercek Postgres'e dogru persist ettigi
   (state/assigned_task/target_unit_id) ayrica test edildi.
+
+## 7. Populasyona gore buyuyen harita + varsayilan yaban mob'lar
+
+Kullanicinin "harita birileri katilinca mi genisleyecek, birde default olarak
+her kanalda 4-5 mob olsun" isteklerine cevaben:
+
+- **Populasyona gore buyuyen harita** (`mapService.mapSizeForPlayerCount`,
+  `channelRepository.growMapSize`): bir kanal artik ilk katilimda 500x500'un
+  tamamini acmiyor - `map_size = min(500, 100 + oyuncu_sayisi * 50)` formuluyle
+  kucuk baslayip (100x100, 1 oyuncu icin 150x150) her yeni katilimda buyuyor,
+  8 oyuncuda (kanalin maksimumu) tam 500x500'e ulasiyor. `growMapSize`
+  `GREATEST` kullanir, yani hicbir zaman kuculmez; zaten yerlestirilmis
+  yapi/birimler etkilenmez (harita buyumesi sadece yeni baslangic/insa
+  sinirini genisletir, terrain fonksiyonu zaten sinirsizdi). Dogrulama:
+  gercek API uzerinden ardisik iki oyuncu katilimi ile `channels.map_size`'in
+  100 -> 150 -> 200 sekilde buyudugu Postgres'te dogrudan gozlemlendi.
+- **Varsayilan yaban mob'lar** (`mobService.ts`, yeni `unitRepository.
+  countAliveMobs`): her kanalda her zaman ~5 sahipsiz (`owner_player_id =
+  NULL`), dusmanca birim ("mob") bulunur - `runTick` her calistiginda
+  `ensureChannelMobs` canli mob sayisini hedefe tamamlar, yani oldurulen
+  mob'lar otomatik yenileniyor. Mob'lar oyuncuyu aramaz, sadece saldirilirsa
+  karsilik verir (mevcut otonom FSM/auto-retaliation degismeden calisir -
+  sahiplik kontrolu yapmiyordu zaten). Bu, baska bir oyuncuya ulasamadan once
+  bile "asker basip savasilacak bir sey" saglar. `units.owner_player_id`
+  sutunu NULL'a izin verecek sekilde genisletildi (schema.sql'e idempotent
+  `ALTER TABLE ... DROP NOT NULL` eklendi); rule engine/LLM tarafinda ekstra
+  degisiklik gerekmedi çünkü butun sahiplik kontrolleri zaten `ownerPlayerId
+  === playerId` sekilinde - null bir mob'u otomatik olarak "dusman" yapiyor.
+  Frontend'de mob'lar icin ayri, hesap rengi kullanmayan sabit bir "vahsi"
+  sprite (kukuletali, kirmizi gozlu, sopali siluet) eklendi. Dogrulama:
+  gercek Postgres'e karsi mob sayisinin 5'e tamamlandigi ve tarayicida
+  ayirt edilebilir sekilde render edildigi goruldu.

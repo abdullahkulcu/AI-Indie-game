@@ -1,6 +1,17 @@
 import { MAP_SIZE } from "../models/types.js";
 import type { DepositType, Region, TileTerrain } from "../models/types.js";
 
+/** A channel's usable map starts small and grows with its population instead
+ * of exposing the full 500x500 from the first join - less empty space to
+ * wander for an early, mostly-empty channel, while a full 8-player channel
+ * still gets the whole map. Never shrinks (see channelRepository.growMapSize). */
+const MIN_CHANNEL_MAP_SIZE = 100;
+const MAP_SIZE_GROWTH_PER_PLAYER = 50;
+
+export function mapSizeForPlayerCount(playerCount: number): number {
+  return Math.min(MAP_SIZE, MIN_CHANNEL_MAP_SIZE + playerCount * MAP_SIZE_GROWTH_PER_PLAYER);
+}
+
 /** Terrain (and resource deposits) for the big fixed-size map are a pure
  * function of (channel seed, x, y), never stored per-tile - that's what
  * makes a 500x500 map cheap: there is nothing to pre-seed, and no per-tile

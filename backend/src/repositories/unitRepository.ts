@@ -3,7 +3,7 @@ import type { AssignedTask, Unit, UnitState, UnitType } from "../models/types.js
 
 interface UnitRow {
   id: string;
-  owner_player_id: string;
+  owner_player_id: string | null;
   channel_id: string;
   type: UnitType;
   x: number;
@@ -48,7 +48,7 @@ export async function listUnits(channelId: string): Promise<Unit[]> {
 }
 
 export async function spawnUnit(
-  ownerPlayerId: string,
+  ownerPlayerId: string | null,
   channelId: string,
   type: UnitType,
   x: number,
@@ -102,6 +102,16 @@ export async function saveUnits(units: Unit[]): Promise<void> {
 export async function removeDeadUnits(unitIds: string[]): Promise<void> {
   if (unitIds.length === 0) return;
   await pool.query(`DELETE FROM units WHERE id = ANY($1::uuid[])`, [unitIds]);
+}
+
+/** How many wild mobs are currently alive in a channel - used to top the
+ * population back up to the target count each tick (see mobService.ts). */
+export async function countAliveMobs(channelId: string): Promise<number> {
+  const result = await pool.query(
+    `SELECT count(*) FROM units WHERE channel_id = $1 AND type = 'mob' AND hp > 0`,
+    [channelId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
 }
 
 export async function assignTask(unitId: string, task: AssignedTask | null): Promise<void> {

@@ -74,7 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_structures_channel ON structures(channel_id);
 
 CREATE TABLE IF NOT EXISTS units (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  -- NULL owner = a wild, neutral-hostile mob (not controlled by any player).
+  owner_player_id UUID REFERENCES players(id) ON DELETE CASCADE,
   channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   x INTEGER NOT NULL,
@@ -91,6 +92,10 @@ CREATE TABLE IF NOT EXISTS units (
 
 CREATE INDEX IF NOT EXISTS idx_units_channel ON units(channel_id);
 CREATE INDEX IF NOT EXISTS idx_units_owner ON units(channel_id, owner_player_id);
+
+-- Widens an existing units table (from before mobs existed) to allow a NULL
+-- owner - a no-op if the column is already nullable.
+ALTER TABLE units ALTER COLUMN owner_player_id DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS chat_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -126,9 +131,11 @@ CREATE TABLE IF NOT EXISTS action_log_entries (
 CREATE INDEX IF NOT EXISTS idx_action_log_channel_tick ON action_log_entries(channel_id, tick_number);
 
 -- Fixed lobby list. Each channel gets a distinct seed so their maps look
--- different; safe to re-run (ON CONFLICT DO NOTHING).
+-- different; safe to re-run (ON CONFLICT DO NOTHING). map_size starts small
+-- and grows with population (see onboarding.ts/mapService.mapSizeForPlayerCount)
+-- rather than exposing the full 500x500 map to a channel's first player.
 INSERT INTO channels (name, map_size, max_players, seed) VALUES
-  ('Kanal 1', 500, 8, 1),
-  ('Kanal 2', 500, 8, 2),
-  ('Kanal 3', 500, 8, 3)
+  ('Kanal 1', 100, 8, 1),
+  ('Kanal 2', 100, 8, 2),
+  ('Kanal 3', 100, 8, 3)
 ON CONFLICT (name) DO NOTHING;

@@ -1,9 +1,8 @@
-import { getChannel, countPlayersInChannel } from "../repositories/channelRepository.js";
+import { getChannel, countPlayersInChannel, growMapSize } from "../repositories/channelRepository.js";
 import { setPlayerChannel, createResources } from "../repositories/playerRepository.js";
 import { claimTile, insertStructure, listStructures } from "../repositories/mapRepository.js";
 import { spawnUnit } from "../repositories/unitRepository.js";
-import { randomStartingPosition } from "./mapService.js";
-import { MAP_SIZE } from "../models/types.js";
+import { randomStartingPosition, mapSizeForPlayerCount } from "./mapService.js";
 
 export class ChannelJoinError extends Error {}
 
@@ -19,10 +18,18 @@ export async function joinChannel(playerId: string, channelId: string): Promise<
     throw new ChannelJoinError(`Kanal dolu: en fazla ${channel.maxPlayers} oyuncu.`);
   }
 
+  // The map grows with the channel's population rather than exposing the
+  // full 500x500 from the first join - see mapService.mapSizeForPlayerCount.
+  const grownMapSize = mapSizeForPlayerCount(playerCount + 1);
+  const effectiveMapSize = Math.max(channel.mapSize, grownMapSize);
+  if (grownMapSize > channel.mapSize) {
+    await growMapSize(channelId, grownMapSize);
+  }
+
   const existingBases = (await listStructures(channelId))
     .filter((s) => s.type === "base")
     .map((s) => ({ x: s.x, y: s.y }));
-  const { x, y } = randomStartingPosition(channel.seed, existingBases, channel.mapSize ?? MAP_SIZE);
+  const { x, y } = randomStartingPosition(channel.seed, existingBases, effectiveMapSize);
 
   await setPlayerChannel(playerId, channelId);
   await createResources(playerId, channelId);

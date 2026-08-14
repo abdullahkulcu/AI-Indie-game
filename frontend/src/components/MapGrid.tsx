@@ -13,6 +13,9 @@ const TOP_MARGIN = 90; // room for buildings/units poking up above the top row
  * itself is up to 500x500, but only this window is ever built into sprites.
  * Kept smaller than before since tiles now render at a bigger pixel size. */
 const VIEW_RADIUS = 7;
+/** Fixed "accent" for ownerless mob units - matches the hostile tone drawn in
+ * sprites.ts (MOB_TONE.mid) so mobs never need a real player color. */
+const MOB_ACCENT = "#5a4636";
 
 function isoX(x: number, y: number): number {
   return (x - y) * (TILE_W / 2);
@@ -196,7 +199,7 @@ export function MapGrid({ snapshot, selfPlayerId, onTileClick }: MapGridProps) {
         entities.push({
           depth: unit.x + unit.y + 0.5, // units render just in front of a building on the same tile
           build: () => {
-            const accent = colorForPlayer(unit.ownerPlayerId, playerIds);
+            const accent = unit.ownerPlayerId ? colorForPlayer(unit.ownerPlayerId, playerIds) : MOB_ACCENT;
             const texture = getUnitTexture(unit.type, accent);
             const unitSprite = new Sprite(texture);
             unitSprite.anchor.set(0.5, 1);

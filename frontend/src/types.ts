@@ -2,7 +2,7 @@ export type ResourceType = "gold" | "wood" | "food" | "stone" | "iron";
 export type TileTerrain = "plains" | "forest" | "mountain" | "water" | "desert" | "oasis";
 export type StructureType = "base" | "farm" | "sawmill" | "barracks" | "market" | "mine";
 export type UnitState = "idle" | "moving" | "attacking" | "retaliating" | "executing_task";
-export type UnitType = "army" | "caravan";
+export type UnitType = "army" | "caravan" | "mob";
 
 export interface Channel {
   id: string;
@@ -48,7 +48,8 @@ export interface Structure {
 
 export interface Unit {
   id: string;
-  ownerPlayerId: string;
+  /** Null for a wild, neutral-hostile "mob" unit. */
+  ownerPlayerId: string | null;
   type: UnitType;
   x: number;
   y: number;

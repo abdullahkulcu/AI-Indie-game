@@ -72,7 +72,7 @@ export interface Structure {
  * LLM only ever sets `assignedTask` / issues one-off orders via validated actions. */
 export type UnitState = "idle" | "moving" | "attacking" | "retaliating" | "executing_task";
 
-export type UnitType = "army" | "caravan";
+export type UnitType = "army" | "caravan" | "mob";
 
 export interface AssignedTask {
   kind: "patrol" | "hold_position" | "raid" | "escort_trade";
@@ -83,7 +83,9 @@ export interface AssignedTask {
 
 export interface Unit {
   id: string;
-  ownerPlayerId: string;
+  /** Null for a wild, neutral-hostile "mob" unit - nobody's general can
+   * command it, it only fights back if attacked. */
+  ownerPlayerId: string | null;
   channelId: string;
   type: UnitType;
   x: number;

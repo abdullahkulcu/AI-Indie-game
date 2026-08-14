@@ -29,7 +29,14 @@ frontend/  React + TypeScript + Vite + PixiJS (2D grid render)
 - **Kanallar** (`backend/src/repositories/channelRepository.ts`): sabit sayida
   (varsayilan 3, `schema.sql`'de tanimli) lobi/oda. Her kanalin kendi haritasi
   (farkli bir `seed`), oyunculari ve tick dongusu var; `GET /channels` +
-  `POST /channels/:id/join` ile katilinir (bkz. `game/onboarding.ts`).
+  `POST /channels/:id/join` ile katilinir (bkz. `game/onboarding.ts`). Bir
+  kanalin haritasi ilk katilimda tam 500x500 acilmaz - `map_size = min(500,
+  100 + oyuncu_sayisi * 50)` ile populasyona gore buyur (hic kuculmez).
+- **Yaban mob'lar** (`backend/src/game/mobService.ts`): her kanalda her zaman
+  ~5 sahipsiz (`owner_player_id = NULL`), dusmanca birim bulunur - oldurulen
+  mob'lar bir sonraki tick'te otomatik yenilenir. Baska bir oyuncuya
+  ulasamadan once bile pratik yapmak/kaynak kazanmak icin uzerlerine
+  `assign_task`(raid) verilebilir; onlar sadece saldirilirsa karsilik verir.
 - **Buyuk harita, sifir bulk depolama** (`backend/src/game/mapService.ts`):
   terrain ve maden yataklari `(seed, x, y)`'nin saf bir fonksiyonu - hicbir
   tile onceden DB'ye yazilmiyor, sadece sahiplik iddialari (`tile_claims`)

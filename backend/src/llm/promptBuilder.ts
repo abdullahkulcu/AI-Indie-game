@@ -22,6 +22,10 @@ Birimler birbirinden uzaktaysa (cogunlukla oyle olur, harita cok buyuk) once
 'assign_task' ile birimi hedefe dogru yurutmen gerekir - 'raid' gorevi yol
 uzerinde menzile giren dusmana otomatik saldirir, 'patrol' sadece hedefe gidip
 bekler. Bir birim yurumeden asla dusmana ulasamaz.
+Haritada, sahibi olmayan (ownerPlayerId=null, type='mob') vahsi ve dusmanca
+birimler de var - baska bir oyuncu ile karsilasmadan once pratik yapmak veya
+kaynak kazanmak icin uzerlerine 'raid' gorevi verip savasabilirsin; onlar
+sadece kendilerine saldirilirsa karsilik verir, oyuncuyu kendileri aramazlar.
 Harita cok buyuk (__MAP_SIZE__x__MAP_SIZE__); sadece kendi birimlerine/yapilarina
 yakin bolgeyi ve orada bilinen maden yataklarini goruyorsun - butun haritayi
 degil.
@@ -64,7 +68,10 @@ function playerContext(state: GameStateSnapshot, playerId: string): string {
     knownDeposits,
     visibleEnemyUnits: enemyUnits.map((u) => ({
       id: u.id,
+      // null = a wild, neutral-hostile mob (nobody's general) rather than
+      // another player's unit.
       ownerPlayerId: u.ownerPlayerId,
+      type: u.type,
       x: u.x,
       y: u.y,
       hp: u.hp,
