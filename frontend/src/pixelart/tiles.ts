@@ -2,13 +2,16 @@ import type { Texture } from "pixi.js";
 import { getProceduralTexture } from "./canvasTexture";
 import { blobPath, groundShadow, speckleTexture } from "./shapes";
 import { DIRT, GRASS, LEAVES, SAND, STONE, WATER, WOOD } from "./palette";
+import { getRealAsset } from "./realAssets";
 
-/** Isometric diamond terrain tiles, generated procedurally - gradient-filled
- * diamonds with a painterly speckle texture (see speckleTexture) and layered
- * decorations, rather than pixel art or downloaded image files - this keeps
- * every visual asset in version-controlled code with no external asset
- * dependency. Ratio is the classic 2:1 isometric diamond used by Age of
- * Empires-era tile engines. */
+/** Isometric diamond terrain tiles. Where the user has supplied a real
+ * sprite-sheet crop (see realAssets.ts / frontend/assets-source/), the base
+ * diamond is drawn from that image instead of a procedural gradient fill -
+ * decorations (trees, rocks, dune highlights) still layer on top either way,
+ * so a "forest" tile is a real grass base plus a procedural tree, etc.
+ * Falls back to the fully-procedural painter for any terrain without a
+ * supplied asset yet. Ratio is the classic 2:1 isometric diamond used by
+ * Age of Empires-era tile engines. */
 
 export const TILE_PX_W = 96;
 export const TILE_PX_H = 48;
@@ -61,6 +64,27 @@ function paintDiamondBase(
   ctx.lineTo(w * 0.92, h * 0.54);
   ctx.stroke();
   ctx.restore();
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(10, 14, 20, 0.2)";
+  ctx.lineWidth = 1;
+  diamondPath(ctx, w, h);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Draws a real (small, native-pixel-art) image stretched to fill the tile
+ * diamond, clipped so it never bleeds past the edge. imageSmoothingEnabled
+ * is off so scaling a tiny source image up keeps crisp pixel edges instead
+ * of blurring - matches the source art's chunky look rather than faking a
+ * smooth vector gradient over it. */
+function paintDiamondFromImage(ctx: CanvasRenderingContext2D, w: number, h: number, image: HTMLImageElement): void {
+  ctx.save();
+  diamondPath(ctx, w, h);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image, 0, 0, w, h);
   ctx.restore();
 
   ctx.save();
@@ -216,6 +240,32 @@ function palm(ctx: CanvasRenderingContext2D, x: number, groundY: number, scale: 
 
 export type TileTerrain = "plains" | "forest" | "mountain" | "water" | "desert" | "oasis";
 
+/** Draws a terrain's ground base: the real supplied sprite crop if it has
+ * finished loading (see realAssets.ts), otherwise the procedural gradient
+ * fallback. `assetKey` is the tile:<terrain> lookup key for the real asset;
+ * a terrain that doesn't have one supplied (forest/oasis reuse plains/desert)
+ * just always falls through to the tones-based procedural painter for that
+ * call's tones/seed. */
+function drawGroundBase(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  assetKey: string,
+  tones: { dark: string; mid: string; light: string },
+  seed: number,
+): void {
+  const real = getRealAsset(assetKey);
+  if (real) {
+    paintDiamondFromImage(ctx, w, h, real);
+  } else {
+    paintDiamondBase(ctx, w, h, tones, seed);
+  }
+}
+
+function cacheKey(base: string, assetKey: string): string {
+  return getRealAsset(assetKey) ? `${base}:asset` : `${base}:proc`;
+}
+
 export function getTileTexture(terrain: TileTerrain): Texture {
   const w = TILE_PX_W;
   const h = TILE_PX_H;
@@ -223,34 +273,34 @@ export function getTileTexture(terrain: TileTerrain): Texture {
 
   switch (terrain) {
     case "plains":
-      return getProceduralTexture(`tile:plains`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, GRASS, 11);
+      return getProceduralTexture(cacheKey("tile:plains", "tile:plains"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:plains", GRASS, 11);
       });
     case "forest":
-      return getProceduralTexture(`tile:forest`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, GRASS, 12);
+      return getProceduralTexture(cacheKey("tile:forest", "tile:plains"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:plains", GRASS, 12);
         tree(ctx, w * 0.34, h * 0.52, scale);
         tree(ctx, w * 0.64, h * 0.38, scale * 0.9);
         tree(ctx, w * 0.52, h * 0.7, scale * 0.85);
       });
     case "mountain":
-      return getProceduralTexture(`tile:mountain`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, DIRT, 13);
+      return getProceduralTexture(cacheKey("tile:mountain", "tile:mountain"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:mountain", DIRT, 13);
         rockCluster(ctx, w * 0.5, h * 0.56, scale, 3);
       });
     case "water":
-      return getProceduralTexture(`tile:water`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, WATER, 14);
+      return getProceduralTexture(cacheKey("tile:water", "tile:water"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:water", WATER, 14);
         waterFoam(ctx, w, h);
       });
     case "desert":
-      return getProceduralTexture(`tile:desert`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, SAND, 15);
+      return getProceduralTexture(cacheKey("tile:desert", "tile:desert"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:desert", SAND, 15);
         duneHighlights(ctx, w, h);
       });
     case "oasis":
-      return getProceduralTexture(`tile:oasis`, w, h, (ctx) => {
-        paintDiamondBase(ctx, w, h, SAND, 16);
+      return getProceduralTexture(cacheKey("tile:oasis", "tile:desert"), w, h, (ctx) => {
+        drawGroundBase(ctx, w, h, "tile:desert", SAND, 16);
         oasisPool(ctx, w * 0.5, h * 0.58, scale);
         palm(ctx, w * 0.24, h * 0.66, scale * 0.9, -1);
         palm(ctx, w * 0.76, h * 0.44, scale * 0.8, 1);

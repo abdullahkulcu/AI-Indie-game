@@ -2,6 +2,7 @@ import type { Texture } from "pixi.js";
 import { getProceduralTexture } from "./canvasTexture";
 import { lighten, shade } from "./color";
 import { chimneySmoke, flag, groundShadow, roofShingleLines, wallTexture, windowPane } from "./shapes";
+import { getRealAsset } from "./realAssets";
 import { CROP, METAL, SKIN, SKIN_SHADOW, STONE, THATCH, WALL, WOOD } from "./palette";
 
 /** Building and unit art, drawn as flat, gradient-shaded vector shapes
@@ -376,7 +377,44 @@ const BUILDING_PAINTERS: Record<StructureType, (ctx: CanvasRenderingContext2D, a
   mine: drawMine,
 };
 
+/** Draws a real (small, native-pixel-art) unit sprite scaled up with crisp
+ * edges, tinted toward the player's accent color via a multiply-then-mask
+ * pass so ownership is still readable at a glance the way the procedural
+ * sprites show it - without this, every player's army would look identical
+ * (the source art has one fixed color baked in). */
+function drawRealUnitSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, accent: string): void {
+  const cx = UNIT_W / 2;
+  const bottomY = UNIT_H - 6;
+  groundShadow(ctx, cx, bottomY, 14, 4.5);
+
+  const scale = UNIT_W / image.width;
+  const dw = image.width * scale;
+  const dh = image.height * scale;
+  const dx = cx - dw / 2;
+  const dy = bottomY - dh;
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(image, dx, dy, dw, dh);
+
+  ctx.globalCompositeOperation = "multiply";
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = accent;
+  ctx.fillRect(dx, dy, dw, dh);
+
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.globalAlpha = 1;
+  ctx.drawImage(image, dx, dy, dw, dh);
+  ctx.restore();
+}
+
 function drawArmy(ctx: CanvasRenderingContext2D, accent: string): void {
+  const realSprite = getRealAsset("unit:army");
+  if (realSprite) {
+    drawRealUnitSprite(ctx, realSprite, accent);
+    return;
+  }
+
   const cx = UNIT_W / 2;
   const bottomY = UNIT_H - 6;
 
@@ -556,7 +594,13 @@ export function getBuildingTexture(type: StructureType, accent: string): Texture
 }
 
 export function getUnitTexture(type: UnitType, accent: string): Texture {
-  return getProceduralTexture(`unit:${type}:${accent}`, UNIT_W, UNIT_H, (ctx) => {
+  // The cache key includes whether a real asset is loaded for this type so
+  // the very first draw (before the async image finishes loading) falls
+  // back to the procedural painter, then automatically switches over to a
+  // freshly-cached "real" texture on the next call once it's ready.
+  const hasReal = type === "army" && getRealAsset("unit:army");
+  const key = `unit:${type}:${accent}:${hasReal ? "asset" : "proc"}`;
+  return getProceduralTexture(key, UNIT_W, UNIT_H, (ctx) => {
     UNIT_PAINTERS[type](ctx, accent);
   });
 }
