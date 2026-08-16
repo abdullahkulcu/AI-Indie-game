@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
@@ -22,8 +22,9 @@ export async function POST(request: Request) {
   if (!body.channelId) return Response.json({ error: "Channel gerekli." }, { status: 400, headers: noStore });
   const [channel] = await getDb().select().from(channels).where(and(eq(channels.id, body.channelId), eq(channels.status, "active"))).limit(1);
   if (!channel) return Response.json({ error: "Channel aktif değil." }, { status: 404, headers: noStore });
-  const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(channelMembers).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active")));
+  const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(channelMembers).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"), ne(channelMembers.userId, user.id)));
   if (Number(count) >= channel.maxPlayers) return Response.json({ error: "Channel dolu." }, { status: 409, headers: noStore });
+  await getDb().update(channelMembers).set({ status: "inactive" }).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.status, "active")));
   await getDb().insert(channelMembers).values({ userId: user.id, channelId: channel.id }).onConflictDoUpdate({ target: [channelMembers.userId, channelMembers.channelId], set: { status: "active" } });
   return Response.json({ joined: true }, { headers: noStore });
 }

@@ -57,3 +57,43 @@ export const llmCredentials = sqliteTable("llm_credentials", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const intelDefenses = sqliteTable("intel_defenses", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  level: integer("level").notNull().default(1),
+  activeUntil: integer("active_until").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const intelMissions = sqliteTable("intel_missions", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  sourceUserId: text("source_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetUserId: text("target_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["pending", "succeeded", "failed", "detected"] }).notNull().default("pending"),
+  successChance: integer("success_chance").notNull(),
+  detectionChance: integer("detection_chance").notNull(),
+  completesAt: integer("completes_at").notNull(),
+  report: text("report"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  resolvedAt: text("resolved_at"),
+}, (table) => [
+  uniqueIndex("idx_intel_missions_source_target_pending").on(table.sourceUserId, table.targetUserId).where(sql`${table.status} = 'pending'`),
+]);
+
+export const sharedMines = sqliteTable("shared_mines", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default("Ortak Demir Damarı"),
+  oreRemaining: integer("ore_remaining").notNull().default(100000),
+  extractedOre: integer("extracted_ore").notNull().default(0),
+  lastTickAt: integer("last_tick_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_shared_mines_channel").on(table.channelId)]);
+
+export const sharedMineWorkers = sqliteTable("shared_mine_workers", {
+  mineId: text("mine_id").notNull().references(() => sharedMines.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  workers: integer("workers").notNull().default(5),
+  joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);

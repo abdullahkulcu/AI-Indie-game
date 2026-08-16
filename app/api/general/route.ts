@@ -76,6 +76,7 @@ function gamePrompt(body: GeneralRequest) {
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı ve açıkça istenmiş inşaat hızlandırma. Bunları kaynak/kota uygunsa uygula.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
     "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
+    "Kesin işlem kuralı: Bir aracı gerçekten çağırmadıysan 'başlattım', 'uyguladım', 'tamamlandı' veya 'devam ediyor' deme. XML, metin içinde araç etiketi ya da hayali araç adı yazma; yalnızca sana verilen native araçları çağır.",
     `KRALLIK_DURUMU=${JSON.stringify(state)}`,
   ].join("\n");
 }
@@ -173,7 +174,15 @@ export async function POST(request: Request) {
       return json({ error: "Mesaj 1–2000 karakter olmalı." }, 400);
     }
     const result = body.provider === "openai" ? await openAI(body) : await anthropic(body);
-    return json({ connected: true, ...result });
+    let actions = result.actions;
+    if (body.mode === "chat" && isExplicitOrder(body.message) && actions.length === 0) {
+      const inferred = inferFallbackAction(body.message ?? "", body.history ?? []);
+      if (inferred) actions = [inferred];
+    }
+    const cleaned = stripPseudoToolMarkup(result.text);
+    const claimsExecution = /(başlattım|başlatıyorum|uyguladım|tamamlandı|devam ediyor|yükseltiliyor)/i.test(cleaned);
+    const text = actions.length ? "Emri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin." : claimsExecution ? "Bu emri gerçek oyun aracına dönüştüremedim; işlem uygulanmadı." : cleaned;
+    return json({ connected: true, text, actions });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
     return json({ error: message }, 502);
@@ -185,3 +194,4 @@ import { getDb } from "../../../db";
 import { llmCredentials } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
+import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
