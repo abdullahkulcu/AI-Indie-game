@@ -27,6 +27,8 @@ npm run tick
 
 Web: `http://localhost:3000`, API: `http://localhost:8787`.
 
+İlk açılış channel, krallık, arazi ve General kurulumuyla başlar. Yayımlanmış istemcideki oynanabilir hızlı-channel kaydı cihazın `localStorage` alanında tutulur; kaynak tick'i, inşa/eğitim kuyruğu, emir kotası, vergi ve şenlik çevrimdışı da ilerler. Çok oyunculu kalıcı dünya ve gerçek BYOK çağrıları için Fastify API, PostgreSQL ve Redis birlikte çalıştırılmalıdır.
+
 ## Güvenlik sınırı
 
 LLM yalnızca tool önerir. Kaynak, bina kilidi, nüfus, mesafe, kiralanabilir birlik, emir kotası, risk kademesi ve sahiplik sunucuda yeniden doğrulanır. API anahtarları log redaction ve AES-256-GCM ile korunur; production'da `BYOK_MASTER_KEY` yerine KMS zarf şifreleme adaptörü kullanılmalıdır.
