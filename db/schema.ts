@@ -98,6 +98,17 @@ export const sharedMineWorkers = sqliteTable("shared_mine_workers", {
   joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
 
+// General riskli bulup teyit istediği emri burada bekletir. Kralın bir sonraki
+// mesajındaki "yap" böylece havada kalmaz, belirli bir emre bağlanır.
+export const pendingDecisions = sqliteTable("pending_decisions", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  reasons: text("reasons").notNull(),
+  riskLevel: text("risk_level", { enum: ["elevated", "severe"] }).notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 // Sabit pencereli hız sınırı sayaçları. `bucket` = "<kapsam>:<kimlik>" (örn. "login:ip:1.2.3.4").
 // Sayaç tek bir upsert deyimiyle artırıldığı için eşzamanlı isteklerde atomiktir.
 export const rateLimits = sqliteTable("rate_limits", {

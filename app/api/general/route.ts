@@ -19,7 +19,8 @@ type GeneralRequest = {
     units?: Record<string, number>;
     channelSpeed?: number;
     activeConstruction?: { name: string; secondsRemaining: number } | null;
-    buildTimes?: Array<{ name: string; nextLevel: number; seconds: number }>;
+    buildTimes?: Array<{ type?: string; name: string; nextLevel: number; seconds: number; cost?: Record<string, number> }>;
+    protectionHoursLeft?: number;
     loyalty?: number;
     quota?: number;
     terrain?: unknown;
@@ -29,6 +30,8 @@ type GeneralRequest = {
     neighbors?: Array<{ ordinal: number; name: string; discovered: boolean; scouting: boolean }>;
     counterIntelligence?: { active: boolean; minutesRemaining: number };
   };
+  /** Sunucunun eklediği bağlam; istemciden gelmez. */
+  pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
 };
 
 const actionTools = [
@@ -86,6 +89,12 @@ function gamePrompt(body: GeneralRequest) {
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
     "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
     "Kesin işlem kuralı: Bir aracı gerçekten çağırmadıysan 'başlattım', 'uyguladım', 'tamamlandı' veya 'devam ediyor' deme. XML, metin içinde araç etiketi ya da hayali araç adı yazma; yalnızca sana verilen native araçları çağır.",
+    "Risk değerlendirmesi oyun motorunda kodla yapılır: itiraz, teyit ve ret kararını sen tek başına vermezsin. Riskli bulduğun emirde gerekçeni açıkça söyle; sonucu motor bildirecek.",
+    "Sadakatin kararlarını gerçekten bağlar. Sadakat düşükken ağır riskli emirleri reddedersin ve Kral yalnızca 'yap' diyerek bunu aşamaz; sadakat yüksekken Kralın ısrarına daha kolay uyarsın.",
+    ...(body.pendingDecision
+      ? [`BEKLEYEN_TEYİT=${JSON.stringify(body.pendingDecision)}`,
+         "Kral bu bekleyen emre cevap veriyor. Onaylıyorsa uygulanacağını, gerekçe sunmasını beklediğini ya da vazgeçtiyse emrin düştüğünü kendi ağzınla kısaca belirt."]
+      : []),
     `KRALLIK_DURUMU=${JSON.stringify(state)}`,
   ].join("\n");
 }
@@ -158,6 +167,75 @@ async function anthropic(body: GeneralRequest) {
   return { text: text || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
+const PENDING_TTL_MS = 30 * 60_000;
+
+async function loadPendingDecision(userId: string) {
+  const [row] = await getDb().select().from(pendingDecisions).where(eq(pendingDecisions.userId, userId)).limit(1);
+  if (!row) return null;
+  if (row.expiresAt <= Date.now()) { await clearPendingDecision(userId); return null; }
+  try {
+    return { action: JSON.parse(row.action) as GeneralAction, reasons: JSON.parse(row.reasons) as string[], riskLevel: row.riskLevel };
+  } catch { await clearPendingDecision(userId); return null; }
+}
+
+async function savePendingDecision(userId: string, action: GeneralAction, reasons: string[], riskLevel: "elevated" | "severe") {
+  const values = { userId, action: JSON.stringify(action), reasons: JSON.stringify(reasons), riskLevel, expiresAt: Date.now() + PENDING_TTL_MS };
+  await getDb().insert(pendingDecisions).values(values).onConflictDoUpdate({ target: pendingDecisions.userId, set: values });
+}
+
+async function clearPendingDecision(userId: string) {
+  await getDb().delete(pendingDecisions).where(eq(pendingDecisions.userId, userId));
+}
+
+/** İstemciden gelen bağlamı risk modelinin beklediği özete çevirir. */
+function snapshotOf(body: GeneralRequest): KingdomSnapshot {
+  const state = body.kingdom ?? {};
+  const units = state.units ?? {};
+  return {
+    resources: state.resources ?? {},
+    hourlyRates: state.hourlyRates ?? {},
+    population: Number(state.population) || 0,
+    popularity: Number(state.popularity) || 0,
+    loyalty: Number(state.loyalty) || 0,
+    army: Object.values(units).reduce<number>((total, amount) => total + (Number(amount) || 0), 0),
+    protectionHoursLeft: Number(state.protectionHoursLeft) || 0,
+    counterIntelligenceActive: Boolean(state.counterIntelligence?.active),
+  };
+}
+
+/** Emrin bilinen maliyeti; istemcinin gönderdiği buildTimes kataloğundan okunur. */
+function costOf(action: GeneralAction, body: GeneralRequest) {
+  if (action.name !== "build_structure") return {};
+  const type = String(action.arguments.building_type ?? "");
+  const target = Math.floor(Number(action.arguments.target_level));
+  const entry = (body.kingdom?.buildTimes ?? []).find(item => item.type === type && item.nextLevel === target);
+  return entry?.cost ?? {};
+}
+
+/**
+ * Her önerilen eylemi risk modelinden geçirir. Sonuç: uygulanacak eylemler,
+ * Kral'a gösterilecek itiraz metinleri ve gerekiyorsa saklanan teyit talebi.
+ */
+async function reviewActions(
+  actions: GeneralAction[],
+  body: GeneralRequest,
+  userId: string,
+  pending: { action: GeneralAction } | null,
+  confirmation: ReturnType<typeof readConfirmation>,
+) {
+  if (!actions.length) return { actions, notes: [] as string[] };
+  const review = reviewProposedActions(
+    actions,
+    snapshotOf(body),
+    action => costOf(action, body),
+    pending?.action.name ?? null,
+    confirmation,
+  );
+  if (review.clearPending) await clearPendingDecision(userId);
+  if (review.toStore) await savePendingDecision(userId, review.toStore.action, review.toStore.reasons, review.toStore.riskLevel);
+  return { actions: review.approved as GeneralAction[], notes: review.notes };
+}
+
 export async function POST(request: Request) {
   try {
     const user = await currentUser(request);
@@ -191,12 +269,26 @@ export async function POST(request: Request) {
     if (body.mode !== "test" && (!body.message?.trim() || body.message.length > 2_000)) {
       return json({ error: "Mesaj 1–2000 karakter olmalı." }, 400);
     }
+    // Bekleyen bir teyit varsa Kralın bu mesajı ona cevaptır; modele de bağlam olarak verilir.
+    const pending = body.mode === "chat" ? await loadPendingDecision(user.id) : null;
+    const confirmation = readConfirmation(body.message);
+    if (pending && confirmation.cancelled) {
+      await clearPendingDecision(user.id);
+      return json({ connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.", actions: [] });
+    }
+    if (pending) body.pendingDecision = { action: pending.action, reasons: pending.reasons, riskLevel: pending.riskLevel };
+
     const result = body.provider === "openai" ? await openAI(body) : await anthropic(body);
     let actions = result.actions;
     if (body.mode === "chat" && isExplicitOrder(body.message) && actions.length === 0) {
       const inferred = inferFallbackAction(body.message ?? "", body.history ?? []);
       if (inferred) actions = [inferred];
     }
+    // Kral bekleyen emri onayladıysa, model yeni bir araç çağırmasa bile o emri geri getiririz.
+    if (pending && confirmation.insisted && actions.length === 0) actions = [pending.action];
+
+    const review = await reviewActions(actions, body, user.id, pending, confirmation);
+    actions = review.actions;
     const cleaned = stripPseudoToolMarkup(result.text);
     // Guard yalnızca gerçek bir emirde ve hiçbir araç çalışmadığında devreye girer.
     // Kalıplar birinci tekil şahıs olmalı: "üretim devam ediyor" gibi doğru bir durum
@@ -204,12 +296,16 @@ export async function POST(request: Request) {
     const claimsExecution = /\b(başlattım|başlatıyorum|uyguladım|uyguluyorum|emrettim|kurdum|kuruyorum|yükselttim|yükseltiyorum|eğittim|eğitiyorum|ayarladım|düzenledim|hızlandırdım|tamamladım)\b/i.test(cleaned);
     const orderWithoutAction = actions.length === 0 && isExplicitOrder(body.message) && claimsExecution;
     // Eylem çalıştığında Generalin gerekçesi atılmaz; motorun sonucu altına eklenir.
+    const verdictNotes = review.notes.length ? `\n\n${review.notes.join("\n\n")}` : "";
     const text = actions.length
-      ? `${cleaned}\n\nEmri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin.`.trim()
-      : orderWithoutAction
-        ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, şenlik ve doktrin kaydı. Ortak maden ve ajan görevleri harita ekranından yürütülür._`.trim()
-        : cleaned;
-    return json({ connected: true, text, actions });
+      ? `${cleaned}${verdictNotes}\n\nEmri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin.`.trim()
+      : review.notes.length
+        // General itiraz etti ya da teyit istiyor: kendi gerekçesi korunur, uydurma sonuç üretilmez.
+        ? `${cleaned}${verdictNotes}`.trim()
+        : orderWithoutAction
+          ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
+          : cleaned;
+    return json({ connected: true, text, actions, awaitingConfirmation: review.notes.some(note => note.startsWith("⏸")) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
     return json({ error: message }, 502);
@@ -218,7 +314,8 @@ export async function POST(request: Request) {
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { llmCredentials } from "../../../db/schema";
+import { llmCredentials, pendingDecisions } from "../../../db/schema";
+import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";

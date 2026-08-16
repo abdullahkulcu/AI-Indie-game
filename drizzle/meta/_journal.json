@@ -43,6 +43,13 @@
       "when": 1786908479748,
       "tag": "0005_cute_black_tom",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786912607614,
+      "tag": "0006_amazing_lizard",
+      "breakpoints": true
     }
   ]
 }
