@@ -5,3 +5,23 @@
   color: #e6c977;
   font: 600 8px/1.4 JetBrains Mono;
 }
+
+.admin-entry {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-entry > a {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
+.admin-entry > button {
+  border: 1px solid #8a714c;
+  padding: 10px;
+  background: transparent;
+  color: #58432e;
+  font: 600 8px Cinzel;
+  cursor: pointer;
+}
