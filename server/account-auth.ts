@@ -1,6 +1,7 @@
 import { and, eq, gt } from "drizzle-orm";
 import { getDb } from "../db";
 import { sessions, users } from "../db/schema";
+export { hashPassword, verifyPassword } from "./password-auth";
 
 const COOKIE = "demirkale_session";
 const encoder = new TextEncoder();
@@ -11,33 +12,9 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function base64ToBytes(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(normalized);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-export async function hashPassword(password: string) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 210_000 }, key, 256);
-  return `pbkdf2:210000:${bytesToBase64(salt)}:${bytesToBase64(new Uint8Array(bits))}`;
-}
-
-export async function verifyPassword(password: string, encoded: string) {
-  const [scheme, count, saltText, expectedText] = encoded.split(":");
-  if (scheme !== "pbkdf2" || !count || !saltText || !expectedText) return false;
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: base64ToBytes(saltText), iterations: Number(count) }, key, 256);
-  const actual = new Uint8Array(bits), expected = base64ToBytes(expectedText);
-  if (actual.length !== expected.length) return false;
-  let difference = 0; for (let i = 0; i < actual.length; i += 1) difference |= actual[i] ^ expected[i];
-  return difference === 0;
 }
 
 export async function inviteMatches(code: string, expectedHash?: string) {
