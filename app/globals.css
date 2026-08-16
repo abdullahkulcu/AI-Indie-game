@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Spectral:wght@400;500;600&display=swap');
 @import "./game.css";
+@import "./terrain.css";
 @import "./connect.css";
 @import "./admin.css";
 @import "tailwindcss";

@@ -1,0 +1,7 @@
+.scene-title small {
+  display: block;
+  max-width: 350px;
+  margin-top: 5px;
+  color: #e6c977;
+  font: 600 8px/1.4 JetBrains Mono;
+}
