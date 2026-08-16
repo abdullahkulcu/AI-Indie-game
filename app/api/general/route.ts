@@ -18,6 +18,7 @@ type GeneralRequest = {
     buildings?: Array<{ name: string; level: number }>;
     units?: Record<string, number>;
     channelSpeed?: number;
+    channelId?: string;
     activeConstruction?: { name: string; secondsRemaining: number } | null;
     buildTimes?: Array<{ type?: string; name: string; nextLevel: number; seconds: number; cost?: Record<string, number> }>;
     protectionHoursLeft?: number;
@@ -41,6 +42,8 @@ const actionTools = [
   { name: "set_tax_rate", description: "Vergi oranını değiştirir. %30 üzeri risklidir; confirmed_risk yalnızca Kral konuşma geçmişinde sonucu duyduktan sonra açıkça ısrar ettiyse true olabilir.", parameters: { type: "object", properties: { rate_percent: { type: "integer", minimum: 0, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["rate_percent"], additionalProperties: false } },
   { name: "accelerate_construction", description: "Devam eden inşaatı, kalan süreye göre oyun motorunun hesaplayacağı altın bedeliyle anında bitirir. Kral hızlandırmayı açıkça emrettiğinde çağır; maliyet uydurma.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_strategy_note", description: "Kralın uzun vadeli yönetim doktrinini kaydeder. Kral ekonomi, savunma, halk, büyüme veya risk iştahı için kalıcı bir öncelik belirttiğinde çağır.", parameters: { type: "object", properties: { note: { type: "string", minLength: 5, maxLength: 300 } }, required: ["note"], additionalProperties: false } },
+  { name: "set_night_order", description: "Kral 'ben yokken', 'gece', 'çevrimdışıyken' veya 'sen idare et' diyerek kalıcı bir gece emri verdiğinde çağır. Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar. Onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
+  { name: "cancel_night_order", description: "Kral gece emrini iptal ettiğinde veya 'artık ben yokken bir şey yapma' dediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. Madendeki toplam işçi üretimi belirler; işçiler krallığın nüfusundan ayrı çalışır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 20 } }, required: ["workers"], additionalProperties: false } },
   { name: "recall_miners", description: "Ortak madendeki bütün işçileri geri çeker. Kral işçileri geri çağırmayı emrettiğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_scout", description: "Komşu bir sancağa ajan gönderir. Hedefi KRALLIK_DURUMU içindeki neighbors listesindeki ordinal (sıra) numarasıyla belirt; kimlik uydurma. Başarı ihtimali düşüktür ve hedef karşı-istihbarat kurmuşsa daha da düşer.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1, maximum: 40 } }, required: ["target_ordinal"], additionalProperties: false } },
@@ -167,6 +170,67 @@ async function anthropic(body: GeneralRequest) {
   return { text: text || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
+/**
+ * Gece emrinin yaşam döngüsü. İki aşamalıdır ve ikinci aşamayı yalnızca Kral açar:
+ * 1) General emri kaydeder → status "pending_approval", gece hiçbir şey yapılmaz.
+ * 2) Kral "sen uygula" derse → "active" + autonomous; "önce bana sor" derse → "active" + ask.
+ */
+async function handleNightOrder(
+  actions: GeneralAction[],
+  body: GeneralRequest,
+  userId: string,
+  confirmation: ReturnType<typeof readConfirmation>,
+): Promise<string[]> {
+  const db = getDb();
+  const notes: string[] = [];
+
+  if (actions.some(action => action.name === "cancel_night_order")) {
+    await db.delete(standingOrders).where(eq(standingOrders.userId, userId));
+    notes.push("🌙 Gece emri iptal edildi; siz yokken hiçbir şey yapmayacağım.");
+    return notes;
+  }
+
+  const setter = actions.find(action => action.name === "set_night_order");
+  if (setter) {
+    const instruction = String(setter.arguments.instruction ?? "").trim();
+    if (instruction.length < 5) return ["🌙 Gece emri anlaşılmadı; ne yapmamı istediğinizi bir cümleyle söyleyin."];
+    const channelId = body.kingdom?.channelId?.trim();
+    if (!channelId) return ["🌙 Gece emri için önce bir channel'a bağlı olmalısınız."];
+    const values = {
+      userId, channelId, instruction,
+      autonomy: "ask" as const, status: "pending_approval" as const,
+      maxActionsPerWake: 1, dailyActionCap: 8, actionsToday: 0, dayStartedAt: Date.now(),
+    };
+    await db.insert(standingOrders).values(values).onConflictDoUpdate({ target: standingOrders.userId, set: values });
+    notes.push(`🌙 Gece emrinizi not ettim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
+    return notes;
+  }
+
+  // Bekleyen bir gece emri varsa, Kralın bu mesajı yetki cevabıdır.
+  const [existing] = await db.select().from(standingOrders).where(eq(standingOrders.userId, userId)).limit(1);
+  if (!existing || existing.status !== "pending_approval") return notes;
+
+  const message = (body.message ?? "").toLocaleLowerCase("tr-TR");
+  const wantsSupervision = /(bana sor|onayımı|onayimi|önce sor|once sor|sorarak|danış|danis|bekle)/.test(message);
+  const grantsAutonomy = confirmation.insisted || /(sen uygula|kendin uygula|sen hallet|sen idare et|yetki|serbest|uygulayabilirsin)/.test(message);
+
+  if (confirmation.cancelled) {
+    await db.delete(standingOrders).where(eq(standingOrders.userId, userId));
+    notes.push("🌙 Gece emrinden vazgeçildi.");
+    return notes;
+  }
+  if (wantsSupervision) {
+    await db.update(standingOrders).set({ status: "active", autonomy: "ask" }).where(eq(standingOrders.userId, userId));
+    notes.push("🌙 Anlaşıldı. Gece uygun bir hamle görürsem uygulamayacağım, önerimi hazırlayıp onayınızı bekleyeceğim.");
+    return notes;
+  }
+  if (grantsAutonomy) {
+    await db.update(standingOrders).set({ status: "active", autonomy: "autonomous" }).where(eq(standingOrders.userId, userId));
+    notes.push("🌙 Yetkiyi aldım. Siz yokken saatte en fazla bir hamle yapacağım, günde en çok sekiz. Sabah defterde ne yaptığımı göreceksiniz.");
+  }
+  return notes;
+}
+
 const PENDING_TTL_MS = 30 * 60_000;
 
 async function loadPendingDecision(userId: string) {
@@ -287,6 +351,11 @@ export async function POST(request: Request) {
     // Kral bekleyen emri onayladıysa, model yeni bir araç çağırmasa bile o emri geri getiririz.
     if (pending && confirmation.insisted && actions.length === 0) actions = [pending.action];
 
+    // Gece emri yetkisi ayrı bir kapıdır: General emri alır almaz yetkilenmez,
+    // Kral açıkça "sen uygula" demeden arka planda hiçbir şey yapmaz.
+    const nightNotes = await handleNightOrder(actions, body, user.id, confirmation);
+    actions = actions.filter(action => action.name !== "set_night_order" && action.name !== "cancel_night_order");
+
     const review = await reviewActions(actions, body, user.id, pending, confirmation);
     actions = review.actions;
     const cleaned = stripPseudoToolMarkup(result.text);
@@ -296,16 +365,17 @@ export async function POST(request: Request) {
     const claimsExecution = /\b(başlattım|başlatıyorum|uyguladım|uyguluyorum|emrettim|kurdum|kuruyorum|yükselttim|yükseltiyorum|eğittim|eğitiyorum|ayarladım|düzenledim|hızlandırdım|tamamladım)\b/i.test(cleaned);
     const orderWithoutAction = actions.length === 0 && isExplicitOrder(body.message) && claimsExecution;
     // Eylem çalıştığında Generalin gerekçesi atılmaz; motorun sonucu altına eklenir.
-    const verdictNotes = review.notes.length ? `\n\n${review.notes.join("\n\n")}` : "";
+    const allNotes = [...nightNotes, ...review.notes];
+    const verdictNotes = allNotes.length ? `\n\n${allNotes.join("\n\n")}` : "";
     const text = actions.length
       ? `${cleaned}${verdictNotes}\n\nEmri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin.`.trim()
-      : review.notes.length
+      : allNotes.length
         // General itiraz etti ya da teyit istiyor: kendi gerekçesi korunur, uydurma sonuç üretilmez.
         ? `${cleaned}${verdictNotes}`.trim()
         : orderWithoutAction
           ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
           : cleaned;
-    return json({ connected: true, text, actions, awaitingConfirmation: review.notes.some(note => note.startsWith("⏸")) });
+    return json({ connected: true, text, actions, awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
     return json({ error: message }, 502);
@@ -314,7 +384,7 @@ export async function POST(request: Request) {
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { llmCredentials, pendingDecisions } from "../../../db/schema";
+import { llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";

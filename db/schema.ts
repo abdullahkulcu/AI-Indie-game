@@ -98,6 +98,25 @@ export const sharedMineWorkers = sqliteTable("shared_mine_workers", {
   joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
 
+// Kralın gece emri. Kayıt yoksa General arka planda hiç uyanmaz; uyanma
+// tetikleyicisi budur. `status` yalnızca Kral onayladığında "active" olur:
+// General emri alır almaz kendiliğinden yetkilenmez.
+export const standingOrders = sqliteTable("standing_orders", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  channelId: text("channel_id").notNull(),
+  instruction: text("instruction").notNull(),
+  // "autonomous": General kendi uygular. "ask": yalnızca önerir, Kralın onayını bekler.
+  autonomy: text("autonomy", { enum: ["autonomous", "ask"] }).notNull().default("ask"),
+  status: text("status", { enum: ["pending_approval", "active", "paused"] }).notNull().default("pending_approval"),
+  maxActionsPerWake: integer("max_actions_per_wake").notNull().default(1),
+  dailyActionCap: integer("daily_action_cap").notNull().default(8),
+  actionsToday: integer("actions_today").notNull().default(0),
+  dayStartedAt: integer("day_started_at").notNull(),
+  lastRunAt: integer("last_run_at"),
+  lastOutcome: text("last_outcome"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 // General riskli bulup teyit istediği emri burada bekletir. Kralın bir sonraki
 // mesajındaki "yap" böylece havada kalmaz, belirli bir emre bağlanır.
 export const pendingDecisions = sqliteTable("pending_decisions", {

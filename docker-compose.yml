@@ -1,16 +1,54 @@
+# Demirkale'yi tek komutla ayağa kaldırır: oyun sunucusu + gece vardiyası cron'u.
+#
+#   cp .env.example .env   (CRON_SECRET'i .dev.vars ile aynı yapın)
+#   docker compose up
+#
+# `app` vinext/miniflare çalıştırır; veritabanı Cloudflare D1'in yerel karşılığı
+# olduğu için ayrı bir Postgres gerekmez. `cron` yalnızca saatte bir /api/cron'u
+# çağırır; asıl karar sunucuda verilir.
 services:
-  postgres:
-    image: postgres:17-alpine
+  app:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports: ["3000:3000"]
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
     environment:
-      POSTGRES_DB: demirkale
-      POSTGRES_USER: demirkale
-      POSTGRES_PASSWORD: demirkale
-    ports: ["5432:5432"]
-    healthcheck: {test: ["CMD-SHELL", "pg_isready -U demirkale"], interval: 3s, timeout: 3s, retries: 20}
-    volumes: ["postgres_data:/var/lib/postgresql/data", "./migrations:/docker-entrypoint-initdb.d:ro"]
-  redis:
-    image: redis:7.4-alpine
-    ports: ["6379:6379"]
-    command: redis-server --appendonly yes
-    volumes: ["redis_data:/data"]
-volumes: {postgres_data: {}, redis_data: {}}
+      NODE_ENV: development
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # Gece vardiyasını tetikler. Emri olmayan hesap sunucuda hiç işlenmez;
+  # bu servis yalnızca "şimdi kontrol et" demekten ibarettir.
+  cron:
+    image: alpine:3.20
+    depends_on:
+      app: {condition: service_healthy}
+    environment:
+      CRON_TARGET: ${CRON_TARGET:-http://app:3000/api/cron}
+      CRON_SECRET: ${CRON_SECRET:?CRON_SECRET tanımlanmalı}
+      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-3600}
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl >/dev/null
+        echo "gece vardiyası tetikleyicisi hazır: $$CRON_TARGET her $$CRON_INTERVAL_SECONDS saniyede"
+        while true; do
+          printf '%s ' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          curl -sS -X POST "$$CRON_TARGET" \
+            -H "x-cron-secret: $$CRON_SECRET" \
+            -H 'content-type: application/json' \
+            --max-time 120 || echo "tetikleme başarısız"
+          echo
+          sleep "$$CRON_INTERVAL_SECONDS"
+        done
+
+volumes:
+  node_modules: {}
