@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { tick } from "../engine/tick";
+import type { Game } from "../engine/types";
 
 /**
  * Oyun durumu hâlâ istemcide hesaplanıyor (bkz. components/KingdomGame.tsx).
@@ -55,6 +57,13 @@ const GROWTH = {
 
 /** İstemci saatinin sunucudan ileri olmasına verilen tolerans. */
 const CLOCK_SKEW_MS = 5 * 60_000;
+
+/**
+ * İstemci tick'i saniyelik küçük adımlarla ilerlerken sunucu tek adımda hesaplar;
+ * bina tamamlanması ve nüfus büyümesi araya girdiği için küçük bir sapma normaldir.
+ */
+const SIMULATION_TOLERANCE = 0.08;
+const SIMULATION_FLOOR = 250;
 
 const finite = (max: number, min = 0) => z.number().finite().min(min).max(max);
 const timestamp = z.number().finite().int().min(0).max(4_102_444_800_000); // 2100-01-01
@@ -172,6 +181,31 @@ function checkFirstSave(game: GameSave): ValidationFailure | null {
   return null;
 }
 
+/**
+ * Sunucu, önceki kayıttan bu ana kadarki üretimi aynı motorla kendisi simüle eder.
+ *
+ * Oyunda kaynak yaratan tek yol tick üretimidir: bütün emirler kaynak *harcar*,
+ * ortak maden ise oyuncunun kaydına cevher yazmaz. Dolayısıyla istemcinin bildirdiği
+ * kaynak, sunucunun kendi simülasyonunun üstüne çıkamaz. Bu, genel tavanlardan çok
+ * daha dar bir sınırdır ve uydurma kaynağı gerçek üretim eğrisiyle yakalar.
+ */
+function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number): ValidationFailure | null {
+  const simulated = tick(previous as Game, Math.max(now, previous.lastTickAt));
+  for (const key of RESOURCE_KEYS) {
+    const ceiling = simulated.resources[key] * (1 + SIMULATION_TOLERANCE) + SIMULATION_FLOOR;
+    if (game.resources[key] > ceiling) {
+      return fail(409, `Bildirilen ${key} miktarı sunucunun ürettiği değerin üzerinde.`);
+    }
+  }
+  if (game.population > simulated.population * (1 + SIMULATION_TOLERANCE) + 5) {
+    return fail(409, "Bildirilen nüfus sunucunun hesapladığı büyümenin üzerinde.");
+  }
+  if (game.quota > simulated.quota + 1) {
+    return fail(409, "Bildirilen emir kotası hak edilenin üzerinde.");
+  }
+  return null;
+}
+
 /** İki kayıt arasındaki artışın, geçen süre ve channel hızıyla açıklanabilir olduğunu doğrular. */
 function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, channelSpeed: number): ValidationFailure | null {
   // Sunucu saatine göre geçen süre; en az bir dakikalık pay tanınır.
@@ -234,6 +268,9 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
     const growthFailure = checkGrowth(game, options.previous, now - options.previousUpdatedAt, options.channelSpeed);
     if (growthFailure) return growthFailure;
   }
+  // Kaba tavanlardan sonra dar kontrol: sunucunun kendi simülasyonu.
+  const simulationFailure = checkAgainstSimulation(game, options.previous, now);
+  if (simulationFailure) return simulationFailure;
   return { ok: true, game };
 }
 

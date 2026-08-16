@@ -87,15 +87,29 @@ test("gelecekteki kayıt zamanı reddedilir", () => {
   assert.equal(result.ok, false);
 });
 
-test("bir saatte makul kaynak artışı kabul edilir", () => {
-  const previous = validateGameSave(startingSave(), firstSave);
+test("gerçek üretim eğrisine uyan artış kabul edilir", () => {
+  const previous = validateGameSave(startingSave({ lastTickAt: NOW - 3_600_000 }), firstSave);
   assert.equal(previous.ok, true);
   if (!previous.ok) return;
-  const next = startingSave({ resources: { ...STARTING_STATE.resources, wood: 300 + 4_000 } });
+  // Sv.1 oduncu kulübesi saatte 22 odun üretir; bir saatlik kazanç bu civarda olmalı.
+  const next = startingSave({ lastTickAt: NOW, resources: { ...STARTING_STATE.resources, wood: 300 + 22 } });
   const result = validateGameSave(next, {
     previous: previous.game, previousUpdatedAt: NOW - 3_600_000, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW,
   });
   assert.equal(result.ok, true);
+});
+
+test("sunucu simülasyonunun üstündeki kaynak reddedilir", () => {
+  const previous = validateGameSave(startingSave({ lastTickAt: NOW - 3_600_000 }), firstSave);
+  if (!previous.ok) throw new Error("kurulum başarısız");
+  // Kaba tavanların altında kalan ama üretimle açıklanamayan bir artış.
+  const next = startingSave({ lastTickAt: NOW, resources: { ...STARTING_STATE.resources, wood: 300 + 4_000 } });
+  const result = validateGameSave(next, {
+    previous: previous.game, previousUpdatedAt: NOW - 3_600_000, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.status, 409);
+  assert.match(result.ok === false ? result.error : "", /sunucunun ürettiği değerin üzerinde/);
 });
 
 test("bir saatte imkânsız kaynak sıçraması reddedilir", () => {
