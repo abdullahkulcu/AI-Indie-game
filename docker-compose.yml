@@ -8,9 +8,13 @@
 # çağırır; asıl karar sunucuda verilir.
 services:
   app:
-    # glibc tabanlı imaj şart: Cloudflare workerd binary'si glibc'ye bağlıdır ve
-    # Alpine'ın musl'ında ELF yükleyicisi bulunamadığı için `spawn ... ENOENT` verir.
-    image: node:22-bookworm-slim
+    # glibc tabanlı TAM imaj şart:
+    #  - workerd binary'si glibc'ye bağlıdır; Alpine'ın musl'ında ELF yükleyicisi
+    #    bulunamadığı için `spawn ... ENOENT` verir.
+    #  - workerd TLS için SİSTEM CA deposunu kullanır (node kendi deposunu taşır).
+    #    bookworm-slim'de /etc/ssl/certs boştur, bu yüzden sağlayıcıya giden her
+    #    istek "internal error" ile düşer. Tam imajda 285 sertifika hazır gelir.
+    image: node:22-bookworm
     working_dir: /app
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
@@ -27,7 +31,7 @@ services:
       # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
       VINEXT_NO_DEV_LOCK: "1"
     healthcheck:
-      # bookworm-slim'de curl/wget yok; node her zaman var.
+      # node her zaman var; curl/wget imaja göre değişir.
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
