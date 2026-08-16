@@ -1,0 +1,36 @@
+.reconnect-button {
+  margin-left: auto;
+  border: 1px solid #8d6c37;
+  background: #6c252b;
+  color: #f0dfbc;
+  padding: 7px 9px;
+  font: 600 7px Cinzel;
+  cursor: pointer;
+}
+.advisor .reconnect-button + .offline { margin-left: 4px; }
+.thinking { opacity: .72; }
+.thinking p { font-style: italic; }
+.chat-form button:disabled, .chat-form input:disabled { opacity: .55; }
+.connect-overlay {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #120d0abe;
+  backdrop-filter: blur(5px);
+}
+.connect-card {
+  position: relative;
+  width: min(560px, 100%);
+  padding: 31px;
+  background: linear-gradient(145deg, #efe3c3, #cfbb91);
+  border: 1px solid #c19343;
+  box-shadow: 0 24px 70px #000b, inset 0 0 0 5px #e8d7b4;
+}
+.connect-card h2 { font: 600 25px Cinzel; margin: 0 0 20px; color: #35241c; }
+.close-connect { position: absolute; right: 13px; top: 10px; border: 0; background: transparent; color: #6d2028; font-size: 25px; cursor: pointer; }
+.connection-error { margin-top: 13px; padding: 10px 12px; border: 1px solid #9c3437; background: #f0c7bd; color: #6a1d23; font: 600 9px/1.45 JetBrains Mono; }
+.privacy-note { font: 9px/1.5 JetBrains Mono; color: #624d35; margin: 14px 0; }
+.connect-submit { width: 100%; }
