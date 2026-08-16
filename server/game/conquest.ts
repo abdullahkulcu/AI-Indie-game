@@ -1,0 +1,2 @@
+export function conquestTransfer(args:{capitalFell:boolean;winner:Record<string,number>;loser:Record<string,number>}){if(!args.capitalFell)return{winner:args.winner,loser:args.loser,requiresCaravans:true};const winner={...args.winner};for(const[r,n]of Object.entries(args.loser))winner[r]=(winner[r]??0)+n;return{winner,loser:Object.fromEntries(Object.keys(args.loser).map(r=>[r,0])),requiresCaravans:false};}
+export function refugeeRestart(){return{resources:{gold:500,food:300,stone:120,wood:180,iron:20,ale:0},population:60,popularity:55,keepLevel:1,protectionDays:3};}

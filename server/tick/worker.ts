@@ -1,0 +1,2 @@
+import {runTick} from "./engine.js";import {runPassiveGeneralCycle} from "../llm/passive.js";
+let stopped=false;const loop=async()=>{while(!stopped){const started=Date.now();try{console.log(JSON.stringify(await runTick()));if(new Date().getMinutes()===0)await runPassiveGeneralCycle();}catch(error){console.error("tick_failed",error);}await new Promise(r=>setTimeout(r,Math.max(1000,60_000-(Date.now()-started))));}};process.on("SIGTERM",()=>{stopped=true;});process.on("SIGINT",()=>{stopped=true;});void loop();
