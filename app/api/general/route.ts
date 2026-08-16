@@ -1,4 +1,5 @@
 type Provider = "openai" | "anthropic";
+type GeneralAction = { name: string; arguments: Record<string, unknown> };
 
 type GeneralRequest = {
   provider?: Provider;
@@ -6,6 +7,7 @@ type GeneralRequest = {
   apiKey?: string;
   mode?: "test" | "chat";
   message?: string;
+  history?: Array<{ role: "king" | "general"; text: string }>;
   kingdom?: {
     name?: string;
     ruler?: string;
@@ -18,8 +20,19 @@ type GeneralRequest = {
     channelSpeed?: number;
     activeConstruction?: { name: string; secondsRemaining: number } | null;
     buildTimes?: Array<{ name: string; nextLevel: number; seconds: number }>;
+    loyalty?: number;
+    quota?: number;
+    terrain?: unknown;
   };
 };
+
+const actionTools = [
+  { name: "build_structure", description: "Yeni bina kurar veya mevcut binayı tam bir seviye yükseltir. Açık ve rutin bir inşa emrinde tekrar onay istemeden çağır. confirmed_risk yalnızca Kral, bildirilen kaynak/yiyecek riskine rağmen açıkça ısrar etmişse true olabilir.", parameters: { type: "object", properties: { building_type: { type: "string", enum: ["keep","wheat_farm","lumberjack","quarry","town_square","barracks","apple_orchard","mill","market","wall","mine"] }, target_level: { type: "integer", minimum: 1, maximum: 6 }, confirmed_risk: { type: "boolean" } }, required: ["building_type","target_level"], additionalProperties: false } },
+  { name: "train_unit", description: "Kral açıkça birlik eğitmeni istediğinde eğitim kuyruğu başlatır. Yiyecek krizi veya büyük nüfus kaybı varsa önce teyit iste; teyitten sonra confirmed_risk true olabilir.", parameters: { type: "object", properties: { unit_type: { type: "string", enum: ["spearman"] }, count: { type: "integer", minimum: 1, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["unit_type","count"], additionalProperties: false } },
+  { name: "host_festival", description: "Halkın rızasını artırmak için şenlik düzenler.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "set_tax_rate", description: "Vergi oranını değiştirir. %30 üzeri risklidir; confirmed_risk yalnızca Kral konuşma geçmişinde sonucu duyduktan sonra açıkça ısrar ettiyse true olabilir.", parameters: { type: "object", properties: { rate_percent: { type: "integer", minimum: 0, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["rate_percent"], additionalProperties: false } },
+  { name: "accelerate_construction", description: "Devam eden inşaatı, kalan süreye göre oyun motorunun hesaplayacağı altın bedeliyle anında bitirir. Kral hızlandırmayı açıkça emrettiğinde çağır; maliyet uydurma.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+] as const;
 
 const json = (body: unknown, status = 200) =>
   Response.json(body, {
@@ -50,9 +63,17 @@ function gamePrompt(body: GeneralRequest) {
     "Karşılaştırma varsa Markdown tablosu; sıralı işler varsa numaralı liste kullan. Aksi halde 1-3 doğal paragraf yeterlidir.",
     "Markdown kullanabilirsin fakat aynı satırda başlık işaretleri, üçlü tire ayraçları veya iç içe biçim karmaşası üretme.",
     "KRALLIK_DURUMU içindeki kesin süreleri, kaynakları ve mevcut inşaatı esas al. Bilinen bir değere 'oyun ayarına göre değişir' deme.",
-    "Oyunda gerçekten yapılmamış bir eylemi yapılmış gibi gösterme; karar yetkisi Kraldadır.",
+    "Sen krallığın günlük yönetimini fiilen yürüten Generalsin. Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
+    "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı ve açıkça istenmiş inşaat hızlandırma. Bunları kaynak/kota uygunsa uygula.",
+    "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
+    "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
     `KRALLIK_DURUMU=${JSON.stringify(state)}`,
   ].join("\n");
+}
+
+function conversation(body: GeneralRequest) {
+  const history = (body.history ?? []).slice(-8).map(item => ({ role: item.role === "king" ? "user" as const : "assistant" as const, content: item.text.slice(0, 1200) }));
+  return [...history, { role: "user" as const, content: body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message! }];
 }
 
 async function openAI(body: GeneralRequest) {
@@ -64,16 +85,8 @@ async function openAI(body: GeneralRequest) {
     },
     body: JSON.stringify({
       model: body.model,
-      messages: [
-        { role: "system", content: gamePrompt(body) },
-        {
-          role: "user",
-          content:
-            body.mode === "test"
-              ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor."
-              : body.message,
-        },
-      ],
+      messages: [{ role: "system", content: gamePrompt(body) }, ...conversation(body)],
+      ...(body.mode === "chat" ? { tools: actionTools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" } : {}),
       temperature: 0.3,
       max_completion_tokens: 700,
     }),
@@ -81,8 +94,10 @@ async function openAI(body: GeneralRequest) {
   });
   const raw = await response.text();
   if (!response.ok) throw new Error(providerError(response.status, raw));
-  const data = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content?.trim() || "General bağlantısı doğrulandı.";
+  const data = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
+  const message = data.choices?.[0]?.message;
+  const actions:GeneralAction[]=(message?.tool_calls??[]).flatMap(call=>{try{return call.function?.name?[{name:call.function.name,arguments:JSON.parse(call.function.arguments||"{}") as Record<string,unknown>}]:[]}catch{return[]}});
+  return { text: message?.content?.trim() || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
 async function anthropic(body: GeneralRequest) {
@@ -98,26 +113,21 @@ async function anthropic(body: GeneralRequest) {
       max_tokens: 700,
       temperature: 0.3,
       system: gamePrompt(body),
-      messages: [
-        {
-          role: "user",
-          content:
-            body.mode === "test"
-              ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor."
-              : body.message,
-        },
-      ],
+      messages: conversation(body),
+      ...(body.mode === "chat" ? { tools: actionTools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters})), tool_choice: { type: "auto" } } : {}),
     }),
     signal: AbortSignal.timeout(30_000),
   });
   const raw = await response.text();
   if (!response.ok) throw new Error(providerError(response.status, raw));
-  const data = JSON.parse(raw) as { content?: Array<{ type?: string; text?: string }> };
-  return (data.content ?? [])
+  const data = JSON.parse(raw) as { content?: Array<{ type?: string; text?: string; name?: string; input?: Record<string,unknown> }> };
+  const text = (data.content ?? [])
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("\n")
-    .trim() || "General bağlantısı doğrulandı.";
+    .trim();
+  const actions:GeneralAction[]=(data.content??[]).filter(part=>part.type==="tool_use"&&part.name).map(part=>({name:part.name!,arguments:part.input??{}}));
+  return { text: text || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
 export async function POST(request: Request) {
@@ -132,8 +142,8 @@ export async function POST(request: Request) {
     if (body.mode !== "test" && (!body.message?.trim() || body.message.length > 2_000)) {
       return json({ error: "Mesaj 1–2000 karakter olmalı." }, 400);
     }
-    const text = body.provider === "openai" ? await openAI(body) : await anthropic(body);
-    return json({ connected: true, text });
+    const result = body.provider === "openai" ? await openAI(body) : await anthropic(body);
+    return json({ connected: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
     return json({ error: message }, 502);

@@ -25,3 +25,35 @@
   font: 600 8px Cinzel;
   cursor: pointer;
 }
+
+.general-authority {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid #b9a274;
+  background: #decea7;
+}
+
+.general-authority > span {
+  color: #8f302f;
+  font: 600 7px JetBrains Mono;
+}
+
+.general-authority > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 5px 0;
+}
+
+.general-authority i {
+  padding: 3px 5px;
+  border: 1px solid #aa9162;
+  background: #efe1bd;
+  font: normal 6px JetBrains Mono;
+}
+
+.general-authority small {
+  display: block;
+  color: #665038;
+  font: 7px/1.35 JetBrains Mono;
+}
