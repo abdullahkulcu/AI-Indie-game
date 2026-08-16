@@ -57,3 +57,105 @@
   color: #665038;
   font: 7px/1.35 JetBrains Mono;
 }
+
+.admin-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-header-actions button {
+  border: 1px solid #715b3d;
+  padding: 10px 13px;
+  background: transparent;
+  color: #c9ac78;
+  font: 600 8px Cinzel;
+  cursor: pointer;
+}
+
+.admin-login {
+  width: min(480px, 100%);
+  margin: 9vh auto;
+  padding: 28px;
+  border: 1px solid #9b763e;
+  background: #e6d5ac;
+  color: #33241a;
+  box-shadow: 0 22px 55px #0009, inset 0 0 0 4px #d8c49a;
+}
+
+.admin-login > p {
+  margin: 0 0 8px;
+  color: #8f302f;
+  font: 600 8px JetBrains Mono;
+}
+
+.admin-login h2 {
+  margin: 0 0 8px;
+  font: 600 21px Cinzel;
+}
+
+.admin-login > span {
+  font: 11px/1.45 Spectral;
+}
+
+.admin-login form {
+  display: grid;
+  gap: 13px;
+  margin-top: 22px;
+}
+
+.admin-login label {
+  font: 600 8px JetBrains Mono;
+}
+
+.admin-login input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 11px;
+  border: 1px solid #9e8052;
+  background: #f7ebce;
+}
+
+.admin-login form button {
+  border: 0;
+  padding: 12px;
+  background: #6d2028;
+  color: #f0dbb1;
+  font: 600 8px Cinzel;
+  cursor: pointer;
+}
+
+.general-only-note {
+  margin: 10px 12px;
+  padding: 10px 11px;
+  border-left: 3px solid #78282e;
+  background: #d7c39b;
+}
+
+.general-only-note b,
+.general-only-note span {
+  display: block;
+}
+
+.general-only-note b {
+  margin-bottom: 4px;
+  font: 600 9px Cinzel;
+}
+
+.general-only-note span {
+  color: #665038;
+  font: 8px/1.45 JetBrains Mono;
+}
+
+.readonly {
+  cursor: default !important;
+}
+
+.build-action.readonly.locked {
+  opacity: .52;
+}
+
+.tax-control input:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}

@@ -1,11 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves, sessions, users } from "../../../db/schema";
-import { currentUser } from "../../../server/account-auth";
+import { currentAdminUser } from "../../../server/account-auth";
 
 export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
-async function admin(request: Request) { const user = await currentUser(request); return user?.role === "admin" ? user : null; }
+async function admin(request: Request) { return currentAdminUser(request); }
 
 export async function GET(request: Request) {
   if (!(await admin(request))) return Response.json({ error: "Yönetici yetkisi gerekli." }, { status: 403, headers: noStore });

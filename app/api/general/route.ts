@@ -23,6 +23,8 @@ type GeneralRequest = {
     loyalty?: number;
     quota?: number;
     terrain?: unknown;
+    strategyNote?: string;
+    hourlyRates?: Record<string, number>;
   };
 };
 
@@ -32,6 +34,7 @@ const actionTools = [
   { name: "host_festival", description: "Halkın rızasını artırmak için şenlik düzenler.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_tax_rate", description: "Vergi oranını değiştirir. %30 üzeri risklidir; confirmed_risk yalnızca Kral konuşma geçmişinde sonucu duyduktan sonra açıkça ısrar ettiyse true olabilir.", parameters: { type: "object", properties: { rate_percent: { type: "integer", minimum: 0, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["rate_percent"], additionalProperties: false } },
   { name: "accelerate_construction", description: "Devam eden inşaatı, kalan süreye göre oyun motorunun hesaplayacağı altın bedeliyle anında bitirir. Kral hızlandırmayı açıkça emrettiğinde çağır; maliyet uydurma.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "set_strategy_note", description: "Kralın uzun vadeli yönetim doktrinini kaydeder. Kral ekonomi, savunma, halk, büyüme veya risk iştahı için kalıcı bir öncelik belirttiğinde çağır.", parameters: { type: "object", properties: { note: { type: "string", minLength: 5, maxLength: 300 } }, required: ["note"], additionalProperties: false } },
 ] as const;
 
 const json = (body: unknown, status = 200) =>
@@ -63,7 +66,12 @@ function gamePrompt(body: GeneralRequest) {
     "Karşılaştırma varsa Markdown tablosu; sıralı işler varsa numaralı liste kullan. Aksi halde 1-3 doğal paragraf yeterlidir.",
     "Markdown kullanabilirsin fakat aynı satırda başlık işaretleri, üçlü tire ayraçları veya iç içe biçim karmaşası üretme.",
     "KRALLIK_DURUMU içindeki kesin süreleri, kaynakları ve mevcut inşaatı esas al. Bilinen bir değere 'oyun ayarına göre değişir' deme.",
-    "Sen krallığın günlük yönetimini fiilen yürüten Generalsin. Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
+    "Kral düğmelere basarak krallığı mikro-yönetmez; sen krallığın günlük yönetimini fiilen yürüten Generalsin. Kral hedef, emir, gerekçe ve siyasi baskı sunar; uygulama ayrıntısını sen seçersin.",
+    "Kralın her cümlesine itaat etmek zorunda değilsin. Kaynaklar, halk, sadakat ve doktrine göre emri tart; makulse uygula, riskliyse itiraz et ve gerekçe iste, felaketse açıkça reddet.",
+    "İkna kuralı: Kral yalnızca 'evet' veya 'yap' diyerek riski aşamaz. Sonucu anladığını gösteren gerekçe, değişen koşul veya güçlü stratejik neden sunarsa konuşma geçmişini değerlendirip confirmed_risk kullanabilirsin.",
+    "Belirsiz ama stratejik bir talimatta ayrıntıyı Kral'a geri yıkma; mevcut duruma göre en makul rutin eylemi kendin seç. Yalnızca gerçek anlamda eksik hedef veya büyük risk varsa soru sor.",
+    "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
+    "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı ve açıkça istenmiş inşaat hızlandırma. Bunları kaynak/kota uygunsa uygula.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
     "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
