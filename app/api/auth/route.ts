@@ -32,7 +32,14 @@ export async function POST(request: Request) {
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
     if (existing) return Response.json({ error: "Bu e-posta zaten kayıtlı." }, { status: 409, headers });
     const id = crypto.randomUUID();
-    const role = await inviteMatches(body.adminInvite ?? "", env.ADMIN_INVITE_HASH) ? "admin" : "player";
+    const hasInvite = Boolean(body.adminInvite?.trim()), validInvite = await inviteMatches(body.adminInvite ?? "", env.ADMIN_INVITE_HASH);
+    if (hasInvite && !validInvite) return Response.json({ error: "Yönetici davet kodu geçersiz." }, { status: 403, headers });
+    let role: "admin" | "player" = "player";
+    if (validInvite) {
+      const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(users).where(eq(users.role, "admin"));
+      if (Number(count) > 0) return Response.json({ error: "Yönetici davet kodu daha önce kullanılmış." }, { status: 409, headers });
+      role = "admin";
+    }
     await db.insert(users).values({ id, email, displayName, passwordHash: await hashPassword(password), role });
     // Önceki özel sürümdeki hesap bağlı krallığı yeni oyun hesabına bir kez taşır.
     const platformUser = await getChatGPTUser();

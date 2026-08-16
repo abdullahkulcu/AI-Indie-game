@@ -10,7 +10,7 @@ export const users = sqliteTable("users", {
   status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   lastLoginAt: text("last_login_at"),
-}, (table) => [uniqueIndex("idx_users_email").on(table.email)]);
+}, (table) => [uniqueIndex("idx_users_email").on(table.email), uniqueIndex("idx_users_single_admin").on(table.role).where(sql`${table.role} = 'admin'`)]);
 
 export const sessions = sqliteTable("sessions", {
   tokenHash: text("token_hash").primaryKey(),

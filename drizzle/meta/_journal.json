@@ -15,6 +15,13 @@
       "when": 1786890179302,
       "tag": "0001_luxuriant_mysterio",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786890540285,
+      "tag": "0002_tricky_makkari",
+      "breakpoints": true
     }
   ]
 }
