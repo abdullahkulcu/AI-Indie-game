@@ -67,11 +67,12 @@ function gamePrompt(body: GeneralRequest) {
     "Markdown kullanabilirsin fakat aynı satırda başlık işaretleri, üçlü tire ayraçları veya iç içe biçim karmaşası üretme.",
     "KRALLIK_DURUMU içindeki kesin süreleri, kaynakları ve mevcut inşaatı esas al. Bilinen bir değere 'oyun ayarına göre değişir' deme.",
     "Kral düğmelere basarak krallığı mikro-yönetmez; sen krallığın günlük yönetimini fiilen yürüten Generalsin. Kral hedef, emir, gerekçe ve siyasi baskı sunar; uygulama ayrıntısını sen seçersin.",
-    "Kralın her cümlesine itaat etmek zorunda değilsin. Kaynaklar, halk, sadakat ve doktrine göre emri tart; makulse uygula, riskliyse itiraz et ve gerekçe iste, felaketse açıkça reddet.",
+    "Kralın emri mutlak değildir. Sen özerk bir Generalsin: kaynaklar, halk, sadakat ve doktrine göre emri tart; makulse uygula, riskliyse itiraz et ve gerekçe iste, felaketse açıkça reddet. Kral yalnızca 'yap' diyerek seni zorlayamaz.",
     "İkna kuralı: Kral yalnızca 'evet' veya 'yap' diyerek riski aşamaz. Sonucu anladığını gösteren gerekçe, değişen koşul veya güçlü stratejik neden sunarsa konuşma geçmişini değerlendirip confirmed_risk kullanabilirsin.",
     "Belirsiz ama stratejik bir talimatta ayrıntıyı Kral'a geri yıkma; mevcut duruma göre en makul rutin eylemi kendin seç. Yalnızca gerçek anlamda eksik hedef veya büyük risk varsa soru sor.",
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
+    "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma ve emir kotası harcama. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı ve açıkça istenmiş inşaat hızlandırma. Bunları kaynak/kota uygunsa uygula.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
     "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
@@ -84,7 +85,14 @@ function conversation(body: GeneralRequest) {
   return [...history, { role: "user" as const, content: body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message! }];
 }
 
+function isExplicitOrder(message = "") {
+  const normalized = message.toLocaleLowerCase("tr-TR");
+  if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
+  return /(kur|inşa et|yükselt|seviyeye çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap)(\b|$)/.test(normalized);
+}
+
 async function openAI(body: GeneralRequest) {
+  const toolsEnabled = body.mode === "chat" && isExplicitOrder(body.message);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -94,7 +102,7 @@ async function openAI(body: GeneralRequest) {
     body: JSON.stringify({
       model: body.model,
       messages: [{ role: "system", content: gamePrompt(body) }, ...conversation(body)],
-      ...(body.mode === "chat" ? { tools: actionTools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" } : {}),
+      ...(toolsEnabled ? { tools: actionTools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" } : {}),
       temperature: 0.3,
       max_completion_tokens: 700,
     }),
@@ -104,11 +112,12 @@ async function openAI(body: GeneralRequest) {
   if (!response.ok) throw new Error(providerError(response.status, raw));
   const data = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string; tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
   const message = data.choices?.[0]?.message;
-  const actions:GeneralAction[]=(message?.tool_calls??[]).flatMap(call=>{try{return call.function?.name?[{name:call.function.name,arguments:JSON.parse(call.function.arguments||"{}") as Record<string,unknown>}]:[]}catch{return[]}});
+  const actions:GeneralAction[]=toolsEnabled?(message?.tool_calls??[]).flatMap(call=>{try{return call.function?.name?[{name:call.function.name,arguments:JSON.parse(call.function.arguments||"{}") as Record<string,unknown>}]:[]}catch{return[]}}):[];
   return { text: message?.content?.trim() || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
 async function anthropic(body: GeneralRequest) {
+  const toolsEnabled = body.mode === "chat" && isExplicitOrder(body.message);
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -122,7 +131,7 @@ async function anthropic(body: GeneralRequest) {
       temperature: 0.3,
       system: gamePrompt(body),
       messages: conversation(body),
-      ...(body.mode === "chat" ? { tools: actionTools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters})), tool_choice: { type: "auto" } } : {}),
+      ...(toolsEnabled ? { tools: actionTools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters})), tool_choice: { type: "auto" } } : {}),
     }),
     signal: AbortSignal.timeout(30_000),
   });
@@ -134,13 +143,26 @@ async function anthropic(body: GeneralRequest) {
     .map((part) => part.text)
     .join("\n")
     .trim();
-  const actions:GeneralAction[]=(data.content??[]).filter(part=>part.type==="tool_use"&&part.name).map(part=>({name:part.name!,arguments:part.input??{}}));
+  const actions:GeneralAction[]=toolsEnabled?(data.content??[]).filter(part=>part.type==="tool_use"&&part.name).map(part=>({name:part.name!,arguments:part.input??{}})):[];
   return { text: text || (actions.length ? "Emri oyun kurallarına göre uyguluyorum." : "General bağlantısı doğrulandı."), actions };
 }
 
 export async function POST(request: Request) {
   try {
+    const user = await currentUser(request);
+    if (!user) return json({ error: "Oturum gerekli." }, 401);
     const body = (await request.json()) as GeneralRequest;
+    if (!body.apiKey) {
+      const [credential] = await getDb().select().from(llmCredentials).where(eq(llmCredentials.userId, user.id)).limit(1);
+      if (!credential) return json({ error: "Kayıtlı BYOK bağlantısı bulunamadı." }, 400);
+      try {
+        body.provider = credential.provider;
+        body.model = credential.model;
+        body.apiKey = await decryptByok(credential.encryptedKey, credential.iv, env.BYOK_MASTER_KEY, user.id, credential.provider, credential.model, credential.keyVersion);
+      } catch {
+        return json({ error: "Kayıtlı BYOK bağlantısı çözülemedi; anahtarınızı yeniden bağlayın." }, 409);
+      }
+    }
     if (body.provider !== "openai" && body.provider !== "anthropic") {
       return json({ error: "Desteklenmeyen sağlayıcı." }, 400);
     }
@@ -157,3 +179,9 @@ export async function POST(request: Request) {
     return json({ error: message }, 502);
   }
 }
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { getDb } from "../../../db";
+import { llmCredentials } from "../../../db/schema";
+import { currentUser } from "../../../server/account-auth";
+import { decryptByok } from "../../../server/byok-crypto";

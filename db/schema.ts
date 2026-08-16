@@ -46,3 +46,14 @@ export const gameSaves = sqliteTable("game_saves", {
   revision: integer("revision").notNull().default(1),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const llmCredentials = sqliteTable("llm_credentials", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider", { enum: ["openai", "anthropic"] }).notNull(),
+  model: text("model").notNull(),
+  encryptedKey: text("encrypted_key").notNull(),
+  iv: text("iv").notNull(),
+  keyVersion: text("key_version").notNull().default("v1"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
