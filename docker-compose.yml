@@ -8,17 +8,27 @@
 # çağırır; asıl karar sunucuda verilir.
 services:
   app:
-    image: node:22-alpine
+    # glibc tabanlı imaj şart: Cloudflare workerd binary'si glibc'ye bağlıdır ve
+    # Alpine'ın musl'ında ELF yükleyicisi bulunamadığı için `spawn ... ENOENT` verir.
+    image: node:22-bookworm-slim
     working_dir: /app
-    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
+    # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
     ports: ["3000:3000"]
     volumes:
       - .:/app
+      # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
       - node_modules:/app/node_modules
+      - vinext_cache:/app/.vinext
     environment:
       NODE_ENV: development
+      # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
+      # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
+      VINEXT_NO_DEV_LOCK: "1"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      # bookworm-slim'de curl/wget yok; node her zaman var.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -52,3 +62,4 @@ services:
 
 volumes:
   node_modules: {}
+  vinext_cache: {}

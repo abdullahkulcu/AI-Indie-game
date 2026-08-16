@@ -2,7 +2,8 @@ import { and, desc, eq, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { projectPublicKingdom, worldPosition } from "../../../server/world-projection";
+import { projectPublicKingdom } from "../../../server/world-projection";
+import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
@@ -36,22 +37,41 @@ export async function GET(request: Request) {
   if (!channel) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
   await resolveDueMissions(user.id, channel.id, channel.name);
   const [rows, missions, defense, incoming] = await Promise.all([
-    getDb().select({ userId: channelMembers.userId, gameState: gameSaves.gameState }).from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId)).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"), ne(channelMembers.userId, user.id))).orderBy(channelMembers.joinedAt),
+    getDb().select({ userId: channelMembers.userId, gameState: gameSaves.gameState }).from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId)).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"))).orderBy(channelMembers.joinedAt),
     getDb().select().from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.sourceUserId, user.id))).orderBy(desc(intelMissions.completesAt)),
     getDb().select().from(intelDefenses).where(eq(intelDefenses.userId, user.id)).limit(1),
     getDb().select({ id: intelMissions.id }).from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.targetUserId, user.id), eq(intelMissions.status, "detected"))).limit(10),
   ]);
   const latest = new Map<string, typeof missions[number]>();
   missions.forEach(mission => { if (!latest.has(mission.targetUserId)) latest.set(mission.targetUserId, mission); });
-  const kingdoms = rows.flatMap(row => {
+  // Yerleşim channel geneli üzerinden hesaplanır: her krallık seçtiği araziye ait
+  // biyoma, katılım sırasına göre bir sonraki boş halkaya oturur.
+  const snapshots = rows.flatMap(row => {
     const snapshot = projectPublicKingdom(row.userId, row.gameState, channel.name);
-    if (!snapshot) return [];
-    const mission = latest.get(row.userId), discovered = mission?.status === "succeeded";
+    return snapshot ? [snapshot] : [];
+  });
+  const layout = layoutChannel(channel.id, snapshots.map<MemberInput>(entry => ({ userId: entry.id, terrain: entry.terrain })));
+  const home = layout.get(user.id) ?? { x: 0, z: 0, ring: 0, biome: "plain" as const };
+
+  const kingdoms = snapshots.flatMap(snapshot => {
+    if (snapshot.id === user.id) return [];
+    const mission = latest.get(snapshot.id), discovered = mission?.status === "succeeded";
     let report: typeof snapshot | null = null;
     if (discovered && mission?.report) try { report = JSON.parse(mission.report) as typeof snapshot; } catch { report = null; }
-    return [{ id: snapshot.id, name: discovered ? snapshot.name : null, terrain: snapshot.terrain, position: worldPosition(channel.id, snapshot.id), discovered, mission: mission ? { status: mission.status, completesAt: mission.completesAt, successChance: mission.successChance } : null, report }];
+    const placement = layout.get(snapshot.id) ?? { x: 0, z: 0, ring: 0, biome: snapshot.terrain };
+    return [{
+      id: snapshot.id,
+      // Keşfedilmemiş krallığın adı ve kale seviyesi gizli kalır; yalnızca kalesi görünür.
+      name: discovered ? snapshot.name : null,
+      terrain: snapshot.terrain,
+      position: { x: placement.x, z: placement.z },
+      ring: placement.ring,
+      discovered,
+      mission: mission ? { status: mission.status, completesAt: mission.completesAt, successChance: mission.successChance } : null,
+      report,
+    }];
   });
-  return response({ channel, kingdoms, defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length });
+  return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length });
 }
 
 export async function POST(request: Request) {

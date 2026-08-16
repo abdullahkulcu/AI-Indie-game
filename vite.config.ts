@@ -44,9 +44,12 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      // docker compose'da gece vardiyası sidecar'ı sunucuya "app" servis adıyla
+      // ulaşır; Vite bilinmeyen Host başlığını varsayılan olarak reddeder.
+      allowedHosts: ["app", "localhost", "127.0.0.1"],
+      ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
+    },
     plugins: [
       vinext(),
       sites(),
