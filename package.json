@@ -1,0 +1,30 @@
+{
+  "name": "krallik",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Krallık Simülasyonu — LLM-yönetimli, kalıcı, çok oyunculu ortaçağ krallık oyunu",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build -w @krallik/shared && npm run build -w @krallik/server && npm run build -w @krallik/web",
+    "typecheck": "npm run typecheck -w @krallik/shared && npm run typecheck -w @krallik/server && npm run typecheck -w @krallik/web",
+    "test": "npm run test -w @krallik/shared && npm run test -w @krallik/server",
+    "migrate": "npm run migrate -w @krallik/server",
+    "seed": "npm run seed -w @krallik/server",
+    "dev": "npm run build && concurrently -n tsc,api,tick,web -c gray,cyan,magenta,green \"npm:dev:watch\" \"npm:dev:api\" \"npm:dev:tick\" \"npm:dev:web\"",
+    "dev:watch": "npm run watch -w @krallik/server",
+    "dev:api": "npm run dev:api -w @krallik/server",
+    "dev:tick": "npm run dev:tick -w @krallik/server",
+    "dev:web": "npm run dev -w @krallik/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2"
+  }
+}

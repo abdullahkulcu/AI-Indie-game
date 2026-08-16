@@ -1,0 +1,41 @@
+# Geliştirme altyapısı: PostgreSQL + Redis.
+#
+# API ve tick servisi kasıtlı olarak burada değil — ikisi de `npm run dev` ile
+# yerelde koşuyor, böylece watch/hot-reload çalışıyor. Üretimde ikisi ayrı
+# konteyner olarak paketlenir (§16.5 rolling deployment: tick servisi API
+# dağıtımı sırasında ayakta kalmalı).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: krallik-postgres
+    environment:
+      POSTGRES_USER: krallik
+      POSTGRES_PASSWORD: krallik
+      POSTGRES_DB: krallik
+    ports:
+      - '5432:5432'
+    volumes:
+      - krallik-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U krallik -d krallik']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: krallik-redis
+    ports:
+      - '6379:6379'
+    # Redis burada yalnızca kilit/kuyruk için kullanılıyor (§15.1); kalıcı veri
+    # tutmuyor, bu yüzden volume yok — yeniden başlatma güvenli.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  krallik-pgdata:
