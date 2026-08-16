@@ -152,6 +152,14 @@ export async function POST(request: Request) {
   try {
     const user = await currentUser(request);
     if (!user) return json({ error: "Oturum gerekli." }, 401);
+    // BYOK anahtarı Kralın kendi hesabından harcandığı için sınır hesap bazındadır.
+    const limit = await consumeRateLimit(RATE_LIMITS.general, `user:${user.id}`);
+    if (!limit.allowed) {
+      return Response.json({ error: "General'e çok sık danıştınız. Bir süre sonra tekrar deneyin." }, {
+        status: 429,
+        headers: { "cache-control": "no-store", "retry-after": String(limit.retryAfterSeconds) },
+      });
+    }
     const body = (await request.json()) as GeneralRequest;
     if (!body.apiKey) {
       const [credential] = await getDb().select().from(llmCredentials).where(eq(llmCredentials.userId, user.id)).limit(1);
@@ -180,8 +188,17 @@ export async function POST(request: Request) {
       if (inferred) actions = [inferred];
     }
     const cleaned = stripPseudoToolMarkup(result.text);
-    const claimsExecution = /(başlattım|başlatıyorum|uyguladım|tamamlandı|devam ediyor|yükseltiliyor)/i.test(cleaned);
-    const text = actions.length ? "Emri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin." : claimsExecution ? "Bu emri gerçek oyun aracına dönüştüremedim; işlem uygulanmadı." : cleaned;
+    // Guard yalnızca gerçek bir emirde ve hiçbir araç çalışmadığında devreye girer.
+    // Kalıplar birinci tekil şahıs olmalı: "üretim devam ediyor" gibi doğru bir durum
+    // anlatımı emir sayılmaz ve Generalin cevabı silinmez.
+    const claimsExecution = /\b(başlattım|başlatıyorum|uyguladım|uyguluyorum|emrettim|kurdum|kuruyorum|yükselttim|yükseltiyorum|eğittim|eğitiyorum|ayarladım|düzenledim|hızlandırdım|tamamladım)\b/i.test(cleaned);
+    const orderWithoutAction = actions.length === 0 && isExplicitOrder(body.message) && claimsExecution;
+    // Eylem çalıştığında Generalin gerekçesi atılmaz; motorun sonucu altına eklenir.
+    const text = actions.length
+      ? `${cleaned}\n\nEmri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin.`.trim()
+      : orderWithoutAction
+        ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, şenlik ve doktrin kaydı. Ortak maden ve ajan görevleri harita ekranından yürütülür._`.trim()
+        : cleaned;
     return json({ connected: true, text, actions });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
@@ -195,3 +212,4 @@ import { llmCredentials } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
+import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";

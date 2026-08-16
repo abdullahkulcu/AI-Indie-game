@@ -97,3 +97,11 @@ export const sharedMineWorkers = sqliteTable("shared_mine_workers", {
   workers: integer("workers").notNull().default(5),
   joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
+
+// Sabit pencereli hız sınırı sayaçları. `bucket` = "<kapsam>:<kimlik>" (örn. "login:ip:1.2.3.4").
+// Sayaç tek bir upsert deyimiyle artırıldığı için eşzamanlı isteklerde atomiktir.
+export const rateLimits = sqliteTable("rate_limits", {
+  bucket: text("bucket").primaryKey(),
+  count: integer("count").notNull().default(1),
+  windowStart: integer("window_start").notNull(),
+});
