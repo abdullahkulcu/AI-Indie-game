@@ -15,3 +15,49 @@
 .population small b.mood.simmering{color:#9c5510}
 .population small b.mood.strike{color:#8f3512}
 .population small b.mood.revolt{color:#7d1a12}
+
+/* ---- Halk sekmesi ---- */
+.populace-panel{display:flex;flex-direction:column;gap:14px}
+.populace-panel .section-head b.mood{font-weight:700}
+.populace-panel .section-head b.mood.content{color:#3f6b22}
+.populace-panel .section-head b.mood.uneasy{color:#8a6a12}
+.populace-panel .section-head b.mood.simmering{color:#9c5510}
+.populace-panel .section-head b.mood.strike{color:#8f3512}
+.populace-panel .section-head b.mood.revolt{color:#7d1a12}
+
+.mood-explain{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.mood-explain div{background:#f2e7cb;border:1px solid #cbb488;padding:8px 10px}
+.mood-explain span{display:block;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:#7a6540}
+.mood-explain b{font-size:1.05rem;color:#3a2f1d}
+
+.ration-list{display:flex;flex-direction:column;gap:10px}
+.ration-row{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px}
+.ration-head{display:flex;justify-content:space-between;align-items:baseline}
+.ration-head b{font-size:.92rem;color:#3a2f1d}
+.ration-head strong{font-size:1.1rem;color:#6d3325}
+.ration-bar{height:6px;background:#dbc9a2;margin:7px 0 6px}
+.ration-bar i{display:block;height:100%;background:linear-gradient(90deg,#8a6a12,#c2a24d)}
+.ration-row small{display:block;font-size:.68rem;color:#7a6540;line-height:1.45}
+.ration-actions{display:flex;gap:8px;margin-top:8px}
+.ration-actions button{flex:1;padding:6px;font-size:.66rem;letter-spacing:.12em;border:1px solid #a9834a;background:#e6d6ae;color:#4a3a20;cursor:pointer}
+.ration-actions button:hover:not(:disabled){background:#6d3325;color:#f2e7cb}
+.ration-actions button:disabled{opacity:.4;cursor:not-allowed}
+
+.soldier-mood{display:grid;grid-template-columns:auto auto 1fr;gap:4px 12px;align-items:baseline;background:#f2e7cb;border-left:3px solid #a9834a;padding:9px 12px}
+.soldier-mood.warn{border-left-color:#c9873c;background:#f6e6c4}
+.soldier-mood.alarm{border-left-color:#8f3512;background:#f6dfd3}
+.soldier-mood span{font-size:.6rem;letter-spacing:.14em;color:#7a6540}
+.soldier-mood strong{font-size:1.05rem;color:#6d3325}
+.soldier-mood small{grid-column:1/-1;font-size:.68rem;color:#5c4a2c}
+
+.amenity-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.amenity-grid button{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:9px 11px;border:1px solid #cbb488;background:#f2e7cb;cursor:pointer;text-align:left}
+.amenity-grid button.built{border-color:#8a6a12;background:#efe0b8}
+.amenity-grid button:hover:not(:disabled){border-color:#6d3325}
+.amenity-grid button b{font-size:.82rem;color:#3a2f1d}
+.amenity-grid button span{font-size:.66rem;color:#7a6540}
+.amenity-grid button em{font-style:normal;font-size:.6rem;letter-spacing:.12em;color:#6d3325}
+
+/* Altı sekme tek satıra sığsın: yazı ve iç boşluk biraz daralır. */
+.tabs.six{grid-template-columns:repeat(6,1fr)}
+.tabs.six button{padding-left:4px;padding-right:4px;font-size:.62rem;letter-spacing:.08em}

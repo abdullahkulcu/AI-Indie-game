@@ -43,3 +43,6 @@ yarn-error.log*
 /work/
 *.tsbuildinfo
 .idea/
+
+# Alt agent worktreeleri; ayrı git deposu olarak durur, repoya girmemeli
+.claude/worktrees/
