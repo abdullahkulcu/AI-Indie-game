@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { parseSqliteTimestamp, parseStoredSave, validateGameSave } from "../../../server/save-validation";
+import { parseTimestamp, parseStoredSave, validateGameSave } from "../../../server/save-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,7 @@ export async function PUT(request: Request) {
   const channel = await activeChannel(user.id);
   const result = validateGameSave(body.game, {
     previous: existing ? parseStoredSave(existing.gameState) : null,
-    previousUpdatedAt: existing ? parseSqliteTimestamp(existing.updatedAt) : null,
+    previousUpdatedAt: existing ? parseTimestamp(existing.updatedAt) : null,
     channelSpeed: channel?.speed ?? 1,
     channelName: channel?.name ?? null,
   });

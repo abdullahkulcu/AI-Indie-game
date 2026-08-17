@@ -274,9 +274,14 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
   return { ok: true, game };
 }
 
-/** D1'in `CURRENT_TIMESTAMP` metnini ("YYYY-MM-DD HH:MM:SS", UTC) epoch'a çevirir. */
-export function parseSqliteTimestamp(value: string | null | undefined): number | null {
+/**
+ * Kayıt zaman damgasını epoch'a çevirir. Postgres timestamptz sürücüden Date olarak
+ * gelir; eski D1 kayıtlarındaki "YYYY-MM-DD HH:MM:SS" metni de desteklenmeye devam eder.
+ */
+export function parseTimestamp(value: Date | string | null | undefined): number | null {
   if (!value) return null;
-  const parsed = Date.parse(`${value.trim().replace(" ", "T")}Z`);
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  const text = value.trim();
+  const parsed = Date.parse(text.includes("T") ? text : `${text.replace(" ", "T")}Z`);
   return Number.isFinite(parsed) ? parsed : null;
 }

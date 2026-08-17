@@ -7,6 +7,16 @@
 # olduğu için ayrı bir Postgres gerekmez. `cron` yalnızca saatte bir /api/cron'u
 # çağırır; asıl karar sunucuda verilir.
 services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: demirkale
+      POSTGRES_USER: demirkale
+      POSTGRES_PASSWORD: demirkale
+    ports: ["5433:5432"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U demirkale"], interval: 3s, timeout: 3s, retries: 30}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+
   app:
     # glibc tabanlı TAM imaj şart:
     #  - workerd binary'si glibc'ye bağlıdır; Alpine'ın musl'ında ELF yükleyicisi
@@ -25,8 +35,11 @@ services:
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
       - node_modules:/app/node_modules
       - vinext_cache:/app/.vinext
+    depends_on:
+      postgres: {condition: service_healthy}
     environment:
       NODE_ENV: development
+      DATABASE_URL: postgres://demirkale:demirkale@postgres:5432/demirkale
       # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
       # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
       VINEXT_NO_DEV_LOCK: "1"
@@ -65,5 +78,6 @@ services:
         done
 
 volumes:
+  postgres_data: {}
   node_modules: {}
   vinext_cache: {}

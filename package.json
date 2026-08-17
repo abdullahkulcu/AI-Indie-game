@@ -14,9 +14,10 @@
     "api": "tsx watch server/index.ts",
     "api:start": "tsx server/index.ts",
     "tick": "tsx server/tick/worker.ts",
-    "db:migrate": "for f in migrations/*.sql; do psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate-from-d1": "tsx scripts/migrate-d1-to-postgres.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
