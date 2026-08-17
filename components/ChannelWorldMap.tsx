@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BIOMES } from "@/engine/world-map";
+import { BIOMES, biomeFeatures } from "@/engine/world-map";
 
 type IntelReport = { ruler: string; keepLevel: number; population: number; buildingCount: number; army: number };
 type WorldKingdom = { id: string; name: string | null; terrain: string; position: { x: number; z: number }; ring?: number; discovered: boolean; mission: { status: "pending" | "succeeded" | "failed" | "detected"; completesAt: number; successChance: number } | null; report: IntelReport | null };
@@ -48,6 +48,10 @@ export default function ChannelWorldMap({ channelName, homeName, homeTerrain, ho
             const angle = biome.centerAngle * Math.PI / 180;
             return <em key={biome.id} className={biome.id} style={{ left: `${50 + Math.cos(angle) * 38}%`, top: `${50 + Math.sin(angle) * 38}%` }}>{biome.label}</em>;
           })}
+        </div>
+        <div className="map-features" aria-hidden="true">
+          {biomeFeatures(channelName, span).map((feature, index) =>
+            <span key={index} className={feature.biome} style={{ left: `${project(feature.x, span)}%`, top: `${project(feature.z, span)}%`, fontSize: `${feature.size}px` }}>{feature.glyph}</span>)}
         </div>
         <div className="map-rings" aria-hidden="true">{[1, 2, 3, 4, 5].map(ring => <i key={ring} style={{ width: `${ring * 17}%`, height: `${ring * 17}%` }}/>)}</div>
         <div className="map-river"/><div className="map-road road-a"/><div className="map-road road-b"/>

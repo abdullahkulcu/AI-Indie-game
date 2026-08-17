@@ -87,6 +87,42 @@ export function sharedMinePosition(): { x: number; z: number } {
   return { x: -17, z: -17 };
 }
 
+/**
+ * Biyomların arazi öğeleri. Deterministiktir: aynı channel her açılışta aynı
+ * ormanı, aynı dağı gösterir. Görüş alanının dışına taşacak kadar üretilir ki
+ * dünya çerçeveli bir ada değil, sürüp giden bir diyar gibi okunsun.
+ */
+export type Feature = { biome: BiomeId; glyph: string; x: number; z: number; size: number };
+
+const FEATURE_GLYPHS: Record<BiomeId, string[]> = {
+  forest: ["🌲", "🌲", "🌳"],
+  mountain: ["⛰", "⛰", "🏔"],
+  riverbank: ["≈", "≈", "🌊"],
+  plain: ["🌾", "🌾", "ʬ"],
+};
+
+export function biomeFeatures(channelId: string, extent: number, perBiome = 26): Feature[] {
+  const features: Feature[] = [];
+  for (const biome of BIOMES) {
+    const glyphs = FEATURE_GLYPHS[biome.id];
+    for (let index = 0; index < perBiome; index += 1) {
+      const seed = `${channelId}:${biome.id}:${index}`;
+      // Yarıçap görüş alanının 1.35 katına kadar; öğeler kenarlardan taşar.
+      const radius = 12 + ((index * 37) % 100) / 100 * extent * 1.35 + jitter(`${seed}:r`, 10);
+      const angleDeg = biome.centerAngle + jitter(`${seed}:a`, biome.spread * 0.92);
+      const angle = angleDeg * Math.PI / 180;
+      features.push({
+        biome: biome.id,
+        glyph: glyphs[index % glyphs.length],
+        x: Math.round(Math.cos(angle) * radius * 10) / 10,
+        z: Math.round(Math.sin(angle) * radius * 10) / 10,
+        size: 10 + ((index * 53) % 7),
+      });
+    }
+  }
+  return features;
+}
+
 /** Haritanın kaç birim genişliğinde çizileceği; halkalar büyüdükçe dünya da büyür. */
 export function worldExtent(placements: Iterable<Placement>) {
   let max = RING_START;

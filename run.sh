@@ -9,7 +9,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 DEV_VARS=".dev.vars"
-ENV_FILE=".env"
 APP_URL="http://localhost:3000"
 PG_HOST_URL="postgres://demirkale:demirkale@127.0.0.1:5433/demirkale"
 PG_CONTAINER_URL="postgres://demirkale:demirkale@postgres:5432/demirkale"
@@ -44,26 +43,6 @@ EOF
 
 read_dev_var(){ grep -E "^$1=" "$DEV_VARS" 2>/dev/null | head -1 | cut -d= -f2-; }
 
-# Cron sidecar'ı .env'den, Worker ise .dev.vars'tan okur. İkisi ayrışırsa cron 401 alır,
-# bu yüzden .dev.vars tek kaynak kabul edilip .env ondan türetilir.
-sync_env(){
-  ensure_dev_vars
-  local secret; secret=$(read_dev_var CRON_SECRET)
-  [ -n "$secret" ] || die "CRON_SECRET $DEV_VARS içinde yok."
-  local target="${CRON_TARGET:-http://app:3000/api/cron}"
-  local interval="${CRON_INTERVAL_SECONDS:-3600}"
-  if [ -f "$ENV_FILE" ]; then
-    target=$(grep -E '^CRON_TARGET=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || echo "$target")
-    interval=$(grep -E '^CRON_INTERVAL_SECONDS=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || echo "$interval")
-  fi
-  cat > "$ENV_FILE" <<EOF
-# run.sh tarafından .dev.vars'tan türetilir; elle düzenlemeyin.
-CRON_SECRET=$secret
-CRON_TARGET=${target:-http://app:3000/api/cron}
-CRON_INTERVAL_SECONDS=${interval:-3600}
-EOF
-}
-
 wait_healthy(){
   local name="$1" limit="${2:-60}" i=0 state
   while [ "$i" -lt "$limit" ]; do
@@ -76,7 +55,7 @@ wait_healthy(){
 }
 
 cmd_up(){
-  need docker; sync_env
+  need docker; ensure_dev_vars
   bold "Demirkale ayağa kaldırılıyor"
   docker compose up -d
   wait_healthy ai-indie-game-postgres-1 24
@@ -97,8 +76,8 @@ cmd_reset(){
   [ "$answer" = "e" ] || [ "$answer" = "E" ] || { info "vazgeçildi"; return 0; }
   docker compose down -v
 }
-cmd_logs(){ need docker; sync_env; docker compose logs -f "${1:-}"; }
-cmd_ps(){ need docker; sync_env; docker compose ps; }
+cmd_logs(){ need docker; docker compose logs -f "${1:-}"; }
+cmd_ps(){ need docker; ensure_dev_vars; docker compose ps; }
 
 # Şema ve veri. Host'tan çalıştığı için 5433 portu kullanılır.
 cmd_db_push(){ need npx; bold "şema Postgres'e uygulanıyor"; DATABASE_URL="$PG_HOST_URL" npx drizzle-kit push; }

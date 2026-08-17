@@ -57,9 +57,11 @@ services:
     image: alpine:3.20
     depends_on:
       app: {condition: service_healthy}
+    # Sır, Worker'ın okuduğu dosyanın aynısından gelir. Ayrı bir .env tutulsaydı
+    # iki dosya ayrışabilir ve cron sessizce 401 alırdı.
+    env_file: [.dev.vars]
     environment:
       CRON_TARGET: ${CRON_TARGET:-http://app:3000/api/cron}
-      CRON_SECRET: ${CRON_SECRET:?CRON_SECRET tanımlanmalı}
       CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-3600}
     command:
       - sh
