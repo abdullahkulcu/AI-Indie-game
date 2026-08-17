@@ -17,17 +17,27 @@ TypeScript seçildi. React/Three.js arayüzü, Fastify API, dakikalık worker ve
 ## Yerel çalıştırma
 
 ```bash
-cp .env.example .env
-# .env içindeki BYOK_MASTER_KEY'i doldurun
-docker compose up -d
-npm run dev
-npm run api
-npm run tick
+./run.sh              # postgres + uygulama + gece cron'u ayağa kaldırır
+./run.sh db:push      # ilk kurulumda şemayı uygular
 ```
 
-Web: `http://localhost:3000`, API: `http://localhost:8787`.
+Web: `http://localhost:3000`. İlk çalıştırmada `.dev.vars` (Worker sırları) ve
+`.env` (cron sidecar) otomatik üretilir; `CRON_SECRET` ikisinde senkron tutulur.
 
-İlk açılış channel, krallık, arazi ve General kurulumuyla başlar. Yayımlanmış istemcideki oynanabilir hızlı-channel kaydı cihazın `localStorage` alanında tutulur; kaynak tick'i, inşa/eğitim kuyruğu, emir kotası, vergi ve şenlik çevrimdışı da ilerler. Çok oyunculu kalıcı dünya ve gerçek BYOK çağrıları için Fastify API, PostgreSQL ve Redis birlikte çalıştırılmalıdır.
+Bütün komutlar için `./run.sh help`. Sık kullanılanlar:
+
+| Komut | Ne yapar |
+| --- | --- |
+| `./run.sh logs app` | uygulama loglarını izler |
+| `./run.sh psql` | veritabanı kabuğu |
+| `./run.sh cron` | gece vardiyasını beklemeden tetikler |
+| `./run.sh dev` | host'ta dev sunucusu (port 3001, docker kapalıyken) |
+| `./run.sh check` | tsc + lint |
+| `./run.sh reset` | durdurur ve veriyi siler (onay ister) |
+
+Veri Postgres'te tutulur (docker'da `postgres` servisi, host'tan port 5433).
+Yayında `DATABASE_URL` Worker secret olarak girilmeli ve Postgres dışarıdan
+erişilebilir olmalıdır; ölçekte önüne Hyperdrive veya PgBouncer konmalıdır.
 
 ## Güvenlik sınırı
 
