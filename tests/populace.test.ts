@@ -136,3 +136,12 @@ test("halk durumu değişince deftere bildirim düşer", () => {
   const after = tick(collapsing, T0 + 6 * 3_600_000);
   assert.ok(after.notices.some(notice => notice.kind === "HALK" || notice.kind === "AÇLIK"), "Kral haberdar edilmeli");
 });
+
+test("akın halkı bir süre sarsılmış bırakır, bir günde düzelir", () => {
+  const base = { servedFood: 100, servedAle: 0, taxRate: 15, population: 100, capacity: 150, buildings: [] };
+  const calm = moodTarget(base);
+  const justRaided = moodTarget({ ...base, hoursSinceRaid: 0 });
+  assert.ok(calm - justRaided > 10, "akının hemen ardından hedef rıza belirgin düşmeli");
+  assert.ok(moodTarget({ ...base, hoursSinceRaid: 8 }) > justRaided, "zamanla toparlamalı");
+  assert.ok(calm - moodTarget({ ...base, hoursSinceRaid: 24 }) < 2, "bir günde neredeyse tamamen düzelmeli");
+});

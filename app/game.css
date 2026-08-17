@@ -61,3 +61,19 @@
 /* Altı sekme tek satıra sığsın: yazı ve iç boşluk biraz daralır. */
 .tabs.six{grid-template-columns:repeat(6,1fr)}
 .tabs.six button{padding-left:4px;padding-right:4px;font-size:.62rem;letter-spacing:.08em}
+
+/* ---- Nöbet ve akın (Ordu sekmesi) ---- */
+.watch-block{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-top:10px}
+.watch-head{display:flex;justify-content:space-between;align-items:baseline}
+.watch-head b{font-size:.92rem;color:#3a2f1d}
+.watch-head strong{font-size:1.1rem;color:#6d3325}
+.watch-block small{display:block;font-size:.68rem;color:#7a6540;line-height:1.45;margin-top:4px}
+.watch-block small.watch-tradeoff{color:#8a5a1c}
+
+.raid-log{margin-top:10px;background:#f2e7cb;border-left:3px solid #a9834a;padding:9px 12px}
+.raid-tally{display:grid;grid-template-columns:auto auto auto auto;gap:4px 10px;align-items:baseline;margin-bottom:6px}
+.raid-tally span{font-size:.6rem;letter-spacing:.12em;color:#7a6540}
+.raid-tally b{font-size:1rem;color:#3f6b22}
+.raid-tally b.bad{color:#8f3512}
+.raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
+.raid-log p.quiet{color:#8a7854;font-style:italic}

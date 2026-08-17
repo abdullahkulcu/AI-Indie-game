@@ -114,6 +114,7 @@ export function tick(g: Game, now: number): Game {
   const target = moodTarget({
     servedFood: served.food, servedAle: served.ale, taxRate: g.taxRate,
     population: g.population, capacity, buildings,
+    hoursSinceRaid: g.lastRaidAt ? (now - g.lastRaidAt) / 3_600_000 : null,
   });
   // Yağmalanan krallıkta halkın rızası da düşer.
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);

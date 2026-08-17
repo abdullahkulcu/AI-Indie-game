@@ -22,6 +22,10 @@ export const RATION_LIMITS = { min: 0, max: 200 } as const;
 /** Rızanın hedefe yaklaşma hızı (puan/saat). */
 const MOOD_APPROACH = 5;
 
+/** Akının hemen ardından hedef rızadan düşülen puan ve sönümlenme sabiti (saat). */
+const RAID_TRAUMA = 14;
+const RAID_TRAUMA_HALFLIFE = 8;
+
 export type Rations = { food: number; ale: number; soldierPay: number };
 
 export function rationsOf(game: Partial<Game>): Rations {
@@ -63,6 +67,8 @@ export type MoodInputs = {
   population: number;
   capacity: number;
   buildings: Array<{ type: string; level: number }>;
+  /** Son akından bu yana geçen saat. Akın halkı bir süre sarsılmış bırakır. */
+  hoursSinceRaid?: number | null;
 };
 
 /** Eğlence ve idare yapılarının rızaya katkısı. */
@@ -96,6 +102,13 @@ export function moodTarget(input: MoodInputs) {
   for (const building of input.buildings) {
     const value = AMENITY_VALUE[building.type];
     if (value) target += value * Math.min(3, building.level) * fed;
+  }
+
+  // Akın travması: tek seferlik bir rıza düşüşü hedefe yakınsama yüzünden bir
+  // saatte siliniyordu, yani yağmalanmak hissedilmiyordu. Artık hedefin kendisi
+  // bir süre baskılanır ve yaklaşık bir günde düzelir.
+  if (input.hoursSinceRaid !== null && input.hoursSinceRaid !== undefined) {
+    target -= RAID_TRAUMA * Math.exp(-Math.max(0, input.hoursSinceRaid) / RAID_TRAUMA_HALFLIFE);
   }
 
   // Kalabalıklık: kapasitenin %90'ını aşınca huzursuzluk başlar.
