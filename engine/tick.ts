@@ -1,5 +1,6 @@
 import { catalog, quotaPerHour, resourceLabels, terrainCatalog } from "./catalog";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import type { Game, Key, Res } from "./types";
 
 export const keep = (g: Pick<Game, "buildings">) => g.buildings.find(b => b.type === "keep")?.level ?? 1;
@@ -39,7 +40,8 @@ export function rates(g: Game): Res {
   const gross = grossRates(g);
   const demand = hourlyDemand(g);
   const army = armySize(g.units ?? {});
-  const state = moodState(g.popularity, suppression(army, g.population, g.soldierUnrest ?? 0));
+  // Nöbetteki asker halkı zapt etmeye daha az kalır; nöbetin üretim bedeli budur.
+  const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0));
   const net = { ...gross };
   for (const [key] of resourceLabels) net[key] = gross[key] * state.production;
   net.food -= demand.food;
@@ -82,6 +84,19 @@ export function tick(g: Game, now: number): Game {
     queue = null;
   }
 
+  // --- Dağ akınları -------------------------------------------------------
+  // Nöbetteki asker, Sur ve arazi akını karşılar; yarılan savunma asker, erzak
+  // ve altın götürür. Pencereler mutlak zamana oturduğu için istemcinin küçük
+  // adımları ile sunucunun tek adımı aynı akınları çözer.
+  const watch = watchRatioOf(g);
+  const raid = resolveRaids(g, g.lastTickAt, now, resources);
+  if (raid.events.length) {
+    resources.food = Math.max(0, resources.food - raid.foodStolen);
+    resources.gold = Math.max(0, resources.gold - raid.goldStolen);
+    if (raid.soldiersLost > 0) units = shrinkArmy(units, raid.soldiersLost);
+    notices = [...raid.events.map(event => ({ kind: "AKIN", text: raidNotice(event), at: event.at })).reverse(), ...notices].slice(0, 20);
+  }
+
   const level = keep({ buildings });
   const square = buildings.find(b => b.type === "town_square")?.level ?? 0;
   const capacity = 150 + square * 80 + (level - 1) * 50;
@@ -100,10 +115,11 @@ export function tick(g: Game, now: number): Game {
     servedFood: served.food, servedAle: served.ale, taxRate: g.taxRate,
     population: g.population, capacity, buildings,
   });
-  const popularity = approachMood(g.popularity, target, hours);
+  // Yağmalanan krallıkta halkın rızası da düşer.
+  const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
 
   const soldierUnrest = army > 0 ? soldierUnrestAfter(g.soldierUnrest ?? 0, served.pay, hours) : 0;
-  const state = moodState(popularity, suppression(army, g.population, soldierUnrest));
+  const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, soldierUnrest));
 
   // Nüfus: durumun tabanı + evlilik dairesi ve meydan katkısı.
   const marriage = buildings.find(b => b.type === "marriage_hall")?.level ?? 0;
@@ -129,6 +145,10 @@ export function tick(g: Game, now: number): Game {
     foodRation: rations.food,
     aleRation: rations.ale,
     soldierPay: rations.soldierPay,
+    watchRatio: watch,
+    lastRaidAt: raid.lastRaidAt ?? g.lastRaidAt,
+    raidsRepelled: (g.raidsRepelled ?? 0) + raid.repelled,
+    raidsSuffered: (g.raidsSuffered ?? 0) + raid.suffered,
     population: Math.max(20, Math.min(capacity, g.population + growth)),
     capacity,
     buildings,
@@ -165,7 +185,7 @@ function populaceNotices(
   at: number,
 ) {
   const added: Game["notices"] = [];
-  const previousState = moodState(previous.popularity, suppression(armySize(previous.units ?? {}), previous.population, previous.soldierUnrest ?? 0));
+  const previousState = moodState(previous.popularity, suppression(offWatchStrength(armySize(previous.units ?? {}), watchRatioOf(previous)), previous.population, previous.soldierUnrest ?? 0));
   if (previousState.id !== now.state.id) {
     const text = now.state.id === "revolt" ? "Halk isyan etti; tezgâhlar durdu ve şehirden kaçış başladı."
       : now.state.id === "strike" ? "Halk iş bıraktı; üretim ağır biçimde düştü."

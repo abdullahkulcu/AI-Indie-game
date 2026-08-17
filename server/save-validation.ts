@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveRaids } from "../engine/raids";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
 
@@ -136,6 +137,11 @@ export const gameSaveSchema = z.object({
   aleRation: finite(200).optional(),
   soldierPay: finite(200).optional(),
   soldierUnrest: finite(100).optional(),
+  // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
+  watchRatio: finite(100).optional(),
+  lastRaidAt: timestamp.optional(),
+  raidsRepelled: finite(1_000_000).optional(),
+  raidsSuffered: finite(1_000_000).optional(),
 }).strict();
 
 export type GameSave = z.infer<typeof gameSaveSchema>;
@@ -194,11 +200,20 @@ function checkFirstSave(game: GameSave): ValidationFailure | null {
  * ortak maden ise oyuncunun kaydına cevher yazmaz. Dolayısıyla istemcinin bildirdiği
  * kaynak, sunucunun kendi simülasyonunun üstüne çıkamaz. Bu, genel tavanlardan çok
  * daha dar bir sınırdır ve uydurma kaynağı gerçek üretim eğrisiyle yakalar.
+ *
+ * Akınlar bu varsayımı bozmaz çünkü kaynak ÇALARLAR, üretmezler. Yine de yağmayı
+ * tavandan düşmüyoruz: istemci iki kayıt arasında nöbeti yükseltip akını
+ * püskürtmüş olabilir ve o zaman elinde sunucunun simüle ettiğinden çok kaynak
+ * kalır. Bu meşru bir sonuçtur, hile değildir; tavanı yağmasız üretim eğrisine
+ * göre kurarız, böylece sınır yine üretimle çizilir.
  */
 function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number): ValidationFailure | null {
-  const simulated = tick(previous as Game, Math.max(now, previous.lastTickAt));
+  const horizon = Math.max(now, previous.lastTickAt);
+  const simulated = tick(previous as Game, horizon);
+  const looted = resolveRaids(previous as Game, previous.lastTickAt, horizon, previous.resources);
+  const loot: Partial<Record<(typeof RESOURCE_KEYS)[number], number>> = { food: looted.foodStolen, gold: looted.goldStolen };
   for (const key of RESOURCE_KEYS) {
-    const ceiling = simulated.resources[key] * (1 + SIMULATION_TOLERANCE) + SIMULATION_FLOOR;
+    const ceiling = (simulated.resources[key] + (loot[key] ?? 0)) * (1 + SIMULATION_TOLERANCE) + SIMULATION_FLOOR;
     if (game.resources[key] > ceiling) {
       return fail(409, `Bildirilen ${key} miktarı sunucunun ürettiği değerin üzerinde.`);
     }

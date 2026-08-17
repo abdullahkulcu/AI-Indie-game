@@ -1,5 +1,6 @@
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL } from "./catalog";
-import { clampRation } from "./populace";
+import { armySize, clampRation } from "./populace";
+import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
@@ -169,6 +170,26 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       if (percent < 60 && !confirmed) { blocked(`Asker maaşını %${percent}'e indirmek firara ve isyana yol açar; açık teyit bekliyorum.`); continue; }
       next = { ...next, soldierPay: percent, quota: next.quota - 1, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
       success(`Asker maaşı %${percent} olarak mühürlendi.`);
+      continue;
+    }
+
+    if (action.name === "set_watch_ratio") {
+      const requested = Number(action.arguments.percent);
+      if (!Number.isFinite(requested) || requested < 0 || requested > 100) { blocked("Nöbet oranı %0 ile %100 arasında olmalı."); continue; }
+      const percent = clampWatch(requested);
+      if (percent === watchRatioOf(next)) { blocked(`Nöbet zaten %${percent}; emir kotası harcanmadı.`); continue; }
+      if (next.quota < 1) { blocked("Nöbet emri uygulanmadı: emir kotası tükendi."); continue; }
+      // İki uç da risklidir: düşük nöbet kaleyi akına açar, yüksek nöbet halkı
+      // zapt edecek kuvvet bırakmaz. İkisi de Kralın açık teyidini bekler.
+      if (percent < 30 && !confirmed) { blocked(`Nöbeti %${percent}'e indirmek kaleyi dağ akınlarına açar; açık teyit bekliyorum.`); continue; }
+      if (percent > 85 && armySize(next.units ?? {}) > 0 && !confirmed) { blocked(`%${percent} nöbet halkı zapt edecek asker bırakmaz; açık teyit bekliyorum.`); continue; }
+      next = {
+        ...next,
+        watchRatio: percent,
+        quota: next.quota - 1,
+        notices: [{ kind: "NÖBET", text: `Nöbet oranı %${percent} olarak belirlendi.`, at: now }, ...next.notices].slice(0, 20),
+      };
+      success(`Nöbet oranı %${percent} olarak mühürlendi.`);
       continue;
     }
 
