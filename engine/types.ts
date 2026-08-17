@@ -56,6 +56,11 @@ export type Game = {
   soldierPay?: number;
   /** Maaşı eksik ödenen askerlerin biriken huzursuzluğu (0-100). */
   soldierUnrest?: number;
+  /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
+  watchRatio?: number;
+  lastRaidAt?: number;
+  raidsRepelled?: number;
+  raidsSuffered?: number;
 };
 
 export type GameAction = { name: string; arguments: Record<string, unknown> };

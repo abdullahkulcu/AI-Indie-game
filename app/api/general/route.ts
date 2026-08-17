@@ -35,6 +35,15 @@ type GeneralRequest = {
       foodRation: number; aleRation: number; soldierPay: number;
       army: number; soldierUnrest: number; dailyFoodNeed: number;
     };
+    defense?: {
+      /** Nöbetteki asker oranı (%) ve fiilen nöbet tutan asker sayısı. */
+      watchRatio: number; watchers: number; wallLevel: number;
+      /** Savunma gücü ve bunu üreten arazi çarpanı. */
+      power: number; terrainDefense: number;
+      raidsRepelled: number; raidsSuffered: number;
+      hoursSinceLastRaid: number | null;
+      recentRaids?: Array<{ text: string; hoursAgo: number }>;
+    };
   };
   /** Sunucunun eklediği bağlam; istemciden gelmez. */
   pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
@@ -50,6 +59,7 @@ const actionTools = [
   { name: "set_food_ration", description: "Halka dağıtılan günlük yiyecek istihkakını yüzde olarak belirler. %100 tam doyum demektir; altı halkı aç bırakır ve rızayı hızla düşürür, üstü pahalıdır ama halkı memnun eder. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
   { name: "set_ale_ration", description: "Bira istihkakını yüzde olarak belirler; halkın moralini yükseltir ama açlığı telafi etmez. Bira Evi kurulu değilse uygulanamaz.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 } }, required: ["percent"], additionalProperties: false } },
   { name: "set_soldier_pay", description: "Asker maaşını yüzde olarak belirler. Eksik ödenen askerler önce maaş ister, sonra firar eder, en sonunda isyan eder ve halkı zapt etmeyi bırakır. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
+  { name: "set_watch_ratio", description: "Ordunun ne kadarının sürekli nöbet tutacağını yüzde olarak belirler. Nöbetteki asker dağdan inen kurt, haydut ve akıncıları karşılar; ama nöbette olduğu için halkın huzursuzluğunu bastırmaya daha az kalır. %30'un altı kaleyi akınlara açar, %85'in üstü halkı zapt edecek kuvvet bırakmaz; iki uç da Kralın açık teyidini gerektirir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 100 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
   { name: "set_night_order", description: "Kral 'ben yokken', 'gece', 'çevrimdışıyken' veya 'sen idare et' diyerek kalıcı bir gece emri verdiğinde çağır. Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar. Onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
   { name: "cancel_night_order", description: "Kral gece emrini iptal ettiğinde veya 'artık ben yokken bir şey yapma' dediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. Madendeki toplam işçi üretimi belirler; işçiler krallığın nüfusundan ayrı çalışır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 20 } }, required: ["workers"], additionalProperties: false } },
@@ -94,11 +104,14 @@ function gamePrompt(body: GeneralRequest) {
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma ve emir kotası harcama. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
-    "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak/kota uygunsa uygula.",
+    "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ölçülü nöbet ayarı, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak/kota uygunsa uygula.",
     "Halk sistemi oyunun kalbidir: istihkak → mutluluk → üretim ve nüfus. Yiyecek istihkakı %100 tam doyumdur; altına inmek ucuzdur ama rıza çöker, halk sırayla kaynar, iş bırakır ve isyan eder. İş bırakmada üretim %40'a, isyanda neredeyse sıfıra düşer ve halk göç eder.",
     "Bira ve eğlence yapıları (Park, Tiyatro, Evlilik Dairesi) morali yükseltir ama AÇ HALKA ETKİSİ ÇOK AZDIR; önce karnını doyur, sonra eğlendir.",
     "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
     "İstihkak ve maaş oranlarını Kral sorduğunda ya da açıkça emrettiğinde ayarla. Kralın haberi olmadan halkı aç bırakma.",
+    "Dağlardan rastgele zamanlarda akın gelir: Kurt Sürüsü askeri öldürüp erzak kaçırır, Haydutlar hazineyi soyar, Dağ Akıncıları hepsini birden yapar. Dağ arazisinde akın daha sık ve daha ağırdır; koruma süresi boyunca hiç akın olmaz.",
+    "Akını yalnızca NÖBETTEKİ asker, Sur seviyesi ve arazinin savunma avantajı karşılar. Savunma akının şiddetini aşarsa akın kayıpsız püskürtülür; aşamazsa yarılan pay kadar asker ölür, yiyecek ve altın yağmalanır, halkın rızası düşer. Maaşsız kalıp huzursuzlaşan asker iyi savunmaz.",
+    "Nöbet oranı gerçek bir seçimdir: nöbete verdiğin asker akını karşılar ama halkın huzursuzluğunu bastırmaya daha az kalır, yani üretim ve iş bırakma riski artar. Az askerle iki işi birden yapamazsın; Krala bu bedeli açıkça söyle. Oranı set_watch_ratio ile ayarla, savunma gücünü KRALLIK_DURUMU içindeki defense alanından oku ve rakam uydurma.",
     "Ortak maden channel'daki bütün krallıklarla paylaşılır; madendeki toplam işçi üretimi belirler ve rezerv tükenebilir. Maden emirlerinde send_miners/recall_miners kullan.",
     "Ajan göndermek risklidir: normal başarı ihtimali %10, hedef nöbet kurmuşsa %3'tür ve yakalanırsan hedef seni görür. send_scout çağırırken hedefi yalnızca neighbors listesindeki ordinal ile belirt, kimlik veya isim uydurma. Keşfedilmemiş sancağın adını biliyormuş gibi konuşma.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
@@ -123,7 +136,7 @@ function isExplicitOrder(message = "") {
   const normalized = message.toLocaleLowerCase("tr-TR");
   if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
   // Maden, ajan ve nöbet emirleri de buraya girmeli; aksi halde modele araç hiç iletilmez.
-  return /(kur|inşa et|yükselt|seviyeye çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|yükselt)(\b|$)/.test(normalized);
+  return /(kur|inşa et|yükselt|seviyeye çıkar|çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|nöbete|yükselt)(\b|$)/.test(normalized);
 }
 
 async function openAI(body: GeneralRequest) {
@@ -391,7 +404,7 @@ export async function POST(request: Request) {
         // General itiraz etti ya da teyit istiyor: kendi gerekçesi korunur, uydurma sonuç üretilmez.
         ? `${cleaned}${verdictNotes}`.trim()
         : orderWithoutAction
-          ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
+          ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, istihkak ve maaş ayarı, nöbet oranı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
           : cleaned;
     return json({ connected: true, text, actions, awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")) });
   } catch (error) {
