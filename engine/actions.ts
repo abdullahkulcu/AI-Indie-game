@@ -1,4 +1,5 @@
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL } from "./catalog";
+import { clampRation } from "./populace";
 import { affordable, costFor, debit, keep, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
@@ -144,6 +145,30 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       if (next.quota < 1) { blocked("Vergi emri uygulanmadı: emir kotası tükendi."); continue; }
       next = { ...next, taxRate: rate, quota: next.quota - 1, loyalty: Math.max(0, next.loyalty - (rate > 30 ? 2 : 0)) };
       success(`Vergi oranı %${rate} olarak mühürlendi.`);
+      continue;
+    }
+
+    if (action.name === "set_food_ration" || action.name === "set_ale_ration" || action.name === "set_soldier_pay") {
+      const requested = Number(action.arguments.percent);
+      if (!Number.isFinite(requested) || requested < 0 || requested > 200) { blocked("İstihkak oranı %0 ile %200 arasında olmalı."); continue; }
+      const percent = clampRation(requested);
+      if (next.quota < 1) { blocked("İstihkak emri uygulanmadı: emir kotası tükendi."); continue; }
+      if (action.name === "set_food_ration") {
+        // Açlık sınırına inmek halkı hızla öfkelendirir; teyitsiz uygulanmaz.
+        if (percent < 60 && !confirmed) { blocked(`Yiyecek istihkakını %${percent}'e indirmek halkı aç bırakır; açık teyit bekliyorum.`); continue; }
+        next = { ...next, foodRation: percent, quota: next.quota - 1, notices: [{ kind: "İSTİHKAK", text: `Yiyecek istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+        success(`Yiyecek istihkakı %${percent} olarak mühürlendi.`);
+        continue;
+      }
+      if (action.name === "set_ale_ration") {
+        if (percent > 0 && !next.buildings.some(building => building.type === "brewery")) { blocked("Bira istihkakı için önce Bira Evi kurulmalı."); continue; }
+        next = { ...next, aleRation: percent, quota: next.quota - 1, notices: [{ kind: "İSTİHKAK", text: `Bira istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+        success(`Bira istihkakı %${percent} olarak mühürlendi.`);
+        continue;
+      }
+      if (percent < 60 && !confirmed) { blocked(`Asker maaşını %${percent}'e indirmek firara ve isyana yol açar; açık teyit bekliyorum.`); continue; }
+      next = { ...next, soldierPay: percent, quota: next.quota - 1, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+      success(`Asker maaşı %${percent} olarak mühürlendi.`);
       continue;
     }
 

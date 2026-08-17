@@ -30,6 +30,11 @@ type GeneralRequest = {
     mine?: { workers: number; totalWorkers: number; oreRemaining: number } | null;
     neighbors?: Array<{ ordinal: number; name: string; discovered: boolean; scouting: boolean }>;
     counterIntelligence?: { active: boolean; minutesRemaining: number };
+    populace?: {
+      mood: string; moodScore: number; productionMultiplier: number;
+      foodRation: number; aleRation: number; soldierPay: number;
+      army: number; soldierUnrest: number; dailyFoodNeed: number;
+    };
   };
   /** Sunucunun eklediği bağlam; istemciden gelmez. */
   pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
@@ -42,6 +47,9 @@ const actionTools = [
   { name: "set_tax_rate", description: "Vergi oranını değiştirir. %30 üzeri risklidir; confirmed_risk yalnızca Kral konuşma geçmişinde sonucu duyduktan sonra açıkça ısrar ettiyse true olabilir.", parameters: { type: "object", properties: { rate_percent: { type: "integer", minimum: 0, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["rate_percent"], additionalProperties: false } },
   { name: "accelerate_construction", description: "Devam eden inşaatı, kalan süreye göre oyun motorunun hesaplayacağı altın bedeliyle anında bitirir. Kral hızlandırmayı açıkça emrettiğinde çağır; maliyet uydurma.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "set_strategy_note", description: "Kralın uzun vadeli yönetim doktrinini kaydeder. Kral ekonomi, savunma, halk, büyüme veya risk iştahı için kalıcı bir öncelik belirttiğinde çağır.", parameters: { type: "object", properties: { note: { type: "string", minLength: 5, maxLength: 300 } }, required: ["note"], additionalProperties: false } },
+  { name: "set_food_ration", description: "Halka dağıtılan günlük yiyecek istihkakını yüzde olarak belirler. %100 tam doyum demektir; altı halkı aç bırakır ve rızayı hızla düşürür, üstü pahalıdır ama halkı memnun eder. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
+  { name: "set_ale_ration", description: "Bira istihkakını yüzde olarak belirler; halkın moralini yükseltir ama açlığı telafi etmez. Bira Evi kurulu değilse uygulanamaz.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 } }, required: ["percent"], additionalProperties: false } },
+  { name: "set_soldier_pay", description: "Asker maaşını yüzde olarak belirler. Eksik ödenen askerler önce maaş ister, sonra firar eder, en sonunda isyan eder ve halkı zapt etmeyi bırakır. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
   { name: "set_night_order", description: "Kral 'ben yokken', 'gece', 'çevrimdışıyken' veya 'sen idare et' diyerek kalıcı bir gece emri verdiğinde çağır. Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar. Onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
   { name: "cancel_night_order", description: "Kral gece emrini iptal ettiğinde veya 'artık ben yokken bir şey yapma' dediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. Madendeki toplam işçi üretimi belirler; işçiler krallığın nüfusundan ayrı çalışır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 20 } }, required: ["workers"], additionalProperties: false } },
@@ -87,6 +95,10 @@ function gamePrompt(body: GeneralRequest) {
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma ve emir kotası harcama. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak/kota uygunsa uygula.",
+    "Halk sistemi oyunun kalbidir: istihkak → mutluluk → üretim ve nüfus. Yiyecek istihkakı %100 tam doyumdur; altına inmek ucuzdur ama rıza çöker, halk sırayla kaynar, iş bırakır ve isyan eder. İş bırakmada üretim %40'a, isyanda neredeyse sıfıra düşer ve halk göç eder.",
+    "Bira ve eğlence yapıları (Park, Tiyatro, Evlilik Dairesi) morali yükseltir ama AÇ HALKA ETKİSİ ÇOK AZDIR; önce karnını doyur, sonra eğlendir.",
+    "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
+    "İstihkak ve maaş oranlarını Kral sorduğunda ya da açıkça emrettiğinde ayarla. Kralın haberi olmadan halkı aç bırakma.",
     "Ortak maden channel'daki bütün krallıklarla paylaşılır; madendeki toplam işçi üretimi belirler ve rezerv tükenebilir. Maden emirlerinde send_miners/recall_miners kullan.",
     "Ajan göndermek risklidir: normal başarı ihtimali %10, hedef nöbet kurmuşsa %3'tür ve yakalanırsan hedef seni görür. send_scout çağırırken hedefi yalnızca neighbors listesindeki ordinal ile belirt, kimlik veya isim uydurma. Keşfedilmemiş sancağın adını biliyormuş gibi konuşma.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
@@ -111,7 +123,7 @@ function isExplicitOrder(message = "") {
   const normalized = message.toLocaleLowerCase("tr-TR");
   if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
   // Maden, ajan ve nöbet emirleri de buraya girmeli; aksi halde modele araç hiç iletilmez.
-  return /(kur|inşa et|yükselt|seviyeye çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap|gönder|yolla|görevlendir|geri çek|geri çağır|çek)(\b|$)/.test(normalized);
+  return /(kur|inşa et|yükselt|seviyeye çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|yükselt)(\b|$)/.test(normalized);
 }
 
 async function openAI(body: GeneralRequest) {

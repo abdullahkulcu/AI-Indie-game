@@ -13,6 +13,7 @@ import type { Game } from "../engine/types";
 export const BUILDING_TYPES = [
   "keep", "wheat_farm", "lumberjack", "quarry", "town_square",
   "barracks", "apple_orchard", "mill", "market", "wall", "mine",
+  "park", "brewery", "marriage_hall", "theater",
 ] as const;
 
 export const RESOURCE_KEYS = ["gold", "food", "stone", "wood", "iron", "ale"] as const;
@@ -130,6 +131,11 @@ export const gameSaveSchema = z.object({
   generalConnected: z.boolean(),
   strategyNote: z.string().max(300).optional(),
   startingReserveGranted: z.boolean().optional(),
+  // Halk sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
+  foodRation: finite(200).optional(),
+  aleRation: finite(200).optional(),
+  soldierPay: finite(200).optional(),
+  soldierUnrest: finite(100).optional(),
 }).strict();
 
 export type GameSave = z.infer<typeof gameSaveSchema>;

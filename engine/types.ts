@@ -50,6 +50,12 @@ export type Game = {
   generalConnected: boolean;
   strategyNote?: string;
   startingReserveGranted?: boolean;
+  /** Halk sistemi. Eski kayıtlarda bulunmayabilir; motor varsayılanları uygular. */
+  foodRation?: number;
+  aleRation?: number;
+  soldierPay?: number;
+  /** Maaşı eksik ödenen askerlerin biriken huzursuzluğu (0-100). */
+  soldierUnrest?: number;
 };
 
 export type GameAction = { name: string; arguments: Record<string, unknown> };

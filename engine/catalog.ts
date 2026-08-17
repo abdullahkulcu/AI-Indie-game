@@ -21,6 +21,10 @@ export const catalog = [
   { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "3 açık teklif yuvası" },
   { type: "wall", name: "Sur", category: "Askerî", unlock: 3, seconds: 28800, cost: { stone: 500, wood: 100 }, detail: "+%20 savunma" },
   { type: "mine", name: "Maden", category: "Ekonomi", unlock: 1, seconds: 10800, cost: { wood: 150, stone: 80 }, detail: "50.000 cevher rezervi" },
+  { type: "park", name: "Park", category: "Halk", unlock: 1, seconds: 3000, cost: { wood: 60, gold: 40 }, detail: "Halkın rızasını yükseltir" },
+  { type: "brewery", name: "Bira Evi", category: "Halk", unlock: 2, seconds: 7200, cost: { wood: 140, stone: 90, gold: 80 }, detail: "Bira üretir; bira istihkakını besler" },
+  { type: "marriage_hall", name: "Evlilik Dairesi", category: "Halk", unlock: 2, seconds: 8400, cost: { wood: 130, stone: 150, gold: 120 }, detail: "Nüfus artışını hızlandırır" },
+  { type: "theater", name: "Tiyatro", category: "Halk", unlock: 3, seconds: 16200, cost: { wood: 260, stone: 320, gold: 260 }, detail: "Büyük rıza; bira tüketir" },
 ] as const;
 
 /** Kale seviyesi başına yükseltme süresi (saniye); index = mevcut seviye. */
