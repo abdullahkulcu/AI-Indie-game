@@ -47,5 +47,9 @@ export const resourceLabels: Array<[Key, string]> = [
   ["wood", "ODUN"], ["iron", "DEMİR"], ["ale", "BİRA"],
 ];
 
-/** Kale seviyesine göre saatlik emir kotası kazanımı. */
+/**
+ * KULLANILMIYOR — eski emir kotası kazanımı. Motor kotayı kaldırdı; bu yardımcı
+ * yalnızca `components/KingdomGame.tsx` hâlâ import ettiği için duruyor.
+ * Arayüzdeki kota göstergesi kalkınca bu satır da silinmeli.
+ */
 export const quotaPerHour = (level: number) => (level >= 5 ? 6 : level >= 3 ? 5 : 4);
