@@ -194,8 +194,14 @@ async function handleNightOrder(
   if (setter) {
     const instruction = String(setter.arguments.instruction ?? "").trim();
     if (instruction.length < 5) return ["🌙 Gece emri anlaşılmadı; ne yapmamı istediğinizi bir cümleyle söyleyin."];
-    const channelId = body.kingdom?.channelId?.trim();
-    if (!channelId) return ["🌙 Gece emri için önce bir channel'a bağlı olmalısınız."];
+    // Channel istemcinin bağlamından değil üyelik kaydından okunur: istemci bu alanı
+    // göndermeyi atlarsa gece emri sessizce reddedilmemeli.
+    const [membership] = await db.select({ channelId: channelMembers.channelId })
+      .from(channelMembers)
+      .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active")))
+      .limit(1);
+    const channelId = membership?.channelId ?? body.kingdom?.channelId?.trim();
+    if (!channelId) return ["🌙 Gece emri için önce bir channel'a katılmalısınız."];
     const values = {
       userId, channelId, instruction,
       autonomy: "ask" as const, status: "pending_approval" as const,
@@ -382,9 +388,9 @@ export async function POST(request: Request) {
   }
 }
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { channelMembers, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
