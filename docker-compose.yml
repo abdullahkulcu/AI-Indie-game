@@ -29,7 +29,9 @@ services:
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
     command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
-    ports: ["3000:3000"]
+    # Dışarıya 80, konteyner içinde 3000. Healthcheck ve cron konteyner içinden
+    # konuştuğu için onlar 3000'de kalır.
+    ports: ["80:3000"]
     volumes:
       - .:/app
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
