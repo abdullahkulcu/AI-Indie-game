@@ -92,6 +92,7 @@ const queueSchema = z.object({
   count: z.number().int().min(1).max(CAPS.unitCount).optional(),
   startedAt: timestamp.optional(),
   completesAt: timestamp,
+  hastened: z.boolean().optional(),
 }).strict();
 
 const noticeSchema = z.object({

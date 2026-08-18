@@ -17,6 +17,8 @@ export type Queue = {
   count?: number;
   startedAt?: number;
   completesAt: number;
+  /** Dışarıdan işçi tutulup hızlandırıldı mı? Aynı iş bir kereden fazla hızlandırılamaz. */
+  hastened?: boolean;
 };
 
 export type Notice = { kind: string; text: string; at: number };

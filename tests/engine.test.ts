@@ -238,3 +238,46 @@ test("ambarda olmayan kaynak satılamaz", () => {
   const { results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "iron", amount: 400, direction: "sell" } }], T0);
   assert.match(results[0], /ambarda 100 DEMİR var/);
 });
+
+test("hızlandırma işi bitirmez, kalan süreyi yarıya indirir", () => {
+  const busy = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 3_600_000 } });
+  const { game, results } = applyActions(busy, [{ name: "accelerate_construction", arguments: {} }], T0);
+  assert.match(results[0], /^✓/);
+  assert.ok(game.queue, "iş kuyrukta kalmalı, anında bitmemeli");
+  assert.equal(game.queue?.completesAt, T0 + 1_800_000, "kalan süre yarıya inmeli");
+  assert.equal(game.buildings.find(b => b.type === "quarry"), undefined, "bina henüz kurulmamalı");
+});
+
+test("dışarıdan gelen ustalar nüfustan düşmez", () => {
+  const busy = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 3_600_000 } });
+  const { game } = applyActions(busy, [{ name: "accelerate_construction", arguments: {} }], T0);
+  assert.equal(game.population, busy.population);
+  assert.ok(game.resources.gold < busy.resources.gold, "yevmiye ödenmeli");
+});
+
+test("aynı işe ikinci kez usta çağrılamaz", () => {
+  const busy = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 3_600_000 } });
+  const once = applyActions(busy, [{ name: "accelerate_construction", arguments: {} }], T0);
+  const twice = applyActions(once.game, [{ name: "accelerate_construction", arguments: {} }], T0);
+  assert.match(twice.results[0], /zaten dışarıdan işçi tutuldu/);
+});
+
+test("hızlandırma eskisinden pahalıdır", () => {
+  const busy = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 3_600_000 } });
+  const { game } = applyActions(busy, [{ name: "accelerate_construction", arguments: {} }], T0);
+  // 60 dakika × 6 altın = 360; eski tarife 2 altın/dakika ile 120 idi.
+  assert.equal(busy.resources.gold - game.resources.gold, 360);
+});
+
+test("hızlandırılan iş kuyruk süresi dolunca normal biter", () => {
+  const busy = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 3_600_000 } });
+  const hastened = applyActions(busy, [{ name: "accelerate_construction", arguments: {} }], T0).game;
+  const after = tick(hastened, T0 + 1_800_000);
+  assert.equal(after.queue, null);
+  assert.equal(after.buildings.find(b => b.type === "quarry")?.level, 1);
+});

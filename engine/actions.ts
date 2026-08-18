@@ -32,6 +32,13 @@ const MAX_ACTIONS_PER_TURN = 3;
  * ambardan çıkar ve üç koşulu vardır — boş konut, kabul edilebilir rıza ve
  * bekleme süresi. Böylece nüfus, hazineyle sınırsızca satın alınamaz.
  */
+/**
+ * Hızlandırma parayla bitirme değildir: dışarıdan gezgin usta tutulur, iş iki
+ * kat hızlanır ve o kadar. Ustalar krallığın nüfusundan çıkmaz — tarlada bir el
+ * eksilmez — ama yevmiyeleri ağırdır ve aynı işe bir kez çağrılırlar.
+ */
+const HASTEN = { goldPerMinute: 6, minCost: 60, minSeconds: 120, crew: "bir usta takımı" };
+
 const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 };
 
 /**
@@ -114,26 +121,25 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     if (action.name === "accelerate_construction") {
       if (!next.queue?.startedAt) { blocked("Hızlandırılacak aktif kuyruk yok."); continue; }
       const active = next.queue;
+      if (active.hastened) { blocked(`Hızlandırma engellendi: ${active.name} için zaten dışarıdan işçi tutuldu. Aynı işe ikinci kez usta çağrılmaz.`); continue; }
+
       const seconds = Math.max(0, Math.ceil((active.completesAt - now) / 1000));
-      const cost = Math.max(10, Math.ceil(seconds / 60) * 2);
-      if (next.resources.gold < cost) { blocked(`Hızlandırma engellendi: ${cost} altın gerekiyor, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
-      let buildings = next.buildings, units = next.units;
-      if (active.kind === "building") {
-        const existing = next.buildings.find(b => b.type === active.type);
-        const item = catalog.find(b => b.type === active.type);
-        buildings = existing
-          ? next.buildings.map(b => b.type === active.type ? { ...b, level: active.targetLevel ?? b.level } : b)
-          : [...next.buildings, { type: active.type, name: active.name.replace(/ Sv\.\d+$/, "") || item?.name || active.name, category: item?.category ?? "Yönetim", level: active.targetLevel ?? 1 }];
-      } else {
-        units = { ...units, [active.type]: (units[active.type] ?? 0) + (active.count ?? 0) };
-      }
+      if (seconds < HASTEN.minSeconds) { blocked(`Hızlandırma engellendi: ${active.name} zaten ${seconds} saniye içinde bitiyor; usta çağırmaya değmez.`); continue; }
+
+      // Ücret kalan süreye göre; iş ne kadar uzunsa o kadar çok yevmiye ödenir.
+      const cost = Math.max(HASTEN.minCost, Math.ceil(seconds / 60) * HASTEN.goldPerMinute);
+      if (next.resources.gold < cost) { blocked(`Hızlandırma engellendi: dışarıdan usta tutmak ${cost} altın, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
+
+      // İş bitmez, yalnızca kalan süre yarıya iner. İşçiler dışarıdan gelir:
+      // krallığın nüfusundan düşmezler, karşılığında yevmiyeleri ağırdır.
+      const saved = Math.floor(seconds / 2);
       next = {
         ...next,
         resources: { ...next.resources, gold: next.resources.gold - cost },
-        buildings, units, queue: null,
-        notices: [{ kind: "TAMAMLANDI", text: `${active.name} hızlandırılarak tamamlandı.`, at: now }, ...next.notices].slice(0, 20),
+        queue: { ...active, completesAt: active.completesAt - saved * 1000, hastened: true },
+        notices: [{ kind: "İNŞAAT", text: `${active.name} için dışarıdan usta tutuldu; ${cost} altın yevmiye ödendi.`, at: now }, ...next.notices].slice(0, 20),
       };
-      success(`${active.name} ${cost} altın harcanarak tamamlandı.`);
+      success(`${active.name} için dışarıdan ${HASTEN.crew} usta çağrıldı; ${cost} altın yevmiye ödendi. Kalan süre yarıya indi: ${Math.ceil((seconds - saved) / 60)} dakika.`);
       continue;
     }
 
