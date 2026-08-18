@@ -157,15 +157,20 @@ export type PlannedRaid = { kind: RaidKind; label: string; threat: number; at: n
  * Bir pencerede akın var mı, varsa hangi tür ve ne şiddette?
  *
  * Tamamen tohumdan türer: aynı krallık, aynı pencere → aynı akın. Koruma
- * süresi dolmadan hiçbir pencere akın üretmez.
+ * Koruma süresi akınları engellemez; krallık kurulduğu andan itibaren akına açıktır.
  */
 export function raidInWindow(
   game: Pick<Game, "kingdomName" | "foundedAt" | "speed" | "terrain" | "buildings" | "protectionEndsAt">,
   index: number,
 ): PlannedRaid | null {
-  if (index < 0) return null;
+  // Koruma süresi akınları durdurmaz: dağdaki kurt da haydut da fermanı tanımaz.
+  // Koruma yalnızca diğer krallıklara karşıdır; doğa ve eşkıya ilk günden gelir.
+  //
+  // Yalnızca 0. pencere boştur ve bu bir koruma değil, bir sınır durumudur:
+  // o pencere kuruluş anıyla başlar, dolayısıyla hiçbir tick aralığının içine
+  // düşmez ve çözülemez. Pratikte gecikme bir pencere (hızlı channel'da daha az).
+  if (index < 1) return null;
   const at = windowStart(game, index);
-  if (at <= game.protectionEndsAt) return null;
 
   const terrain = TERRAIN_RAIDS[game.terrain] ?? TERRAIN_RAIDS.plain;
   const level = keepLevel(game);

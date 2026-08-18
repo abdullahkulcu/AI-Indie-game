@@ -72,10 +72,20 @@ test("tick determinizmi: aynı kayıt iki kez işlenirse aynı sonucu verir", ()
   assert.deepEqual(first.notices, second.notices);
 });
 
-test("koruma süresi boyunca akın gelmez", () => {
+test("koruma süresi akınları engellemez; krallık ilk günden akına açıktır", () => {
+  // Koruma yalnızca diğer krallıklara karşıdır. Dağdaki kurt da haydut da
+  // fermanı tanımaz; yeni kurulan kale de vurulabilir.
   const protectedGame = newGame({ protectionEndsAt: T0 + 4 * 86_400_000 });
+  let raids = 0;
+  for (let index = 0; index <= 24; index += 1) if (raidInWindow(protectedGame, index)) raids += 1;
+  assert.ok(raids > 0, "koruma altındaki kaleye de akın gelebilmeli");
+});
+
+test("korumalı ve korumasız krallık aynı akın takvimini görür", () => {
+  const shielded = newGame({ protectionEndsAt: T0 + 4 * 86_400_000 });
+  const exposed = newGame({ protectionEndsAt: T0 });
   for (let index = 0; index <= 24; index += 1) {
-    assert.equal(raidInWindow(protectedGame, index), null, "koruma altındaki kaleye akın olmamalı");
+    assert.deepEqual(raidInWindow(shielded, index), raidInWindow(exposed, index));
   }
 });
 
