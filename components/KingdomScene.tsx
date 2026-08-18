@@ -668,9 +668,18 @@ export default function KingdomScene({
 
     const line=(from:[number,number],to:[number,number],color:number)=>{const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(from[0],.12,from[1]),new THREE.Vector3(to[0],.12,to[1])]);const material=new THREE.LineDashedMaterial({color,dashSize:1.5,gapSize:.8,transparent:true,opacity:.8});materials.set(`l${color}`,material);const drawn=new THREE.Line(geo,material);drawn.computeLineDistances();scene.add(drawn);return drawn;};
     const regionColors:Record<string,number>={plain:0x8b8b55,forest:0x355c38,mountain:0x696b61,riverbank:0x49706a};
-    kingdoms.slice(0,40).forEach(kingdom=>{const {x,z}=kingdom.position,region=add(geom("region",()=>new THREE.CircleGeometry(7.5,28)),mat(regionColors[kingdom.terrain]??0x68784b),x,-.02,z);region.rotation.x=-Math.PI/2;region.castShadow=false;cylinder(1.15,2.8,kingdom.discovered?0x7a2529:0x493e35,x,1.4,z);cone(1.5,1.5,kingdom.discovered?0xb08a46:0x6a6257,x,3.55,z);box(1.7,1,1.4,0x927653,x+1.8,.5,z+1.5);});
-    if(sharedMine){const {x,z}=sharedMine.position;const mineRegion=add(geom("mineRegion",()=>new THREE.CircleGeometry(8,28)),mat(0x8d6f3f),x,-.01,z);mineRegion.rotation.x=-Math.PI/2;mineRegion.castShadow=false;for(const offset of[-2,0,2])cone(1.8,3.5,0x54534d,x+offset,1.75,z+(offset%4));box(4.8,2,2.4,0x57402e,x,1,z+4);}
-    const network=[...kingdoms.slice(0,40).map(kingdom=>line([0,0],[kingdom.position.x,kingdom.position.z],kingdom.discovered?0xd6a53f:0x8d7e61)),...(sharedMine?[line([0,0],[sharedMine.position.x,sharedMine.position.z],0xc59a43)]:[])];
+    // Komşular uzaktaki siluetlerdir: bölge lekesi, kule ve çatı. Ek yapı ve
+    // etiket yok — buradan komşunun ayrıntısı okunmaz, keşif ajanla yapılır.
+    kingdoms.slice(0,40).forEach(kingdom=>{const {x,z}=kingdom.position;
+      const region=add(geom("region",()=>new THREE.CircleGeometry(7.5,28)),mat(regionColors[kingdom.terrain]??0x68784b),x,-.02,z);
+      region.rotation.x=-Math.PI/2;region.castShadow=false;
+      cylinder(1.15,2.8,kingdom.discovered?0x7a2529:0x493e35,x,1.4,z);
+      cone(1.5,1.5,kingdom.discovered?0xb08a46:0x6a6257,x,3.55,z);});
+    // Demir damarı dağların içindedir: yalnızca dağ arazisindeki krallık onu
+    // kendi ufkunda görür. Diğerleri madeni channel haritasından takip eder.
+    const mineVisible=sharedMine&&terrain==="mountain";
+    if(mineVisible){const {x,z}=sharedMine.position;const mineRegion=add(geom("mineRegion",()=>new THREE.CircleGeometry(8,28)),mat(0x8d6f3f),x,-.01,z);mineRegion.rotation.x=-Math.PI/2;mineRegion.castShadow=false;for(const offset of[-2,0,2])cone(1.8,3.5,0x54534d,x+offset,1.75,z+(offset%4));box(4.8,2,2.4,0x57402e,x,1,z+4);}
+    const network=[...kingdoms.slice(0,40).map(kingdom=>line([0,0],[kingdom.position.x,kingdom.position.z],kingdom.discovered?0xd6a53f:0x8d7e61)),...(mineVisible?[line([0,0],[sharedMine.position.x,sharedMine.position.z],0xc59a43)]:[])];
 
     const labels:Array<{el:HTMLSpanElement;pos:THREE.Vector3;wide:boolean}>=[];
     const label=(text:string,x:number,y:number,z:number,wide=false)=>{const el=document.createElement("span");el.className="world-label";el.textContent=text;host.appendChild(el);labels.push({el,pos:new THREE.Vector3(x,y,z),wide});};
@@ -680,8 +689,9 @@ export default function KingdomScene({
     placed.forEach(item=>label(`${(buildingNames.get(item.type)??item.type).toLocaleUpperCase("tr")} · SV.${item.level}`,item.x,item.type==="wall"?4.5:5.2,item.z));
     // Etiket mahallenin AĞIRLIK MERKEZİNE otursun; sabit nokta evleri ıskalıyordu.
     if(homes.length)label(`⌂ MAHALLE · ${homes.length} HANE`,homes.reduce((sum,home)=>sum+home.x,0)/homes.length,3.4,homes.reduce((sum,home)=>sum+home.z,0)/homes.length);
-    kingdoms.slice(0,40).forEach(kingdom=>label(kingdom.name??"BİLİNMEYEN SANCAK",kingdom.position.x,5,kingdom.position.z,true));
-    if(sharedMine)label(`⛏ ${sharedMine.name} · ${sharedMine.totalWorkers} İŞÇİ`,sharedMine.position.x,5,sharedMine.position.z,true);
+    // Komşuya etiket yok: uzaktan yalnızca bir kale silueti seçilir, kim
+    // olduğu ve ne durumda olduğu ancak ajanla öğrenilir.
+    if(mineVisible)label(`⛏ ${sharedMine.name} · ${sharedMine.totalWorkers} İŞÇİ`,sharedMine.position.x,5,sharedMine.position.z,true);
     terrainLabels.forEach(([text,x,y,z])=>label(text,x,y,z,true));
 
     const update=()=>{camera.position.set(Math.sin(theta)*46,35,Math.cos(theta)*46);camera.lookAt(0,1,0);camera.zoom=zoom;camera.updateProjectionMatrix();};update();let dragging=false,lastX=0,raf=0;
