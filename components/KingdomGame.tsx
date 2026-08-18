@@ -134,7 +134,7 @@ export default function KingdomGame(){
   const step=(current:number,delta:number)=>Math.max(0,Math.min(200,current+delta));
   return <div className="populace-panel">
    <div className="section-head"><span>HALKIN DURUMU · RAPOR</span><b className={`mood ${mood.id}`}>{mood.label}</b></div>
-   <div className="general-only-note"><b>Halkı General yönetir</b><span>İstihkakı doğrudan çeviremezsin; ne istediğini söyle, General uygular ya da itiraz eder.</span></div>
+   <div className="general-only-note"><b>Ferman senin, uygulama Generalin</b><span>Vergi ve istihkakları doğrudan çevirirsin; General uygulamaz ama her değişiklikte görüşünü söyler. Asker maaşı ve yapılar emirle yürür.</span></div>
 
    <div className="mood-explain">
     <div><span>Üretim çarpanı</span><b>×{mood.production.toFixed(2)}</b></div>
