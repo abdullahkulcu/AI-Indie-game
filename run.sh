@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 DEV_VARS=".dev.vars"
-APP_URL="http://localhost:3000"
+APP_URL="http://localhost"
 PG_HOST_URL="postgres://demirkale:demirkale@127.0.0.1:5433/demirkale"
 PG_CONTAINER_URL="postgres://demirkale:demirkale@postgres:5432/demirkale"
 
