@@ -13,6 +13,12 @@ type Props = {
   /** Kurulu yapılar; her tür sahnede kendi silüetiyle çizilir. */
   buildings?: SceneBuilding[];
   population?: number; capacity?: number;
+  /** Toplam asker sayısı; sahnedeki devriye figürlerinin sayısını belirler. */
+  army?: number;
+  /** Nöbet oranı (%0-100). Askerlerin kaçının sur hattında olduğunu belirler. */
+  watchRatio?: number;
+  /** Halkın ruh hâli: content | uneasy | simmering | strike | revolt. */
+  mood?: string;
   /** Determinizm tohumu: aynı krallık her açılışta aynı sahneyi üretir. */
   seedKey?: string;
 };
@@ -34,16 +40,26 @@ const terrainPlans: Record<string, {
 
 export default function KingdomScene({
   night, keepLevel = 1, developed = false, terrain = "plain", constructionName,
-  kingdoms = [], sharedMine, buildings = [], population = 0, capacity = 0, seedKey = "demirkale",
+  kingdoms = [], sharedMine, buildings = [], population = 0, capacity = 0,
+  army = 0, watchRatio = 40, mood = "content", seedKey = "demirkale",
 }: Props) {
   const mount = useRef<HTMLDivElement>(null); const nightRef = useRef(night);
+  // Ruh hâli ve nöbet oranı sık değişir; imzaya girselerdi sahne her değişimde
+  // baştan kurulurdu. Bunlar ref'ten okunur, animasyon döngüsü davranışı CANLI
+  // günceller ve tek bir geometri bile yeniden yaratılmaz.
+  const moodRef = useRef(mood), watchRef = useRef(watchRatio);
   const worldSignature = kingdoms.map(kingdom=>`${kingdom.id}:${kingdom.name??"?"}:${kingdom.discovered}:${kingdom.terrain}:${kingdom.position.x}:${kingdom.position.z}`).join("|")+`|mine:${sharedMine?.name??""}:${sharedMine?.position.x??""}:${sharedMine?.position.z??""}:${sharedMine?.totalWorkers??0}`;
   // Nüfus her tick'te ondalık oynar. Sahne 10 saniyede bir yeniden kurulmasın diye
   // ham sayı değil, ondan türeyen EV SAYISI ve doluluk kuşağı bağımlılık olur.
   const houseCount = Math.max(0, Math.min(HOUSE_CAP, Math.round(Math.max(0, population) / PEOPLE_PER_HOUSE)));
   const crowdBand = capacity > 0 ? Math.round(Math.min(1.2, Math.max(0, population) / capacity) * 5) : 0;
   const buildingSignature = buildings.map(item=>`${item.type}:${item.level}`).sort().join(",");
+  // Asker sayısı örnek KAPASİTESİNİ belirlediği için imzaya girmek zorunda; ham
+  // sayı değil bantlanmış figür sayısı girer, böylece tek asker eğitmek sahneyi
+  // yeniden kurmaz.
+  const soldierCount = Math.max(0, Math.min(28, Math.round(Math.max(0, army) / 5)));
   useEffect(() => { nightRef.current = night; }, [night]);
+  useEffect(() => { moodRef.current = mood; watchRef.current = watchRatio; }, [mood, watchRatio]);
   useEffect(() => {
     const host = mount.current; if (!host) return;
     const plan = terrainPlans[terrain] ?? terrainPlans.plain;
@@ -455,6 +471,130 @@ export default function KingdomScene({
       detail.add(bodies,roofs);
     }
 
+    // --- Halk ve asker: mekaniği görünür kılan figürler --------------------
+    // Bu blok yalnızca FİGÜR SAYISI değişince kurulur. Ruh hâli ve nöbet oranı
+    // ref'ten okunduğu için davranış yeniden kurulmadan, canlı değişir.
+    // Figür boyu: ev gövdesi ~1.25, çatıyla ~2.2 birim. Köylü ~0.95, asker ~1.1
+    // birim; yapıların yanında inandırıcı, uzaktan da seçilebilir.
+    const VILLAGER_Y=.47,SOLDIER_Y=.55;
+    const walkRandom=makeRandom("walkers");
+    // Yürüyüş hattı: sokak ekseni. Sokak koridoru zaten dekordan arındırılmış ve
+    // evler yanlara dizilmiş durumda. Hat, KATI engele (su, kaya, yapı) çarptığı
+    // yerde biter; böylece kimse nehre girmez ya da yapının içinden geçmez.
+    const routes=streets.map(angle=>{
+      const cos=Math.cos(angle),sin=Math.sin(angle),inner=coreRadius+1.4;
+      let outer=inner;
+      for(let d=inner;d<=villageReach;d+=.7){if(!isFree(cos*d,sin*d,.5,false))break;outer=d}
+      return {angle,cos,sin,inner,outer};
+    }).filter(route=>route.outer-route.inner>=3);
+    // Grev toplanma yeri: Meydan varsa orası, yoksa kale önü.
+    const square=placed.find(item=>item.type==="town_square");
+    const rally=square?{x:square.x,z:square.z}
+      :routes.length?{x:routes[0].cos*(coreRadius+2.4),z:routes[0].sin*(coreRadius+2.4)}
+      :{x:coreRadius+2.4,z:0};
+
+    const villagerCount=homes.length?Math.max(3,Math.min(44,Math.round(homes.length*.8))):0;
+    const villagers=Array.from({length:villagerCount},(unused,i)=>({
+      route:routes.length?i%routes.length:-1,
+      home:homes.length?i%homes.length:-1,
+      lateral:(walkRandom()-.5)*2.1,
+      phase:walkRandom(),
+      pace:.75+walkRandom()*.55,
+      blend:0,
+      ox:(walkRandom()-.5)*3.6,oz:(walkRandom()-.5)*3.6,
+    }));
+    let villagerMesh:THREE.InstancedMesh|null=null;
+    if(villagerCount){
+      villagerMesh=new THREE.InstancedMesh(geom("villager",()=>new THREE.CapsuleGeometry(.21,.53,4,7)),tinted(0xffffff),villagerCount);
+      const tones=[0xbaa480,0xa89070,0xccb996,0x8f7b5d,0xa66d43,0x9c8fa0];
+      for(let i=0;i<villagerCount;i++)villagerMesh.setColorAt(i,new THREE.Color(tones[i%tones.length]));
+      if(villagerMesh.instanceColor)villagerMesh.instanceColor.needsUpdate=true;
+      // Matrisler her karede değişiyor; sınır küresi güncellenmediği için kırpma
+      // kapatılmazsa figürler bir anda yok oluyor.
+      villagerMesh.frustumCulled=false;villagerMesh.castShadow=true;detail.add(villagerMesh);
+    }
+
+    // Devriye hattı: sur varsa surun hemen dışındaki KARE, yoksa çekirdek çevresi.
+    const wallRing=9.4,patrolSquare=hasWall,patrolRadius=hasWall?wallRing+1.3:coreRadius+2.4;
+    const patrolAt=(t:number):[number,number]=>{
+      if(!patrolSquare){const a=t/4*Math.PI*2;return[Math.cos(a)*patrolRadius,Math.sin(a)*patrolRadius]}
+      const R=patrolRadius,side=Math.floor(t)%4,u=(t-Math.floor(t))*2-1;
+      if(side===0)return[R,u*R];if(side===1)return[-u*R,R];if(side===2)return[-R,-u*R];return[u*R,-R];
+    };
+    // Nöbette olmayan asker kışlanın çevresinde bekler; kışla yoksa kale önünde.
+    // Kışlanın TAM konumu binanın içi; oraya konan asker gövdenin arkasında
+    // kayboluyordu. Bekleme yeri kışlanın kale tarafındaki önüne alınır.
+    const barracks=placed.find(item=>item.type==="barracks");
+    const post=(()=>{
+      if(!barracks)return{x:Math.cos(slotPhase)*(coreRadius+2.8),z:Math.sin(slotPhase)*(coreRadius+2.8)};
+      const reach=Math.hypot(barracks.x,barracks.z)||1,front=Math.max(coreRadius+1.6,reach-4.4);
+      return{x:barracks.x/reach*front,z:barracks.z/reach*front};
+    })();
+    const soldiers=Array.from({length:soldierCount},(unused,i)=>({
+      t:(i/Math.max(1,soldierCount))*4,
+      pace:.85+walkRandom()*.3,
+      blend:0,
+      ox:(walkRandom()-.5)*3.2,oz:(walkRandom()-.5)*3.2,
+    }));
+    let soldierMesh:THREE.InstancedMesh|null=null;
+    if(soldierCount){
+      soldierMesh=new THREE.InstancedMesh(geom("soldier",()=>new THREE.CapsuleGeometry(.23,.63,4,7)),tinted(0xffffff),soldierCount);
+      const tones=[0x8d2f33,0x616b78,0x7a2529,0x4f5866];
+      for(let i=0;i<soldierCount;i++)soldierMesh.setColorAt(i,new THREE.Color(tones[i%tones.length]));
+      if(soldierMesh.instanceColor)soldierMesh.instanceColor.needsUpdate=true;
+      soldierMesh.frustumCulled=false;soldierMesh.castShadow=true;detail.add(soldierMesh);
+    }
+
+    /** Figürleri ilerletir. Ruh hâli ve nöbet oranı her karede ref'ten okunur. */
+    const stepWalkers=(dt:number)=>{
+      if(villagerMesh){
+        const state=moodRef.current;
+        // Ruh hâli hızı VE hedefi belirler: memnun halk gezer, kaynayan halk
+        // ağırlaşır, iş bırakan halk meydanda öbeklenir, isyan eden dışa kaçar.
+        const pace=state==="uneasy"?.8:state==="simmering"?.42:state==="strike"?.06:state==="revolt"?1.35:1;
+        const gathering=state==="strike",fleeing=state==="revolt";
+        for(let i=0;i<villagers.length;i++){
+          const walker=villagers[i];
+          walker.phase=(walker.phase+dt*walker.pace*pace*.04)%1;
+          const trip=walker.phase<.5?walker.phase*2:2-walker.phase*2;
+          let x:number,z:number,facing:number;
+          if(walker.route>=0){
+            const route=routes[walker.route],d=route.inner+trip*(route.outer-route.inner);
+            x=route.cos*d-route.sin*walker.lateral;z=route.sin*d+route.cos*walker.lateral;
+            facing=-route.angle+(walker.phase<.5?Math.PI/2:-Math.PI/2);
+          }else if(walker.home>=0){
+            const home=homes[walker.home],a=walker.phase*Math.PI*2;
+            x=home.x+Math.cos(a)*1.9;z=home.z+Math.sin(a)*1.9;facing=-a;
+          }else continue;
+          let tx=x,tz=z,pull=0;
+          if(gathering){tx=rally.x+walker.ox;tz=rally.z+walker.oz;pull=1}
+          else if(fleeing&&walker.route>=0){const route=routes[walker.route];tx=route.cos*route.outer-route.sin*walker.lateral*1.8;tz=route.sin*route.outer+route.cos*walker.lateral*1.8;pull=1}
+          walker.blend+=(pull-walker.blend)*Math.min(1,dt*.7);
+          dummy.position.set(x+(tx-x)*walker.blend,VILLAGER_Y,z+(tz-z)*walker.blend);
+          dummy.rotation.set(0,facing,0);dummy.scale.setScalar(1);dummy.updateMatrix();
+          villagerMesh.setMatrixAt(i,dummy.matrix);
+        }
+        villagerMesh.instanceMatrix.needsUpdate=true;
+      }
+      if(soldierMesh){
+        // Nöbet oranı DOĞRUDAN okunur: askerlerin yüzde kaçı hatta, o kadarı
+        // devriyede. %0'da hepsi kışlada, %100'de hepsi sur hattında.
+        const watch=Math.max(0,Math.min(100,watchRef.current)),onDuty=soldiers.length*watch/100;
+        for(let i=0;i<soldiers.length;i++){
+          const guard=soldiers[i];
+          guard.t=(guard.t+dt*guard.pace*.05)%4;
+          guard.blend+=((i<onDuty?1:0)-guard.blend)*Math.min(1,dt*.55);
+          const [px,pz]=patrolAt(guard.t),[nx,nz]=patrolAt((guard.t+.03)%4);
+          const ix=post.x+guard.ox,iz=post.z+guard.oz;
+          dummy.position.set(ix+(px-ix)*guard.blend,SOLDIER_Y,iz+(pz-iz)*guard.blend);
+          dummy.rotation.set(0,Math.atan2(nx-px,nz-pz),0);dummy.scale.setScalar(1);dummy.updateMatrix();
+          soldierMesh.setMatrixAt(i,dummy.matrix);
+        }
+        soldierMesh.instanceMatrix.needsUpdate=true;
+      }
+    };
+    stepWalkers(0);
+
     const constructionCrane=new THREE.Group();
     if(constructionName){const site=new THREE.Group(),atKeep=constructionName.startsWith("Kale");site.position.set(atKeep?0:16,0,atKeep?0:-4);scene.add(site);const scaffold=0xb8894f;for(const x of[-2.2,2.2])for(const z of[-2.2,2.2])box(.16,4.8,.16,scaffold,x,2.4,z,site);for(const y of[1.2,2.5,3.8]){box(4.6,.12,.16,scaffold,0,y,-2.2,site);box(4.6,.12,.16,scaffold,0,y,2.2,site);box(.16,.12,4.6,scaffold,-2.2,y,0,site);box(.16,.12,4.6,scaffold,2.2,y,0,site)}box(3.7,.8,3.7,0x8c755d,0,.4,0,site);constructionCrane.position.set(2.8,0,-2.8);site.add(constructionCrane);box(.22,6,.22,0x6f4b2d,0,3,0,constructionCrane);box(5,.18,.18,0x6f4b2d,1.8,5.7,0,constructionCrane);box(.05,2,.05,0x2d231c,3.8,4.7,0,constructionCrane);}
 
@@ -481,6 +621,7 @@ export default function KingdomScene({
     const resize=()=>{const w=host.clientWidth,h=host.clientHeight;renderer.setSize(w,h);const a=w/Math.max(h,1);/* Dikey gorus sabit kalirsa genis ekranda yatay 130+ birime aciliyor ve krallik bos zeminin icinde kayboluyor. Orani bozmadan tek care yakinlasmak. */const half=Math.max(13,Math.min(22,22/Math.max(1,a/1.6)));camera.left=-half*a;camera.right=half*a;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();};const observer=new ResizeObserver(resize);observer.observe(host);resize();const clock=new THREE.Clock();
     const animate=()=>{raf=requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);const time=clock.elapsedTime;if(!dragging){theta+=dt*.1;update();}
       spinners.forEach(blades=>{blades.rotation.z+=dt*.9});
+      if(detail.visible)stepWalkers(dt); // Uzaklaşınca figürler gizli; matris yazmaya da gerek yok.
       water.forEach(({mesh,base})=>{(mesh.material as THREE.MeshStandardMaterial).opacity=base+Math.sin(time*.7)*.06});
       if(constructionName)constructionCrane.rotation.y+=dt*.12;
       const dark=nightRef.current;ambient.intensity+=((dark ? .5 : 1.8)-ambient.intensity)*.04;sun.intensity+=((dark ? .25 : 2.6)-sun.intensity)*.04;scene.fog!.color.lerp(new THREE.Color(dark?0x101b2d:plan.fog),.04);
@@ -491,7 +632,10 @@ export default function KingdomScene({
       labels.forEach(({el})=>el.remove());
       // Havuzlar tek elden temizlenir; havuza girmeyen bir şey kalırsa diye sahne
       // ayrıca taranır. Aksi hâlde her sekme değişiminde GPU tamponu birikiyor.
-      scene.traverse(node=>{const target=node as THREE.Object3D&{geometry?:THREE.BufferGeometry;material?:THREE.Material|THREE.Material[]};target.geometry?.dispose();const material=target.material;if(Array.isArray(material))material.forEach(entry=>entry.dispose());else material?.dispose()});
+      scene.traverse(node=>{const target=node as THREE.Object3D&{geometry?:THREE.BufferGeometry;material?:THREE.Material|THREE.Material[]};target.geometry?.dispose();const material=target.material;if(Array.isArray(material))material.forEach(entry=>entry.dispose());else material?.dispose();
+        // InstancedMesh ayrıca örnek tamponlarını (matrix/color) tutar; sahne
+        // taraması yalnız geometri ve materyali kapsıyordu.
+        const instanced=node as THREE.InstancedMesh;if(instanced.isInstancedMesh)instanced.dispose()});
       geometries.forEach(entry=>entry.dispose());materials.forEach(entry=>entry.dispose());
       geometries.clear();materials.clear();
       renderer.dispose();host.removeChild(renderer.domElement);
@@ -499,7 +643,9 @@ export default function KingdomScene({
     // `kingdoms`, `sharedMine` ve `buildings` bilerek listede yok: dünya verisi 10
     // saniyede bir YENİ nesne olarak geliyor, referansa bağlansaydı sahne sürekli
     // baştan kurulurdu. Yerlerine içerikten türeyen imzalar bağlanır.
+    // `mood` ve `watchRatio` da yok: onlar ref'ten canlı okunur, çünkü her tick'te
+    // değişebilirler ve sahneyi yeniden kurmaları kabul edilemez.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[keepLevel,developed,terrain,constructionName,worldSignature,buildingSignature,houseCount,crowdBand,seedKey]);
+  },[keepLevel,developed,terrain,constructionName,worldSignature,buildingSignature,houseCount,crowdBand,soldierCount,seedKey]);
   return <div className="three-host" ref={mount} aria-label="Etkileşimli izometrik Demirkale dünya haritası"/>;
 }
