@@ -39,6 +39,17 @@ export type Game = {
   reputation: number;
   loyalty: number;
   taxRate: number;
+  /**
+   * KULLANILMIYOR — eski emir kotası. Motor (tick/actions) bu iki alana artık
+   * hiç dokunmaz; emir sayısına kota yoktur.
+   *
+   * Alanlar tipten SİLİNMEDİ, çünkü:
+   *  1) Eski kayıtlarda mevcutlar ve save şeması `.strict()`; sessizce silmek
+   *     bütün eski kayıtları reddettirirdi (şemada `.optional()` yapıldı).
+   *  2) `components/KingdomGame.tsx` bunları hâlâ okuyor. Opsiyonel yapmak o
+   *     dosyada tip hatası üretirdi; arayüz sadeleşmesi ayrı bir iş.
+   * Arayüz kotayı göstermeyi bıraktığında ikisi de kaldırılabilir.
+   */
   quota: number;
   quotaAt: number;
   buildings: Building[];

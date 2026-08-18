@@ -62,11 +62,10 @@ test("kuyruk tamamlanınca bina eklenir ve bildirim düşer", () => {
   assert.match(after.notices[0].text, /tamamlandı/);
 });
 
-test("emir kotası saatlik birikir ve tavanda durur", () => {
-  const after = tick(newGame({ quota: 0 }), T0 + 3_600_000);
-  assert.equal(after.quota, 4);
-  const capped = tick(newGame({ quota: 0 }), T0 + 20 * 3_600_000);
-  assert.equal(capped.quota, 8, "Kale Sv.1 için tavan 4×2");
+test("tick emir kotası biriktirmez; alan olduğu gibi taşınır", () => {
+  const after = tick(newGame({ quota: 0 }), T0 + 20 * 3_600_000);
+  assert.equal(after.quota, 0, "kota birikimi kaldırıldı");
+  assert.equal(after.quotaAt, T0, "kota zamanı da ilerletilmez");
 });
 
 test("maliyet seviyeyle 1.65 kat büyür", () => {
@@ -79,12 +78,12 @@ test("kale seviyesi binalardan okunur", () => {
   assert.equal(keep(newGame({ buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 4 }] })), 4);
 });
 
-test("bina emri kaynak düşer, kuyruğa alır ve kota harcar", () => {
+test("bina emri kaynak düşer ve kuyruğa alır; kota harcamaz", () => {
   const before = newGame();
   const { game, results } = applyActions(before, [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0);
   assert.match(results[0], /^✓/);
   assert.equal(game.queue?.type, "quarry");
-  assert.equal(game.quota, before.quota - 1);
+  assert.equal(game.quota, before.quota, "emir kotadan düşmemeli");
   assert.equal(game.resources.wood, before.resources.wood - 100);
   assert.equal(game.resources.gold, before.resources.gold - 60);
 });
@@ -106,9 +105,26 @@ test("kışla olmadan asker eğitilemez", () => {
   assert.match(results[0], /Kışla kurulmalı/);
 });
 
-test("kota bittiğinde emirler uygulanmaz", () => {
-  const { results } = applyActions(newGame({ quota: 0 }), [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0);
-  assert.match(results[0], /emir kotası tükendi/);
+test("kota sıfırken bile emirler uygulanır", () => {
+  const { game, results } = applyActions(newGame({ quota: 0 }), [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0);
+  assert.match(results[0], /^✓/);
+  assert.equal(game.queue?.type, "quarry");
+});
+
+test("art arda çok sayıda emir yalnızca kaynak ve kuyrukla sınırlanır", () => {
+  // Kota kalktı: aynı turda üç şenlik de uygulanır, kaynak yettiği sürece.
+  const rich = newGame({ resources: { gold: 5000, food: 5000, stone: 300, wood: 300, iron: 100, ale: 0 } });
+  const many = Array.from({ length: 3 }, () => ({ name: "host_festival", arguments: {} }));
+  const { game, results } = applyActions(rich, many, T0);
+  assert.equal(results.filter(line => line.startsWith("✓")).length, 3);
+  assert.equal(game.resources.gold, 5000 - 3 * 120);
+});
+
+test("kaynak bitince emir engellenir; engelleyen kota değil hazinedir", () => {
+  const poor = newGame({ resources: { gold: 0, food: 0, stone: 0, wood: 0, iron: 0, ale: 0 } });
+  const { results } = applyActions(poor, [{ name: "host_festival", arguments: {} }], T0);
+  assert.match(results[0], /^✕/);
+  assert.match(results[0], /altın ve 150 yiyecek gerekli/);
 });
 
 test("yüksek vergi teyitsiz uygulanmaz, teyitli uygulanır", () => {

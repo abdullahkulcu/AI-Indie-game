@@ -118,8 +118,11 @@ export const gameSaveSchema = z.object({
   reputation: finite(100),
   loyalty: finite(100),
   taxRate: finite(CAPS.taxRate),
-  quota: finite(CAPS.quota),
-  quotaAt: timestamp,
+  // Emir kotası kaldırıldı. Alanlar `.optional()`: eski kayıtlar (alan dolu) ve
+  // arayüz kotayı bıraktıktan sonraki kayıtlar (alan yok) birlikte kabul edilir.
+  // Değer artık hiçbir kuralı beslemediği için üst sınır dışında denetlenmez.
+  quota: finite(CAPS.quota).optional(),
+  quotaAt: timestamp.optional(),
   buildings: z.array(buildingSchema).min(1).max(CAPS.buildings),
   units: z.record(z.string().regex(/^[a-z_]{2,24}$/), finite(CAPS.unitCount)).refine(
     value => Object.keys(value).length <= CAPS.unitKinds,
@@ -173,7 +176,7 @@ function checkTimestamps(game: GameSave, now: number): ValidationFailure | null 
   const horizon = now + CLOCK_SKEW_MS;
   if (game.foundedAt > horizon) return fail(400, "Kuruluş zamanı gelecekte olamaz.");
   if (game.lastTickAt > horizon) return fail(400, "Kayıt zamanı gelecekte olamaz.");
-  if (game.quotaAt > horizon) return fail(400, "Emir kotası zamanı gelecekte olamaz.");
+  if (game.quotaAt !== undefined && game.quotaAt > horizon) return fail(400, "Emir kotası zamanı gelecekte olamaz.");
   const maxProtection = game.foundedAt + STARTING_STATE.protectionDays * 86_400_000 + CLOCK_SKEW_MS;
   if (game.protectionEndsAt > maxProtection) return fail(400, "Koruma süresi izin verilen sınırı aşıyor.");
   return null;
@@ -221,9 +224,9 @@ function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number)
   if (game.population > simulated.population * (1 + SIMULATION_TOLERANCE) + 5) {
     return fail(409, "Bildirilen nüfus sunucunun hesapladığı büyümenin üzerinde.");
   }
-  if (game.quota > simulated.quota + 1) {
-    return fail(409, "Bildirilen emir kotası hak edilenin üzerinde.");
-  }
+  // Emir kotası denetimi kaldırıldı: kota artık hiçbir emri kısıtlamadığı için
+  // şişirilmesi de bir avantaj sağlamıyor. Motor kotayı biriktirmediğinden bu
+  // kontrol, istemcinin taşıdığı eski değeri haksız yere reddediyordu.
   return null;
 }
 

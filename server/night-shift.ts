@@ -76,7 +76,6 @@ export function shouldWake(order: StandingOrder, game: Game, now: number): WakeD
   if (withinSameDay && order.actionsToday >= order.dailyActionCap) {
     return { act: false, reason: "Günlük eylem tavanına ulaşıldı." };
   }
-  if (game.quota < 1) return { act: false, reason: "Emir kotası tükendi; hiçbir emir uygulanamaz." };
   if (game.queue) return { act: false, reason: "Kuyruk dolu; yeni iş başlatılamaz." };
 
   const emergency = detectEmergency(game);
@@ -112,7 +111,6 @@ export function compactContext(game: Game, order: StandingOrder, decision: Extra
     kale: keep(game),
     nufus: round(game.population),
     riza: round(game.popularity),
-    kota: round(game.quota),
     kaynak: {
       altin: round(game.resources.gold), yiyecek: round(game.resources.food), tas: round(game.resources.stone),
       odun: round(game.resources.wood), demir: round(game.resources.iron),

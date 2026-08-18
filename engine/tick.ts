@@ -1,4 +1,4 @@
-import { catalog, quotaPerHour, resourceLabels, terrainCatalog } from "./catalog";
+import { catalog, resourceLabels, terrainCatalog } from "./catalog";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import type { Game, Key, Res } from "./types";
@@ -51,9 +51,12 @@ export function rates(g: Game): Res {
 }
 
 /**
- * Kaynak üretimi, kuyruk tamamlanması, nüfus/popülerlik ve emir kotasını
- * `now` anına kadar ilerletir. Saf fonksiyon: aynı girdi hep aynı çıktıyı verir,
- * böylece istemci ve sunucu aynı sonucu hesaplar.
+ * Kaynak üretimi, kuyruk tamamlanması ve nüfus/popülerliği `now` anına kadar
+ * ilerletir. Saf fonksiyon: aynı girdi hep aynı çıktıyı verir, böylece istemci
+ * ve sunucu aynı sonucu hesaplar.
+ *
+ * Emir kotası birikimi kaldırıldı; `quota`/`quotaAt` alanları yalnızca eski
+ * kayıtlarla uyum için taşınır ve motor bunlara hiç dokunmaz.
  */
 export function tick(g: Game, now: number): Game {
   const hours = Math.min(24, (now - g.lastTickAt) / 3_600_000 * g.speed);
@@ -136,8 +139,6 @@ export function tick(g: Game, now: number): Game {
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
   }
 
-  const quotaHours = Math.floor((now - g.quotaAt) / 3_600_000);
-
   return {
     ...g,
     resources,
@@ -156,8 +157,6 @@ export function tick(g: Game, now: number): Game {
     units,
     queue,
     notices,
-    quota: Math.min(quotaPerHour(level) * 2, g.quota + quotaHours * quotaPerHour(level)),
-    quotaAt: quotaHours ? g.quotaAt + quotaHours * 3_600_000 : g.quotaAt,
     lastTickAt: now,
   };
 }

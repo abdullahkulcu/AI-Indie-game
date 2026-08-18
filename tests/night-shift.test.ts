@@ -69,10 +69,11 @@ test("kuyruk doluyken model çağrılmaz", () => {
   assert.match(decision.reason, /Kuyruk dolu/);
 });
 
-test("kota bittiğinde model çağrılmaz", () => {
+test("kota sıfırken de gece vardiyası çalışır", () => {
+  // Kota kaldırıldı; gece uyanmasını yalnızca kuyruk, günlük tavan ve
+  // karşılanabilir seçenek olup olmadığı belirler.
   const decision = shouldWake(order(), game({ quota: 0 }), T0);
-  assert.equal(decision.act, false);
-  assert.match(decision.reason, /kotası tükendi/);
+  assert.equal(decision.act, true);
 });
 
 test("karşılanabilir seçenek yoksa model çağrılmaz", () => {

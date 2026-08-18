@@ -21,6 +21,11 @@ const MAX_ACTIONS_PER_TURN = 3;
  * General'in önerdiği eylemleri oyun durumuna uygular. Saf fonksiyondur:
  * ağ, depolama veya tarayıcı API'si kullanmaz, bu yüzden istemci ve sunucu
  * birebir aynı sonucu üretir.
+ *
+ * Emirlerin sayısına kota konmaz. Oyunun asıl değeri General'le konuşmaktır;
+ * saatlik bir sayaç Kralı tam da bu konuşmadan caydırıyordu. Kısıtı üç gerçek
+ * kaynak taşır: harcanan kaynaklar, aynı anda tek iş alan kuyruk ve General'in
+ * kendi risk yargısı (bkz. server/general-risk.ts).
  */
 export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
   let next = tick(base, now);
@@ -41,7 +46,6 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
     if (action.name === "build_structure") {
       if (next.queue) { blocked(`İnşa emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
-      if (next.quota < 1) { blocked("İnşa emri uygulanmadı: emir kotası tükendi."); continue; }
       const type = String(action.arguments.building_type ?? "");
       const target = Math.floor(Number(action.arguments.target_level));
       const level = keep(next);
@@ -51,7 +55,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         const cost = keepUpgradeCosts[level];
         if (!affordable(next.resources, cost)) { blocked("Kale yükseltmesi kaynak yetersizliği nedeniyle engellendi."); continue; }
         if (majorSpend(cost) && !confirmed) { blocked("Kale yükseltmesi hazinenin kritik bölümünü tüketeceği için açık teyit bekliyor."); continue; }
-        next = { ...next, resources: debit(next.resources, cost), quota: next.quota - 1, queue: { kind: "building", type: "keep", name: `Kale Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + keepSeconds[level] / next.speed * 1000 } };
+        next = { ...next, resources: debit(next.resources, cost), queue: { kind: "building", type: "keep", name: `Kale Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + keepSeconds[level] / next.speed * 1000 } };
         success(`Kale Sv.${target} yükseltmesi başlatıldı.`);
         continue;
       }
@@ -70,7 +74,6 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        quota: next.quota - 1,
         queue: { kind: "building", type, name: `${item.name} Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + item.seconds / next.speed * 1000 },
         notices: [{ kind: "GENERAL", text: `${item.name} Sv.${target} emri uygulandı.`, at: now }, ...next.notices],
       };
@@ -106,7 +109,6 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
     if (action.name === "train_unit") {
       if (next.queue) { blocked(`Eğitim emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
-      if (next.quota < 1) { blocked("Eğitim emri uygulanmadı: emir kotası tükendi."); continue; }
       if (!next.buildings.some(b => b.type === "barracks")) { blocked("Eğitim engellendi: önce Kışla kurulmalı."); continue; }
       const unit = String(action.arguments.unit_type ?? ""), count = Math.floor(Number(action.arguments.count));
       if (unit !== "spearman" || count < 1 || count > 50) { blocked("Desteklenmeyen birlik veya adet emri reddedildi."); continue; }
@@ -116,7 +118,6 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        quota: next.quota - 1,
         population: next.population - count,
         queue: { kind: "unit", type: "spearman", name: `${count} Mızrakçı`, count, startedAt: now, completesAt: now + count * 1200 / next.speed * 1000 },
       };
@@ -126,12 +127,10 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
     if (action.name === "host_festival") {
       const cost = { gold: 120, food: 150 };
-      if (next.quota < 1) { blocked("Şenlik engellendi: emir kotası tükendi."); continue; }
       if (!affordable(next.resources, cost)) { blocked("Şenlik engellendi: 120 altın ve 150 yiyecek gerekli."); continue; }
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        quota: next.quota - 1,
         popularity: Math.min(100, next.popularity + 12),
         notices: [{ kind: "GENERAL", text: "General halk için şenlik düzenledi.", at: now }, ...next.notices],
       };
@@ -143,8 +142,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const rate = Math.floor(Number(action.arguments.rate_percent));
       if (!Number.isFinite(rate) || rate < 0 || rate > 50) { blocked("Geçersiz vergi oranı reddedildi."); continue; }
       if (rate > 30 && !confirmed) { blocked(`%${rate} vergi halk için riskli; açık Kral teyidi olmadan uygulanmadı.`); continue; }
-      if (next.quota < 1) { blocked("Vergi emri uygulanmadı: emir kotası tükendi."); continue; }
-      next = { ...next, taxRate: rate, quota: next.quota - 1, loyalty: Math.max(0, next.loyalty - (rate > 30 ? 2 : 0)) };
+      next = { ...next, taxRate: rate, loyalty: Math.max(0, next.loyalty - (rate > 30 ? 2 : 0)) };
       success(`Vergi oranı %${rate} olarak mühürlendi.`);
       continue;
     }
@@ -153,22 +151,21 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const requested = Number(action.arguments.percent);
       if (!Number.isFinite(requested) || requested < 0 || requested > 200) { blocked("İstihkak oranı %0 ile %200 arasında olmalı."); continue; }
       const percent = clampRation(requested);
-      if (next.quota < 1) { blocked("İstihkak emri uygulanmadı: emir kotası tükendi."); continue; }
       if (action.name === "set_food_ration") {
         // Açlık sınırına inmek halkı hızla öfkelendirir; teyitsiz uygulanmaz.
         if (percent < 60 && !confirmed) { blocked(`Yiyecek istihkakını %${percent}'e indirmek halkı aç bırakır; açık teyit bekliyorum.`); continue; }
-        next = { ...next, foodRation: percent, quota: next.quota - 1, notices: [{ kind: "İSTİHKAK", text: `Yiyecek istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+        next = { ...next, foodRation: percent, notices: [{ kind: "İSTİHKAK", text: `Yiyecek istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
         success(`Yiyecek istihkakı %${percent} olarak mühürlendi.`);
         continue;
       }
       if (action.name === "set_ale_ration") {
         if (percent > 0 && !next.buildings.some(building => building.type === "brewery")) { blocked("Bira istihkakı için önce Bira Evi kurulmalı."); continue; }
-        next = { ...next, aleRation: percent, quota: next.quota - 1, notices: [{ kind: "İSTİHKAK", text: `Bira istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+        next = { ...next, aleRation: percent, notices: [{ kind: "İSTİHKAK", text: `Bira istihkakı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
         success(`Bira istihkakı %${percent} olarak mühürlendi.`);
         continue;
       }
       if (percent < 60 && !confirmed) { blocked(`Asker maaşını %${percent}'e indirmek firara ve isyana yol açar; açık teyit bekliyorum.`); continue; }
-      next = { ...next, soldierPay: percent, quota: next.quota - 1, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
+      next = { ...next, soldierPay: percent, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
       success(`Asker maaşı %${percent} olarak mühürlendi.`);
       continue;
     }

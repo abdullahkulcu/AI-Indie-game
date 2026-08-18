@@ -139,6 +139,38 @@ export const pendingDecisions = pgTable("pending_decisions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * General'in defteri: Kral hakkında biriken kalıcı hafıza.
+ *
+ * Oyun kaydı blob'u yerine ayrı tabloda tutulur; çünkü kayıt istemcide
+ * hesaplanıp sunucuya gönderiliyor (bkz. server/save-validation.ts). Kral kendi
+ * sicilini düzenleyebilseydi defterin bütün anlamı kalkardı. Burada yazma yetkisi
+ * yalnızca sunucudadır.
+ *
+ * Birincil anahtar (user_id, kind): aynı türden olay yeni satır açmaz, mevcut
+ * satırın `weight` değeri artar. Defter böyle sınırlı kalır.
+ */
+export const generalLedger = pgTable("general_ledger", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  weight: integer("weight").notNull().default(1),
+  firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull(),
+  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull(),
+}, (table) => [primaryKey({ columns: [table.userId, table.kind] })]);
+
+/**
+ * General'in Kral'dan açık talepleri. Durumdan türetilir; burada yalnızca ne
+ * zaman açıldıkları (`raisedAt`) saklanır ki General "üç gündür istiyorum"
+ * diyebilsin. Talep karşılanınca satır silinir ve deftere kayıt düşer.
+ */
+export const generalRequests = pgTable("general_requests", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  text: text("text").notNull(),
+  severity: text("severity", { enum: ["normal", "urgent"] }).notNull().default("normal"),
+  raisedAt: bigint("raised_at", { mode: "number" }).notNull(),
+}, (table) => [primaryKey({ columns: [table.userId, table.kind] })]);
+
 // Sabit pencereli hız sınırı sayaçları; tek upsert deyimiyle atomik artar.
 export const rateLimits = pgTable("rate_limits", {
   bucket: text("bucket").primaryKey(),

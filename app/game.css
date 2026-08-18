@@ -77,3 +77,14 @@
 .raid-tally b.bad{color:#8f3512}
 .raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
 .raid-log p.quiet{color:#8a7854;font-style:italic}
+
+/* ---- General'in talepleri ---- */
+.general-requests{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-bottom:12px}
+.requests-head{display:block;font-size:.6rem;letter-spacing:.16em;color:#7a6540;margin-bottom:7px}
+.general-requests .request{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:7px 0;border-top:1px solid #e0cfa6}
+.general-requests .request:first-of-type{border-top:0}
+.general-requests .request p{margin:0;font-size:.74rem;color:#4a3a20;line-height:1.5}
+.general-requests .request.urgent p{color:#8f3512;font-weight:600}
+.general-requests .request button{flex:0 0 auto;padding:5px 10px;font-size:.62rem;letter-spacing:.12em;border:1px solid #a9834a;background:#e6d6ae;color:#4a3a20;cursor:pointer}
+.general-requests .request button:hover:not(:disabled){background:#6d3325;color:#f2e7cb}
+.general-requests .request button:disabled{opacity:.4;cursor:not-allowed}

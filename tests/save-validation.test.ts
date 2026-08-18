@@ -47,6 +47,34 @@ test("geçerli kuruluş kaydı kabul edilir", () => {
   assert.equal(result.ok, true);
 });
 
+test("kota alanlarını taşıyan eski kayıt hâlâ kabul edilir", () => {
+  // Kota kaldırıldı ama şema `.strict()`; alanlar `.optional()` yapılmasaydı
+  // bütün eski kayıtlar reddedilirdi.
+  const result = validateGameSave(startingSave({ quota: 8, quotaAt: NOW }), firstSave);
+  assert.equal(result.ok, true);
+});
+
+test("kota alanları hiç yokken de kayıt kabul edilir", () => {
+  // Arayüz kotayı bıraktığında kayıtlar bu alansız gelecek.
+  const save = startingSave() as Record<string, unknown>;
+  delete save.quota;
+  delete save.quotaAt;
+  const result = validateGameSave(save, firstSave);
+  assert.equal(result.ok, true);
+});
+
+test("şişirilmiş kota artık kaydı reddettirmez", () => {
+  // Kota hiçbir emri kısıtlamadığı için değerini şişirmek bir avantaj sağlamaz;
+  // eski simülasyon kontrolü meşru kayıtları haksız yere 409'luyordu.
+  const previous = startingSave({ quota: 0 });
+  const current = startingSave({ quota: 24, lastTickAt: NOW + 60_000 });
+  const result = validateGameSave(current, {
+    previous: previous as never, previousUpdatedAt: NOW, channelSpeed: 1,
+    channelName: "Standart Sezon I", now: NOW + 60_000,
+  });
+  assert.equal(result.ok, true);
+});
+
 test("ilk kayıtta uydurma kaynak reddedilir", () => {
   const result = validateGameSave(startingSave({ resources: { gold: 999_999_999, food: 1, stone: 1, wood: 1, iron: 1, ale: 0 } }), firstSave);
   assert.equal(result.ok, false);

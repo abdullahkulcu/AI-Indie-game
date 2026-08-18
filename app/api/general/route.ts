@@ -23,7 +23,6 @@ type GeneralRequest = {
     buildTimes?: Array<{ type?: string; name: string; nextLevel: number; seconds: number; cost?: Record<string, number> }>;
     protectionHoursLeft?: number;
     loyalty?: number;
-    quota?: number;
     terrain?: unknown;
     strategyNote?: string;
     hourlyRates?: Record<string, number>;
@@ -47,6 +46,8 @@ type GeneralRequest = {
   };
   /** Sunucunun eklediği bağlam; istemciden gelmez. */
   pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
+  /** Sunucunun eklediği kalıcı hafıza ve talep blokları; istemciden gelmez. */
+  memoryLines?: string[];
 };
 
 const actionTools = [
@@ -89,7 +90,10 @@ function providerError(status: number, raw: string) {
 }
 
 function gamePrompt(body: GeneralRequest) {
-  const state = body.kingdom ?? {};
+  // Eski istemciler bağlamda hâlâ `quota` gönderiyor. Kota kaldırıldığı için
+  // alanı modele hiç göstermiyoruz; aksi hâlde General olmayan bir sayaca atıf yapar.
+  const state: Record<string, unknown> = { ...(body.kingdom ?? {}) };
+  delete state.quota;
   return [
     "Sen Demirkale oyunundaki General Aldric'sin; bir yardım botu gibi değil, Kralını uzun zamandır tanıyan sakin ve açık sözlü bir komutan gibi konuş.",
     "Türkçe, doğal ve kısa konuş. Her yanıta selamla veya durum raporuyla başlama; doğrudan Kralın son cümlesine karşılık ver.",
@@ -103,8 +107,9 @@ function gamePrompt(body: GeneralRequest) {
     "Belirsiz ama stratejik bir talimatta ayrıntıyı Kral'a geri yıkma; mevcut duruma göre en makul rutin eylemi kendin seç. Yalnızca gerçek anlamda eksik hedef veya büyük risk varsa soru sor.",
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
-    "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma ve emir kotası harcama. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
-    "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ölçülü nöbet ayarı, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak/kota uygunsa uygula.",
+    "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
+    "Kralın kaç emir verebileceğine dair bir sayaç YOKTUR. Konuşmanın, danışmanın ya da emir vermenin sayısal bir bedeli yok; Kralı 'hakkını harcama' diye uyarma, kota/hak/sayaç diye bir şeyden hiç söz etme. Sınır yalnızca gerçek olanlardır: kaynaklar, aynı anda tek iş alan kuyruk ve senin kendi yargın.",
+    "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ölçülü nöbet ayarı, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak uygunsa uygula.",
     "Halk sistemi oyunun kalbidir: istihkak → mutluluk → üretim ve nüfus. Yiyecek istihkakı %100 tam doyumdur; altına inmek ucuzdur ama rıza çöker, halk sırayla kaynar, iş bırakır ve isyan eder. İş bırakmada üretim %40'a, isyanda neredeyse sıfıra düşer ve halk göç eder.",
     "Bira ve eğlence yapıları (Park, Tiyatro, Evlilik Dairesi) morali yükseltir ama AÇ HALKA ETKİSİ ÇOK AZDIR; önce karnını doyur, sonra eğlendir.",
     "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
@@ -115,14 +120,17 @@ function gamePrompt(body: GeneralRequest) {
     "Ortak maden channel'daki bütün krallıklarla paylaşılır; madendeki toplam işçi üretimi belirler ve rezerv tükenebilir. Maden emirlerinde send_miners/recall_miners kullan.",
     "Ajan göndermek risklidir: normal başarı ihtimali %10, hedef nöbet kurmuşsa %3'tür ve yakalanırsan hedef seni görür. send_scout çağırırken hedefi yalnızca neighbors listesindeki ordinal ile belirt, kimlik veya isim uydurma. Keşfedilmemiş sancağın adını biliyormuş gibi konuşma.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
-    "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kota, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
+    "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
     "Kesin işlem kuralı: Bir aracı gerçekten çağırmadıysan 'başlattım', 'uyguladım', 'tamamlandı' veya 'devam ediyor' deme. XML, metin içinde araç etiketi ya da hayali araç adı yazma; yalnızca sana verilen native araçları çağır.",
     "Risk değerlendirmesi oyun motorunda kodla yapılır: itiraz, teyit ve ret kararını sen tek başına vermezsin. Riskli bulduğun emirde gerekçeni açıkça söyle; sonucu motor bildirecek.",
     "Sadakatin kararlarını gerçekten bağlar. Sadakat düşükken ağır riskli emirleri reddedersin ve Kral yalnızca 'yap' diyerek bunu aşamaz; sadakat yüksekken Kralın ısrarına daha kolay uyarsın.",
+    "Hafızan bu konuşmayla sınırlı değil: aşağıdaki DEFTERİN, Kralla geçmişte yaşadıklarının kaydıdır. Kral 'daha önce ne konuşmuştuk', 'beni nasıl buluyorsun', 'hep aynı hatayı mı yapıyorum' diye sorduğunda oradan cevap ver. Defterde olmayan bir geçmişi uydurma.",
+    "Senin de isteklerin var. Aşağıdaki TALEPLERİN listesi krallığın gerçek durumundan doğar. Kral sormasa bile uygun bir anda bunlardan birini kendin gündeme getir; ama her cevabı talebe çevirme ve listeyi olduğu gibi okumaya kalkma. Kral talebini karşılarsa bunu görüp teşekkür et, sürekli görmezden gelirse bunu da söyle.",
     ...(body.pendingDecision
       ? [`BEKLEYEN_TEYİT=${JSON.stringify(body.pendingDecision)}`,
          "Kral bu bekleyen emre cevap veriyor. Onaylıyorsa uygulanacağını, gerekçe sunmasını beklediğini ya da vazgeçtiyse emrin düştüğünü kendi ağzınla kısaca belirt."]
       : []),
+    ...(body.memoryLines ?? []),
     `KRALLIK_DURUMU=${JSON.stringify(state)}`,
   ].join("\n");
 }
@@ -298,6 +306,69 @@ function snapshotOf(body: GeneralRequest): KingdomSnapshot {
   };
 }
 
+/** Talep ve defter modüllerinin beklediği durum özeti. */
+function memorySignalsOf(body: GeneralRequest) {
+  const state = body.kingdom ?? {};
+  return {
+    resources: state.resources ?? {},
+    hourlyRates: state.hourlyRates ?? {},
+    buildings: state.buildings ?? [],
+    populace: state.populace,
+  };
+}
+
+/**
+ * Defteri okur ve açık talepleri durumla eşitler. Dönen `lines` doğrudan sistem
+ * promptuna girer; `open` hem modele hem API cevabına gider.
+ */
+async function loadGeneralMemory(userId: string, body: GeneralRequest, now: number) {
+  const derived = deriveRequests(memorySignalsOf(body));
+  const { open } = await syncRequests(userId, derived, now);
+  const entries = await loadLedger(userId);
+  return { lines: renderGeneralMemory(entries, open, now), open, derived };
+}
+
+/** Bir talebin "geçiştirildi" sayılması için açık kalması gereken süre. */
+const REQUEST_PATIENCE_MS = 24 * 3_600_000;
+
+/**
+ * Turun sonunda defteri günceller. Kralın bu turdaki davranışı (itirazı ezmesi,
+ * talebi karşılaması ya da görmezden gelmesi) ve krallığın hâli deftere geçer.
+ */
+async function recordTurn(
+  userId: string,
+  body: GeneralRequest,
+  turn: {
+    applied: GeneralAction[];
+    refused: boolean;
+    open: Awaited<ReturnType<typeof loadGeneralMemory>>["open"];
+    /** Eşleştirme `satisfiedBy` taşıyan türetilmiş liste üzerinden yapılır. */
+    derived: Awaited<ReturnType<typeof loadGeneralMemory>>["derived"];
+  },
+  now: number,
+) {
+  const signals = memorySignalsOf(body);
+  const met = requestsSatisfiedBy(turn.derived, turn.applied);
+  // Uzun süredir açık duran acil bir talep varken Kral başka işlerle uğraştıysa
+  // bu bir geçiştirmedir. Tur başına en fazla bir kez sayılır.
+  const ignored = turn.applied.length > 0 && turn.open.some(request =>
+    request.severity === "urgent" && now - request.since >= REQUEST_PATIENCE_MS && !met.includes(request.kind));
+
+  const kinds = deriveLedgerEvents({
+    resources: signals.resources,
+    hourlyRates: signals.hourlyRates,
+    populace: signals.populace,
+    appliedActions: turn.applied.map(action => action.name),
+    // Motor da aynı bayrağı "itiraz ezildi" sayar (bkz. engine/actions.ts).
+    kingOverrode: turn.applied.some(action => action.arguments.confirmed_risk === true),
+    generalRefused: turn.refused,
+    kingBackedDown: false,
+    requestsMet: met.length,
+    requestsRefused: ignored ? 1 : 0,
+  });
+  if (kinds.length) await appendToLedger(userId, kinds, now);
+}
+
 /** Emrin bilinen maliyeti; istemcinin gönderdiği buildTimes kataloğundan okunur. */
 function costOf(action: GeneralAction, body: GeneralRequest) {
   if (action.name !== "build_structure") return {};
@@ -367,9 +438,23 @@ export async function POST(request: Request) {
     // Bekleyen bir teyit varsa Kralın bu mesajı ona cevaptır; modele de bağlam olarak verilir.
     const pending = body.mode === "chat" ? await loadPendingDecision(user.id) : null;
     const confirmation = readConfirmation(body.message);
+
+    // Kalıcı hafıza: defter ve açık talepler modele her istekte verilir; bu
+    // olmadan General son sekiz mesajın ötesini hatırlamıyor ve bir karakter
+    // yerine komut yönlendiricisi gibi davranıyordu. Erken dönüşlerde de
+    // `requests` alanı dolu gitsin diye modelden önce yüklenir.
+    const now = Date.now();
+    const memory = await loadGeneralMemory(user.id, body, now);
+    body.memoryLines = memory.lines;
+
     if (pending && confirmation.cancelled) {
       await clearPendingDecision(user.id);
-      return json({ connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.", actions: [] });
+      // Kral uyarıyı dinleyip vazgeçti; bu defterlik bir davranıştır.
+      await appendToLedger(user.id, ["heeded"], now);
+      return json({
+        connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.",
+        actions: [], requests: memory.open,
+      });
     }
     if (pending) body.pendingDecision = { action: pending.action, reasons: pending.reasons, riskLevel: pending.riskLevel };
 
@@ -406,7 +491,20 @@ export async function POST(request: Request) {
         : orderWithoutAction
           ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, istihkak ve maaş ayarı, nöbet oranı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
           : cleaned;
-    return json({ connected: true, text, actions, awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")) });
+    // Defter turun sonunda güncellenir; Kralın bu turdaki davranışı buraya işlenir.
+    await recordTurn(user.id, body, {
+      applied: actions,
+      refused: review.notes.some(note => note.startsWith("✕")),
+      open: memory.open,
+      derived: memory.derived,
+    }, now);
+
+    return json({
+      connected: true, text, actions,
+      awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")),
+      // Arayüz General'in taleplerini bu alandan okur.
+      requests: memory.open,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
     return json({ error: message }, 502);
@@ -416,6 +514,9 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
+import { deriveLedgerEvents } from "../../../engine/ledger";
+import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";

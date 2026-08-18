@@ -105,12 +105,12 @@ test("maaşsız ordu firar eder", () => {
   assert.ok(after.units.spearman < 40, "firar orduyu küçültmeli");
 });
 
-test("istihkak emri uygulanır ve kota harcar", () => {
+test("istihkak emri uygulanır ve kota harcamaz", () => {
   const before = newGame();
   const { game, results } = applyActions(before, [{ name: "set_food_ration", arguments: { percent: 140 } }], T0);
   assert.match(results[0], /^✓/);
   assert.equal(game.foodRation, 140);
-  assert.equal(game.quota, before.quota - 1);
+  assert.equal(game.quota, before.quota, "istihkak ayarı kotadan düşmemeli");
 });
 
 test("açlık sınırına inen istihkak teyitsiz uygulanmaz", () => {
