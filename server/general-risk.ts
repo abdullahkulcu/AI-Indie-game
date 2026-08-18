@@ -1,3 +1,4 @@
+import { isConfirmationReply } from "./general-intent";
 /**
  * General'in itiraz kararı burada, kodda verilir; modelin insafına bırakılmaz.
  * Amaç: Kral riskli bir emir verdiğinde General'in gerçekten karşı çıkabilmesi,
@@ -219,10 +220,18 @@ export function reviewProposedActions(
   return { approved, notes, toStore, clearPending };
 }
 
-/** Kralın mesajı bekleyen bir emri onaylıyor mu, ve gerekçe sunuyor mu? */
+/**
+ * Kralın mesajı bekleyen bir emri onaylıyor mu, ve gerekçe sunuyor mu?
+ *
+ * Kısa onaylar (evet / tamam / onay / onay veriyorum) tek bir yerden okunur:
+ * isConfirmationReply. Burada ayrıca ısrar ve emir kipleri aranır. Eskiden bu
+ * liste kendi başınaydı ve "onay" ile "onay veriyorum" hiç eşleşmiyordu; Kral
+ * onay verdiğini sanıyor, bekleyen emir hiç uygulanmıyordu.
+ */
 export function readConfirmation(message = "") {
   const normalized = message.toLocaleLowerCase("tr-TR");
-  const insisted = /(yap|uygula|onaylıyorum|onayla|ısrar ediyorum|israr ediyorum|devam et|emrediyorum|yine de|buna rağmen|ragmen)/.test(normalized);
+  const insisted = isConfirmationReply(message)
+    || /(yap|uygula|onaylıyorum|onayla|onay ver|ısrar ediyorum|israr ediyorum|devam et|emrediyorum|yine de|buna rağmen|ragmen)/.test(normalized);
   const cancelled = /(vazgeçtim|vazgectim|iptal|boş ver|bos ver|gerek yok|yapma)/.test(normalized);
   // Gerekçe: "çünkü", "zira" gibi bir bağlaç ya da yeterince uzun bir açıklama.
   const justified = /(çünkü|cunku|zira|nedeni|bu yüzden|bu yuzden|amacım|amacim|sebebi)/.test(normalized) || normalized.trim().split(/\s+/).length >= 8;

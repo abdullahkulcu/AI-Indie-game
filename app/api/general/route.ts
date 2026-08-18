@@ -53,6 +53,7 @@ type GeneralRequest = {
 const actionTools = [
   { name: "build_structure", description: "Yeni bina kurar veya mevcut binayı tam bir seviye yükseltir. Açık ve rutin bir inşa emrinde tekrar onay istemeden çağır. confirmed_risk yalnızca Kral, bildirilen kaynak/yiyecek riskine rağmen açıkça ısrar etmişse true olabilir.", parameters: { type: "object", properties: { building_type: { type: "string", enum: ["keep","wheat_farm","lumberjack","quarry","town_square","barracks","apple_orchard","mill","market","wall","mine"] }, target_level: { type: "integer", minimum: 1, maximum: 6 }, confirmed_risk: { type: "boolean" } }, required: ["building_type","target_level"], additionalProperties: false } },
   { name: "train_unit", description: "Kral açıkça birlik eğitmeni istediğinde eğitim kuyruğu başlatır. Yiyecek krizi veya büyük nüfus kaybı varsa önce teyit iste; teyitten sonra confirmed_risk true olabilir.", parameters: { type: "object", properties: { unit_type: { type: "string", enum: ["spearman"] }, count: { type: "integer", minimum: 1, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["unit_type","count"], additionalProperties: false } },
+  { name: "propose_action", description: "Kralın cümlesinden bir istek ANLADIN ama bu açık bir emir değil: yapmayı düşündüğün somut eylemi Kralın onayına sunar. Eylemi UYGULAMAZ, yalnızca bekletir; Kral 'onay/evet/tamam' derse sen bir şey yapmadan uygulanır. Emir kipi olmayan ama niyet taşıyan her cümlede bunu kullan.", parameters: { type: "object", properties: { action: { type: "string", description: "Onaya sunulacak aracın adı, örn. trade_resource" }, arguments: { type: "object", description: "O aracın alacağı parametreler" }, summary: { type: "string", description: "Kralın göreceği tek cümlelik özet, örn. 'Pazarda 100 odun satacağım.'" } }, required: ["action","summary"], additionalProperties: false } },
   { name: "trade_resource", description: "Pazarda kaynak satar veya satın alır. Kral satmayı/almayı emrettiğinde çağır; miktarı sen belirle.", parameters: { type: "object", properties: { resource: { type: "string", enum: ["food","wood","stone","iron","ale"] }, amount: { type: "integer", minimum: 1, maximum: 100000 }, direction: { type: "string", enum: ["sell","buy"] } }, required: ["resource","amount","direction"], additionalProperties: false } },
   { name: "call_settlers", description: "Çevre köylerden göçmen çağırır; boş konut ve yeterli rıza varsa nüfusu doğrudan artırır. Kral nüfusu artırmak istediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "host_festival", description: "Halkın rızasını artırmak için şenlik düzenler.", parameters: { type: "object", properties: {}, additionalProperties: false } },
@@ -110,6 +111,9 @@ function gamePrompt(body: GeneralRequest) {
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Araçlar her turda elinin altındadır; emir ile sohbeti AYIRT ETMEK SENİN İŞİNDİR. Soru, varsayım, fikir alma, olasılık tartışması, durum raporu isteği ve 'şöyle olsa ne yaparsın?' cümlelerinde hiçbir araç çağırma — bunlarda yalnızca konuş. Aracı, Kral bir işin yapılmasını istediğinde çağır; bunu cümlenin kelimelerinden değil niyetinden anla. 'Biraları satabilirsin', 'sat', 'o zaman odun sat' gibi kısa ve dolaylı cümleler de emirdir.",
+    "Kral emir kipi kullanmak zorunda değil. 'Altına ihtiyacım var', 'şu odunlar fazla', 'halk aç kalmasın', 'bir şeyler yapmalıyız' gibi cümleler de bir istek taşır. Böyle bir cümlede ne yapılması gerektiğini SEN çıkar, somut bir eyleme çevir ve propose_action ile Kralın onayına sun; kararı ona bırak ama seçeneği sen üret. 'Ne yapmamı istersiniz?' diye topu geri atma.",
+    "propose_action ile sunduğun öneri beklemeye alınır. Kral 'onay', 'evet', 'tamam' derse eylem sen bir şey yapmadan uygulanır; 'iptal' derse düşer. Öneriyi sunduktan sonra aynı turda ayrıca aracı çağırma.",
+    "Açık ve rutin emirlerde öneriye gerek yok: aracı doğrudan çağır. propose_action yalnızca niyeti yorumladığın, emrin açık olmadığı durumlar içindir.",
     "Kararsız kaldığında sor, uydurma: emir mi sohbet mi belli değilse aracı çağırmadan ne yapacağını söyle ve teyit iste. Ama Kral bir kez emri netleştirdiyse ikinci kez sorma, uygula.",
     "Kralın kaç emir verebileceğine dair bir sayaç YOKTUR. Konuşmanın, danışmanın ya da emir vermenin sayısal bir bedeli yok; Kralı 'hakkını harcama' diye uyarma, kota/hak/sayaç diye bir şeyden hiç söz etme. Sınır yalnızca gerçek olanlardır: kaynaklar, aynı anda tek iş alan kuyruk ve senin kendi yargın.",
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ölçülü nöbet ayarı, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak uygunsa uygula.",
@@ -472,6 +476,16 @@ export async function POST(request: Request) {
     // Kral bekleyen emri onayladıysa, model yeni bir araç çağırmasa bile o emri geri getiririz.
     if (pending && confirmation.insisted && actions.length === 0) actions = [pending.action];
 
+    // Öneri: General niyeti anladı ama emir açık değil. Eylem uygulanmaz,
+    // bekleyen karar olarak saklanır; Kral onay verdiğinde yukarıdaki
+    // "pending && confirmation.insisted" yolu onu kendiliğinden uygular.
+    const proposal = readProposal(actions, actionTools.map(tool => tool.name));
+    actions = proposal.actions as GeneralAction[];
+    if (proposal.pending) {
+      await savePendingDecision(user.id, proposal.pending.action as GeneralAction, [proposal.pending.summary], "elevated");
+    }
+    const proposalNotes = proposal.note ? [proposal.note] : [];
+
     // Gece emri yetkisi ayrı bir kapıdır: General emri alır almaz yetkilenmez,
     // Kral açıkça "sen uygula" demeden arka planda hiçbir şey yapmaz.
     const nightNotes = await handleNightOrder(actions, body, user.id, confirmation);
@@ -486,7 +500,7 @@ export async function POST(request: Request) {
     const claimsExecution = CLAIM_PATTERN.test(cleaned);
     const orderWithoutAction = actions.length === 0 && isExplicitOrder(body.message) && claimsExecution;
     // Eylem çalıştığında Generalin gerekçesi atılmaz; motorun sonucu altına eklenir.
-    const allNotes = [...nightNotes, ...review.notes];
+    const allNotes = [...proposalNotes, ...nightNotes, ...review.notes];
     const verdictNotes = allNotes.length ? `\n\n${allNotes.join("\n\n")}` : "";
     const text = actions.length
       ? `${cleaned}${verdictNotes}\n\nEmri oyun motoruna iletiyorum; kesin sonucu aşağıda göreceksin.`.trim()
@@ -527,4 +541,5 @@ import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";
+import { readProposal } from "../../../server/general-proposal";
 import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";

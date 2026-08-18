@@ -82,3 +82,18 @@ test("Kralın onayı ve gerekçesi mesajdan okunur", () => {
   assert.equal(readConfirmation("vazgeçtim, yapma").insisted, false);
   assert.equal(readConfirmation("vazgeçtim, yapma").cancelled, true);
 });
+
+test("kısa onaylar bekleyen emri uygular", () => {
+  // Bu satır bir kez kırıldı: readConfirmation'ın kendi listesi vardı ve
+  // "onay" ile "onay veriyorum" hiç eşleşmiyordu. Kral onay verdiğini
+  // sanıyor, bekleyen emir sessizce bekliyordu.
+  for (const reply of ["onay", "onay veriyorum", "evet", "tamam", "olur", "onaylıyorum", "kabul ediyorum"]) {
+    assert.equal(readConfirmation(reply).insisted, true, `"${reply}" onay sayılmalı`);
+  }
+});
+
+test("vazgeçme onay sayılmaz", () => {
+  for (const reply of ["vazgeçtim", "iptal", "boş ver", "gerek yok"]) {
+    assert.equal(readConfirmation(reply).insisted, false, `"${reply}" onay olmamalı`);
+  }
+});
