@@ -147,6 +147,15 @@ export const gameSaveSchema = z.object({
   migrationDrift: z.number().finite().optional(),
   lastSettlerCallAt: z.number().finite().optional(),
   marketVolume: finite(1e7).optional(),
+  marketOrders: z.array(z.object({
+    id: z.string().min(1).max(80),
+    resource: z.enum(["gold", "food", "stone", "wood", "iron", "ale"]),
+    amount: z.number().int().min(1).max(1e6),
+    direction: z.enum(["sell", "buy"]),
+    gold: finite(1e7),
+    placedAt: timestamp,
+    completesAt: timestamp,
+  }).strict()).max(6).optional(),
   marketDayAt: z.number().finite().optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),

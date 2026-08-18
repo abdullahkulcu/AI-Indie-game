@@ -6,6 +6,8 @@ import type { Game, Key, Res } from "./types";
 /** Defteri gereksiz satırla doldurmamak için, hareket bu eşiği aşınca yazılır. */
 const LEDGER_STEP = 5;
 
+const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? key;
+
 export const keep = (g: Pick<Game, "buildings">) => g.buildings.find(b => b.type === "keep")?.level ?? 1;
 
 export const affordable = (r: Res, c: Partial<Res>) =>
@@ -151,6 +153,22 @@ export function tick(g: Game, now: number): Game {
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
   }
 
+  // Pazar teklifleri: süresi dolan teklif kapanır, karşılığı ancak şimdi gelir.
+  let marketOrders = g.marketOrders ?? [];
+  if (marketOrders.length) {
+    const due = marketOrders.filter(order => order.completesAt <= now);
+    marketOrders = marketOrders.filter(order => order.completesAt > now);
+    for (const order of due) {
+      if (order.direction === "sell") {
+        resources.gold += order.gold;
+        notices = [{ kind: "PAZAR", text: `${order.amount} ${labelOf(order.resource)} satıldı; ${order.gold} altın hazineye girdi.`, at: order.completesAt }, ...notices].slice(0, 20);
+      } else {
+        resources[order.resource] += order.amount;
+        notices = [{ kind: "PAZAR", text: `Satın alınan ${order.amount} ${labelOf(order.resource)} ambara indirildi.`, at: order.completesAt }, ...notices].slice(0, 20);
+      }
+    }
+  }
+
   // Nüfus defteri: sessiz erime olmasın, her hareket yazıya geçsin.
   const settled = Math.max(20, Math.min(capacity, g.population + growth));
   const moved = settled - g.population;
@@ -168,6 +186,7 @@ export function tick(g: Game, now: number): Game {
 
   return {
     ...g,
+    marketOrders,
     peopleJoined: joined,
     peopleLeft: left,
     migrationDrift: drift,

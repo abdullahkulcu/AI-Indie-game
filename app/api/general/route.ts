@@ -151,20 +151,6 @@ function conversation(body: GeneralRequest) {
  * cümlesi değildir ama General'in kendi önerisine verilmiş cevaptır; araçlar
  * açılmazsa General onayı uygulayamaz ve Kral "onay verdim, yapmadı" der.
  */
-function isConfirmationReply(message = "") {
-  const normalized = message.toLocaleLowerCase("tr-TR").trim();
-  return /(^|\s)(evet|tamam|olur|onay|onaylıyorum|onayladım|kabul|peki|hadi|başla|devam)(\b|$)/.test(normalized)
-    || /onay ver/.test(normalized);
-}
-
-function isExplicitOrder(message = "") {
-  const normalized = message.toLocaleLowerCase("tr-TR");
-  if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
-  if (isConfirmationReply(normalized)) return true;
-  // Maden, ajan ve nöbet emirleri de buraya girmeli; aksi halde modele araç hiç iletilmez.
-  return /(kur|inşa et|yükselt|seviyeye çıkar|çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|yap|yapalım|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|nöbete|yükselt)(\b|$)/.test(normalized);
-}
-
 async function openAI(body: GeneralRequest) {
   const toolsEnabled = body.mode === "chat" && isExplicitOrder(body.message);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -496,7 +482,7 @@ export async function POST(request: Request) {
     // Guard yalnızca gerçek bir emirde ve hiçbir araç çalışmadığında devreye girer.
     // Kalıplar birinci tekil şahıs olmalı: "üretim devam ediyor" gibi doğru bir durum
     // anlatımı emir sayılmaz ve Generalin cevabı silinmez.
-    const claimsExecution = /\b(başlattım|başlatıyorum|uyguladım|uyguluyorum|emrettim|kurdum|kuruyorum|yükselttim|yükseltiyorum|eğittim|eğitiyorum|ayarladım|düzenledim|hızlandırdım|tamamladım)\b/i.test(cleaned);
+    const claimsExecution = CLAIM_PATTERN.test(cleaned);
     const orderWithoutAction = actions.length === 0 && isExplicitOrder(body.message) && claimsExecution;
     // Eylem çalıştığında Generalin gerekçesi atılmaz; motorun sonucu altına eklenir.
     const allNotes = [...nightNotes, ...review.notes];
@@ -540,3 +526,4 @@ import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";
+import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder } from "../../../server/general-intent";

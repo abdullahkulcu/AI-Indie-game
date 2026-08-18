@@ -1,18 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { guardFires, isExplicitOrder } from "../server/general-intent";
 
-// route.ts Cloudflare'a özgü modülleri import ettiği için guard mantığını burada
-// birebir aynı kurallarla yeniden kurup davranışı sabitliyoruz.
-const CLAIM_PATTERN = /\b(başlattım|başlatıyorum|uyguladım|uyguluyorum|emrettim|kurdum|kuruyorum|yükselttim|yükseltiyorum|eğittim|eğitiyorum|ayarladım|düzenledim|hızlandırdım|tamamladım)\b/i;
-
-function isExplicitOrder(message = "") {
-  const normalized = message.toLocaleLowerCase("tr-TR");
-  if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
-  return /(kur|inşa et|yükselt|seviyeye çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap)(\b|$)/.test(normalized);
-}
-
-const guardFires = (message: string, reply: string, actionCount: number) =>
-  actionCount === 0 && isExplicitOrder(message) && CLAIM_PATTERN.test(reply);
+// Kural artık burada kopyalanmıyor: route.ts ile testler AYNI modülü kullanır.
+// Eskiden kopyaydı ve sessizce ayrıştı — "sat" fiili gerçek kapıda hiç yoktu,
+// yani Pazar aracı var olduğu halde Kral onu asla tetikleyemiyordu.
 
 test("soruya verilen 'devam ediyor' cevabı guard'ı tetiklemez", () => {
   const reply = "Sen çevrimdışıyken üretim ve inşaat kuyruğu devam ediyor; yeni karar alamam.";
@@ -33,4 +25,37 @@ test("araç gerçekten çalıştıysa guard devreye girmez", () => {
 
 test("varsayımsal cümle emir sayılmaz", () => {
   assert.equal(guardFires("Taş ocağını kursak ne olur", "Kursak iyi olurdu, başlatmadım.", 0), false);
+});
+
+test("satış emri araçları açar", () => {
+  // Bu satır bir kez kırıldı: "sat" fiili kapıda yoktu, General konuşup
+  // hiçbir şey yapmıyordu ve Kral yalnızca "hiçbir şey değişmedi" diyordu.
+  assert.equal(isExplicitOrder("Pazarda 100 yiyecek sat."), true);
+  assert.equal(isExplicitOrder("sat"), true);
+  assert.equal(isExplicitOrder("Biraları satabilirsin"), true);
+  assert.equal(isExplicitOrder("odun sat altın al"), true);
+  assert.equal(isExplicitOrder("200 taşı nakde çevir"), true);
+});
+
+test("her aracın tetikleyici bir fiili vardır", () => {
+  const orders = [
+    "Taş Ocağı kur.", "5 mızrakçı eğit.", "Göçmen çağır.", "Şenlik düzenle.",
+    "Vergiyi %20 yap.", "İnşaatı hızlandır.", "Doktrini belirle.",
+    "Yiyecek istihkakını %100 yap.", "Bira istihkakını artır.", "Asker maaşını yükselt.",
+    "Nöbet oranını %60 ayarla.", "Gece emri ver.", "Madene 10 işçi gönder.",
+    "İşçileri geri çek.", "Ajan gönder.", "Karşı-istihbarat kur.", "Pazarda odun sat.",
+  ];
+  const missed = orders.filter(order => !isExplicitOrder(order));
+  assert.deepEqual(missed, [], `bu emirler araçları açmıyor: ${missed.join(" | ")}`);
+});
+
+test("soru ve varsayım hâlâ emir değildir", () => {
+  assert.equal(isExplicitOrder("Bira satılır mı sence"), false);
+  assert.equal(isExplicitOrder("Satsam ne olur"), false);
+  assert.equal(isExplicitOrder("nüfusun geriye kalanı nerde"), false);
+});
+
+test("araç çalışmadan satış iddiası guard'ı tetikler", () => {
+  assert.equal(guardFires("Pazarda 100 yiyecek sat.", "100 yiyeceği pazarda satıyorum.", 0), true);
+  assert.equal(guardFires("Pazarda 100 yiyecek sat.", "100 yiyeceği pazarda satıyorum.", 1), false);
 });

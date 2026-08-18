@@ -52,16 +52,25 @@ const MARKET = {
   price: { food: .25, wood: .3, stone: .4, iron: 1.2, ale: .8 } as Record<string, number>,
   spread: 1.6,
   dailyPerLevel: 500,
+  /** Teklifin kapanma süresi: sabit hazırlık + yük başına bekleme. */
+  baseMinutes: 18,
+  minutesPerUnit: .12,
 };
+
+/** Bir teklifin kaç dakikada kapanacağı. Channel hızı süreyi kısaltır. */
+export function marketDuration(amount: number, speed: number) {
+  return Math.max(5, Math.round((MARKET.baseMinutes + amount * MARKET.minutesPerUnit) / Math.max(1, speed)));
+}
 
 const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? key;
 
 export function marketState(game: Game, now: number) {
   const level = game.buildings.find(building => building.type === "market")?.level ?? 0;
+  const open = game.marketOrders ?? [];
   const fresh = now - (game.marketDayAt ?? 0) >= 86_400_000;
   const used = fresh ? 0 : game.marketVolume ?? 0;
   const limit = level * MARKET.dailyPerLevel;
-  return { level, used, limit, left: Math.max(0, limit - used), dayAt: fresh ? now : game.marketDayAt ?? now, price: MARKET.price, spread: MARKET.spread };
+  return { level, used, limit, left: Math.max(0, limit - used), dayAt: fresh ? now : game.marketDayAt ?? now, price: MARKET.price, spread: MARKET.spread, open, slots: level, freeSlots: Math.max(0, level - open.length) };
 }
 
 export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
@@ -170,24 +179,33 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       if (!MARKET.price[resource]) { blocked(`Pazar emri geçersiz: ${resource || "kaynak"} pazarda işlem görmez. Yalnızca yiyecek, odun, taş, demir ve bira alınıp satılır.`); continue; }
       if (market.level < 1) { blocked("Pazar emri engellendi: Pazarımız yok. Önce Pazar kurulmalı (Kale Sv.2)."); continue; }
       if (amount < 1) { blocked("Pazar emri engellendi: miktar belirtilmedi."); continue; }
+      if (market.freeSlots < 1) { blocked(`Pazar emri engellendi: Sv.${market.level} Pazarın ${market.slots} teklif yuvası da dolu. Önce bekleyen teklifler kapansın.`); continue; }
       if (amount > market.left) { blocked(`Pazar emri engellendi: Sv.${market.level} Pazarın günlük hacmi ${market.limit} birim, bugün ${market.used} birim işlem gördü; ${market.left} birim kaldı.`); continue; }
 
       const key = resource as keyof Res;
       const unit = MARKET.price[resource];
+      const minutes = marketDuration(amount, next.speed);
+      // Teklif kimliği deterministik: aynı girdi aynı kimliği üretir, motor saf kalır.
+      const id = `${buying ? "b" : "s"}-${resource}-${amount}-${now}`;
+
       if (buying) {
         const cost = Math.ceil(amount * unit * MARKET.spread);
         if (next.resources.gold < cost) { blocked(`Alım engellendi: ${amount} ${labelOf(key)} için ${cost} altın gerekli, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
-        next = { ...next, resources: { ...next.resources, gold: next.resources.gold - cost, [key]: next.resources[key] + amount },
+        // Altın peşin çıkar, mal kervanla gelir.
+        next = { ...next, resources: { ...next.resources, gold: next.resources.gold - cost },
           marketVolume: market.used + amount, marketDayAt: market.dayAt,
-          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} satın alındı; ${cost} altın ödendi.`, at: now }, ...next.notices] };
-        success(`Pazardan ${amount} ${labelOf(key)} alındı; ${cost} altın ödendi. Günlük hacimden ${market.left - amount} birim kaldı.`);
+          marketOrders: [...market.open, { id, resource: key, amount, direction: "buy" as const, gold: cost, placedAt: now, completesAt: now + minutes * 60_000 }],
+          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} için ${cost} altın ödendi; mal ${minutes} dakika sonra ambarda.`, at: now }, ...next.notices].slice(0, 20) };
+        success(`Pazara alım teklifi verildi: ${amount} ${labelOf(key)}, ${cost} altın peşin. Mal ${minutes} dakika sonra ambara girer.`);
       } else {
         if (next.resources[key] < amount) { blocked(`Satış engellendi: ambarda ${Math.floor(next.resources[key])} ${labelOf(key)} var, ${amount} satılamaz.`); continue; }
         const earned = Math.floor(amount * unit);
-        next = { ...next, resources: { ...next.resources, gold: next.resources.gold + earned, [key]: next.resources[key] - amount },
+        // Mal ambardan hemen çıkar; parası ancak teklif kapanınca gelir.
+        next = { ...next, resources: { ...next.resources, [key]: next.resources[key] - amount },
           marketVolume: market.used + amount, marketDayAt: market.dayAt,
-          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} satıldı; ${earned} altın alındı.`, at: now }, ...next.notices] };
-        success(`${amount} ${labelOf(key)} satıldı; hazineye ${earned} altın girdi. Günlük hacimden ${market.left - amount} birim kaldı.`);
+          marketOrders: [...market.open, { id, resource: key, amount, direction: "sell" as const, gold: earned, placedAt: now, completesAt: now + minutes * 60_000 }],
+          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} pazara çıkarıldı; ${earned} altın ${minutes} dakika sonra hazineye girer.`, at: now }, ...next.notices].slice(0, 20) };
+        success(`Pazara satış teklifi verildi: ${amount} ${labelOf(key)} tezgâha çıktı. ${earned} altın ${minutes} dakika sonra hazineye girer.`);
       }
       continue;
     }

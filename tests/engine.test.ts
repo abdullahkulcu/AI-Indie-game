@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
 import { costFor, keep, rates, tick } from "../engine/tick";
+import { marketDuration } from "../engine/actions";
 import type { Game } from "../engine/types";
 
 const T0 = 1_800_000_000_000;
@@ -210,21 +211,50 @@ test("Pazar olmadan hiçbir şey satılamaz", () => {
   assert.match(results[0], /Pazarımız yok/);
 });
 
-test("Pazar kaynağı altına çevirir ve deftere yazar", () => {
+test("satış anında olmaz: mal tezgâha çıkar, para sonra gelir", () => {
   const trader = newGame({ buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
   const { game, results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "sell" } }], T0);
   assert.match(results[0], /^✓/);
-  assert.equal(game.resources.wood, 100);
-  assert.equal(game.resources.gold, 1060);
+  assert.equal(game.resources.wood, 100, "mal ambardan hemen çıkmalı");
+  assert.equal(game.resources.gold, 1000, "para henüz gelmemeli");
+  assert.equal(game.marketOrders?.length, 1);
   assert.equal(game.notices[0].kind, "PAZAR");
+
+  const order = game.marketOrders![0];
+  const early = tick(game, order.completesAt - 60_000);
+  assert.equal(early.marketOrders?.length, 1, "süresi dolmadan kapanmamalı");
+
+  const when = order.completesAt + 1000;
+  const settled = tick(game, when);
+  assert.equal(settled.marketOrders?.length, 0, "süresi dolan teklif kapanmalı");
+  // Aynı anda, teklifi olmayan bir kopyayla karşılaştır: aradaki fark satışın parasıdır.
+  const without = tick({ ...game, marketOrders: [] }, when);
+  assert.equal(Math.round(settled.resources.gold - without.resources.gold), 60);
+  assert.match(settled.notices.find(notice => notice.kind === "PAZAR")!.text, /hazineye girdi/);
 });
 
 test("satıp geri almak zarardır: pazar bedava altın basmaz", () => {
-  const trader = newGame({ buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 2 }] });
+  const trader = newGame({ resources: { gold: 5000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
+    buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 2 }] });
   const sold = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "sell" } }], T0);
   const back = applyActions(sold.game, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "buy" } }], T0);
-  assert.equal(back.game.resources.wood, trader.resources.wood, "odun geri gelmeli");
-  assert.ok(back.game.resources.gold < trader.resources.gold, "tur bitince hazine azalmalı");
+  // Bütün teklifler kapansın; ancak o zaman turun bilançosu görülür.
+  const done = tick(back.game, T0 + 6 * 3_600_000);
+  assert.equal(Math.round(done.resources.wood - tick(trader, T0 + 6 * 3_600_000).resources.wood), 0, "odun geri gelmeli");
+  assert.ok(done.resources.gold < tick(trader, T0 + 6 * 3_600_000).resources.gold, "tur bitince hazine azalmalı");
+});
+
+test("Pazar yuvaları sınırlıdır: Sv.1 pazarda ikinci teklif açılmaz", () => {
+  const trader = newGame({ resources: { gold: 5000, food: 5000, stone: 300, wood: 300, iron: 100, ale: 0 },
+    buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
+  const first = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "wood", amount: 100, direction: "sell" } }], T0);
+  const second = applyActions(first.game, [{ name: "trade_resource", arguments: { resource: "food", amount: 100, direction: "sell" } }], T0);
+  assert.match(second.results[0], /teklif yuvası da dolu/);
+});
+
+test("yüklü teklif küçük teklife göre daha uzun sürer", () => {
+  assert.ok(marketDuration(1000, 1) > marketDuration(50, 1));
+  assert.ok(marketDuration(500, 4) < marketDuration(500, 1), "hızlı channel'da teklif daha çabuk kapanır");
 });
 
 test("günlük pazar hacmi seviyeyle sınırlıdır", () => {

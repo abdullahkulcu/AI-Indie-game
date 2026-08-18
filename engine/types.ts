@@ -21,6 +21,22 @@ export type Queue = {
   hastened?: boolean;
 };
 
+/**
+ * Pazara verilen açık teklif. Mal ambardan (ya da altın hazineden) emir
+ * verilince çıkar, karşılığı ancak teklif kapandığında gelir. Yüklü teklif
+ * daha uzun sürer; pazar anlık bir takas masası değildir.
+ */
+export type MarketOrder = {
+  id: string;
+  resource: Key;
+  amount: number;
+  direction: "sell" | "buy";
+  /** Satışta gelecek altın, alışta ödenmiş altın. */
+  gold: number;
+  placedAt: number;
+  completesAt: number;
+};
+
 export type Notice = { kind: string; text: string; at: number };
 
 export type Game = {
@@ -82,6 +98,8 @@ export type Game = {
   /** Pazarda bugün alınıp satılan toplam birim ve o günün başlangıcı. */
   marketVolume?: number;
   marketDayAt?: number;
+  /** Pazarda bekleyen açık teklifler; yuva sayısı Pazar seviyesidir. */
+  marketOrders?: MarketOrder[];
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;
