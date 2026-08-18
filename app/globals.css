@@ -39,3 +39,8 @@
 .market-actions{display:flex;align-items:center;gap:10px;flex:0 0 auto}
 .market-actions small{font-size:.74rem;opacity:.65}
 .market-actions button{padding:6px 11px;font-size:.71rem;letter-spacing:.05em}
+
+/* Kamera dönüş anahtarı: sahneyi incelerken dönüş rahatsız ediyor. */
+.rotate-toggle{margin-left:8px;padding:5px 10px;font-size:.66rem;letter-spacing:.08em;border:1px solid rgba(255,240,205,.35);border-radius:3px;background:rgba(20,14,8,.55);color:#f4e6c8;cursor:pointer}
+.rotate-toggle:hover{background:rgba(20,14,8,.78)}
+.rotate-toggle.spinning{border-color:rgba(214,168,80,.55);color:#f0d089}
