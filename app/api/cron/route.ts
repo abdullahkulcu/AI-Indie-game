@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
 import { tick } from "../../../engine/tick";
 import type { Game, GameAction } from "../../../engine/types";
 import { getDb } from "../../../db";
 import { channels, gameSaves, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { decryptByok } from "../../../server/byok-crypto";
-import { compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
+import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +75,21 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
   // Ön eleme: model çağrılmadan karar verilir, bu uyanma sıfır token harcar.
   if (!decision.act) return finish(decision.reason, false, false);
 
+  // Saatlik dilimi modele gitmeden ÖNCE kilitle. Aynı anda düşen iki tetikleme
+  // (elle deneme, tekrar eden cron, çakışan iki konteyner) yukarıdaki ön elemeyi
+  // birlikte geçerdi: ikisi de token harcar ve ikisi de eylem uygulardı. Koşullu
+  // UPDATE'i yalnızca bir istek kazanır; kaybeden sıfır token ile döner.
+  // Gün penceresinin sıfırlanması da burada kalıcılaşır, böylece aşağıdaki artış
+  // saf SQL toplaması olabilir ve iki istek birbirinin sayacını ezemez.
+  const claimed = await db.update(standingOrders)
+    .set({ lastRunAt: now, actionsToday: window.actionsToday, dayStartedAt: window.dayStartedAt })
+    .where(and(
+      eq(standingOrders.userId, row.userId),
+      or(isNull(standingOrders.lastRunAt), lte(standingOrders.lastRunAt, now - WAKE_INTERVAL_MS)),
+    ))
+    .returning({ userId: standingOrders.userId });
+  if (!claimed.length) return { userId: row.userId, acted: false, detail: "Bu saatlik dilimde zaten uyanıldı.", tokensUsed: false };
+
   const [credential] = await db.select().from(llmCredentials).where(eq(llmCredentials.userId, row.userId)).limit(1);
   if (!credential) return finish("BYOK bağlantısı yok; General sessiz.", false, false);
 
@@ -113,7 +128,7 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     set: { gameState: JSON.stringify(next), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` },
   });
   if (succeeded) {
-    await db.update(standingOrders).set({ actionsToday: window.actionsToday + 1, dayStartedAt: window.dayStartedAt }).where(eq(standingOrders.userId, row.userId));
+    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.userId, row.userId));
   }
   return finish(summary, succeeded, true);
 }
