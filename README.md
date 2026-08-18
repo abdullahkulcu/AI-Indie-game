@@ -21,7 +21,7 @@ TypeScript seçildi. React/Three.js arayüzü, Fastify API, dakikalık worker ve
 ./run.sh db:push      # ilk kurulumda şemayı uygular
 ```
 
-Web: `http://localhost:3000`. İlk çalıştırmada `.dev.vars` (Worker sırları) ve
+Web: `http://localhost` (80 portu; konteyner içinde 3000). İlk çalıştırmada `.dev.vars` (Worker sırları) ve
 `.env` (cron sidecar) otomatik üretilir; `CRON_SECRET` ikisinde senkron tutulur.
 
 Bütün komutlar için `./run.sh help`. Sık kullanılanlar:
