@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { NEED, hourlyDemand, moodState, moodTarget, rationsOf, soldierUnrestAfter, suppression } from "../engine/populace";
+import { NEED, hourlyDemand, moodState, moodTarget, rationsOf, soldierUnrestAfter, suppression , populationChange } from "../engine/populace";
 import { grossRates, rates, tick } from "../engine/tick";
 import type { Game } from "../engine/types";
 
@@ -163,4 +163,32 @@ test("madenciler yemek yemeye devam eder", () => {
 test("madenci sayısı nüfusu aşamaz", () => {
   const absurd = newGame({ population: 10, mineWorkers: 999 });
   assert.equal(grossRates(absurd).wood, 0, "bütün halk madendeyse tarlada üretim kalmaz");
+});
+
+test("nüfus kaybı da kazancı da halkın büyüklüğüne orantılıdır", () => {
+  const revolt = moodState(5, 0);
+  const small = populationChange(revolt, 24, 300, [], 24);
+  const large = populationChange(revolt, 300, 300, [], 24);
+  assert.ok(small < 0 && large < 0);
+  assert.ok(Math.abs(large) > Math.abs(small) * 10, "büyük krallık isyanda daha çok insan kaybetmeli");
+});
+
+test("büyüme boş konut kaldıkça olur, kapasite dolunca durur", () => {
+  const content = moodState(85, 0);
+  assert.ok(populationChange(content, 24, 300, [], 1) > 0);
+  assert.equal(populationChange(content, 300, 300, [], 1), 0, "kapasite doluyken büyüme durmalı");
+});
+
+test("çökmüş nüfus makul sürede toparlanır", () => {
+  const content = moodState(85, 0);
+  let population = 24;
+  for (let hour = 0; hour < 24 * 7; hour++) population += populationChange(content, population, 300, [], 1);
+  assert.ok(population > 240, `bir haftada 24'ten 240'a çıkmalı, çıkan: ${Math.round(population)}`);
+});
+
+test("evlilik dairesi ve meydan büyümeyi hızlandırır, kaybı etkilemez", () => {
+  const content = moodState(85, 0), revolt = moodState(5, 0);
+  const halls = [{ type: "marriage_hall", level: 2 }, { type: "town_square", level: 1 }];
+  assert.ok(populationChange(content, 100, 300, halls, 1) > populationChange(content, 100, 300, [], 1));
+  assert.equal(populationChange(revolt, 100, 300, halls, 1), populationChange(revolt, 100, 300, [], 1));
 });

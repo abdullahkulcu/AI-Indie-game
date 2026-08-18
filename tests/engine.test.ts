@@ -167,3 +167,40 @@ test("tur başına en fazla üç eylem işlenir", () => {
   const { results } = applyActions(newGame({ resources: { gold: 5000, food: 5000, stone: 300, wood: 300, iron: 100, ale: 0 } }), many, T0);
   assert.equal(results.length, 3);
 });
+
+test("göçmen çağrısı nüfusu artırır ve deftere yazılır", () => {
+  const before = newGame({ popularity: 60, resources: { gold: 1000, food: 1000, stone: 300, wood: 300, iron: 100, ale: 0 } });
+  const { game, results } = applyActions(before, [{ name: "call_settlers", arguments: {} }], T0);
+  assert.match(results[0], /^✓/);
+  assert.ok(game.population > before.population, "çağrı nüfusu artırmalı");
+  assert.equal(game.peopleJoined, Math.round(game.population - before.population));
+  assert.equal(game.resources.gold, 780);
+});
+
+test("huzursuz krallığa kimse taşınmaz", () => {
+  const unhappy = newGame({ popularity: 20, resources: { gold: 1000, food: 1000, stone: 300, wood: 300, iron: 100, ale: 0 } });
+  const { results } = applyActions(unhappy, [{ name: "call_settlers", arguments: {} }], T0);
+  assert.match(results[0], /^✕/);
+  assert.match(results[0], /kimse taşınmaz/);
+});
+
+test("kapasite doluyken göçmen çağrısı reddedilir", () => {
+  const full = newGame({ popularity: 60, population: 150, capacity: 150, resources: { gold: 1000, food: 1000, stone: 300, wood: 300, iron: 100, ale: 0 } });
+  const { results } = applyActions(full, [{ name: "call_settlers", arguments: {} }], T0);
+  assert.match(results[0], /boş konut yok/);
+});
+
+test("göçmen çağrısı ard arda yapılamaz", () => {
+  const rich = newGame({ popularity: 60, resources: { gold: 5000, food: 5000, stone: 300, wood: 300, iron: 100, ale: 0 } });
+  const once = applyActions(rich, [{ name: "call_settlers", arguments: {} }], T0);
+  const twice = applyActions(once.game, [{ name: "call_settlers", arguments: {} }], T0 + 3_600_000);
+  assert.match(twice.results[0], /kervan yolda/);
+});
+
+test("göç deftere geçer: sessiz erime olmaz", () => {
+  const collapsing = newGame({ popularity: 3, population: 300, capacity: 300 });
+  const after = tick(collapsing, T0 + 3 * 3_600_000);
+  assert.ok(after.population < collapsing.population);
+  assert.ok((after.peopleLeft ?? 0) > 0, "kaybedilen insan deftere yazılmalı");
+  assert.match(after.notices[0].text, /terk etti/);
+});

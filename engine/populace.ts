@@ -130,16 +130,23 @@ export type MoodState = {
   label: string;
   /** Üretim çarpanı: iş bırakma ve isyan üretimi düşürür. */
   production: number;
-  /** Saatlik nüfus değişimi tabanı (kapasite ve yapılar ayrıca ekler). */
+  /**
+   * Saatlik nüfus değişimi, mevcut halkın ORANI olarak. Sabit sayı değil:
+   * 24 kişilik krallık 24 kişilik hızla toparlanır, 300 kişilik 300 kişilik
+   * hızla dağılır. Büyüme ayrıca boş konut kaldıkça yavaşlar (bkz.
+   * populationChange), böylece kapasite gerçek bir tavan olur.
+   */
+  populationRate: number;
+  /** Geriye dönük okunabilirlik: 100 kişilik bir krallıkta saatlik değişim. */
   populationPerHour: number;
 };
 
 const STATES: Array<{ min: number } & MoodState> = [
-  { min: 70, id: "content", label: "Memnun", production: 1.1, populationPerHour: 0.1 },
-  { min: 40, id: "uneasy", label: "Huzursuz", production: 1, populationPerHour: 0.04 },
-  { min: 25, id: "simmering", label: "Kaynıyor", production: 0.75, populationPerHour: 0 },
-  { min: 10, id: "strike", label: "İş bırakma", production: 0.4, populationPerHour: -0.35 },
-  { min: 0, id: "revolt", label: "İsyan", production: 0.05, populationPerHour: -0.9 },
+  { min: 70, id: "content", label: "Memnun", production: 1.1, populationRate: .05, populationPerHour: 5 },
+  { min: 40, id: "uneasy", label: "Huzursuz", production: 1, populationRate: .018, populationPerHour: 1.8 },
+  { min: 25, id: "simmering", label: "Kaynıyor", production: 0.75, populationRate: 0, populationPerHour: 0 },
+  { min: 10, id: "strike", label: "İş bırakma", production: 0.4, populationRate: -.012, populationPerHour: -1.2 },
+  { min: 0, id: "revolt", label: "İsyan", production: 0.05, populationRate: -.03, populationPerHour: -3 },
 ];
 
 /**
@@ -171,3 +178,30 @@ export function soldierUnrestAfter(current: number, servedPay: number, hours: nu
 }
 
 export const SOLDIER_THRESHOLDS = { demand: 30, desertion: 60, mutiny: 85 } as const;
+
+/** Yapıların büyümeye katkısı: meydan ve evlilik dairesi hızı çarpar, taban vermez. */
+export function growthMultiplier(buildings: Array<{ type: string; level: number }>) {
+  const level = (type: string) => buildings.find(building => building.type === type)?.level ?? 0;
+  return 1 + level("town_square") * .05 + level("marriage_hall") * .15;
+}
+
+/**
+ * Bir saatteki nüfus değişimi.
+ *
+ * Büyüme lojistiktir: boş konut kaldıkça hızlıdır, kapasite dolarken durur.
+ * Kayıp boş konuta bakmaz — insanlar yer olduğu için kalmaz, huzur olduğu
+ * için kalır. Kaybın orantılı olması iki şeyi düzeltir: küçük bir krallık
+ * dibe vurup orada donmaz, büyük bir krallık da isyanı ucuza atlatamaz.
+ */
+export function populationChange(
+  state: MoodState,
+  population: number,
+  capacity: number,
+  buildings: Array<{ type: string; level: number }>,
+  hours: number,
+) {
+  if (population <= 0 || hours <= 0) return 0;
+  if (state.populationRate < 0) return population * state.populationRate * hours;
+  const room = capacity > 0 ? Math.max(0, 1 - population / capacity) : 0;
+  return population * state.populationRate * growthMultiplier(buildings) * room * hours;
+}

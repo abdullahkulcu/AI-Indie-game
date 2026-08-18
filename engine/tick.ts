@@ -1,7 +1,10 @@
 import { catalog, resourceLabels, terrainCatalog } from "./catalog";
-import { armySize, approachMood, hourlyDemand, moodState, moodTarget, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import type { Game, Key, Res } from "./types";
+
+/** Defteri gereksiz satırla doldurmamak için, hareket bu eşiği aşınca yazılır. */
+const LEDGER_STEP = 5;
 
 export const keep = (g: Pick<Game, "buildings">) => g.buildings.find(b => b.type === "keep")?.level ?? 1;
 
@@ -136,10 +139,8 @@ export function tick(g: Game, now: number): Game {
   const soldierUnrest = army > 0 ? soldierUnrestAfter(g.soldierUnrest ?? 0, served.pay, hours) : 0;
   const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, soldierUnrest));
 
-  // Nüfus: durumun tabanı + evlilik dairesi ve meydan katkısı.
-  const marriage = buildings.find(b => b.type === "marriage_hall")?.level ?? 0;
-  const growthBonus = state.populationPerHour > 0 ? (square * .04 + marriage * .12) : 0;
-  const growth = (state.populationPerHour + growthBonus) * hours;
+  // Nüfus halkın büyüklüğüne oranla değişir; kapasite büyümeyi frenler.
+  const growth = populationChange(state, g.population, capacity, buildings, hours);
 
   notices = populaceNotices(g, { state, soldierUnrest, previousUnrest: g.soldierUnrest ?? 0, served }, notices, now);
 
@@ -150,8 +151,26 @@ export function tick(g: Game, now: number): Game {
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
   }
 
+  // Nüfus defteri: sessiz erime olmasın, her hareket yazıya geçsin.
+  const settled = Math.max(20, Math.min(capacity, g.population + growth));
+  const moved = settled - g.population;
+  let drift = (g.migrationDrift ?? 0) + moved;
+  let joined = g.peopleJoined ?? 0, left = g.peopleLeft ?? 0;
+  if (drift <= -LEDGER_STEP) {
+    const gone = Math.floor(-drift);
+    left += gone; drift += gone;
+    notices = [{ kind: "GÖÇ", text: `${gone} kişi krallığı terk etti; geriye ${Math.round(settled)} kişi kaldı.`, at: now }, ...notices].slice(0, 20);
+  } else if (drift >= LEDGER_STEP) {
+    const came = Math.floor(drift);
+    joined += came; drift -= came;
+    notices = [{ kind: "GÖÇ", text: `${came} kişi krallığa yerleşti; nüfus ${Math.round(settled)} oldu.`, at: now }, ...notices].slice(0, 20);
+  }
+
   return {
     ...g,
+    peopleJoined: joined,
+    peopleLeft: left,
+    migrationDrift: drift,
     resources,
     popularity,
     soldierUnrest,
@@ -162,7 +181,7 @@ export function tick(g: Game, now: number): Game {
     lastRaidAt: raid.lastRaidAt ?? g.lastRaidAt,
     raidsRepelled: (g.raidsRepelled ?? 0) + raid.repelled,
     raidsSuffered: (g.raidsSuffered ?? 0) + raid.suffered,
-    population: Math.max(20, Math.min(capacity, g.population + growth)),
+    population: settled,
     capacity,
     buildings,
     units,

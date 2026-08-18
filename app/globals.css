@@ -9,3 +9,21 @@
 @media(max-width:900px){html,body{overflow:auto}.topbar{height:auto;min-height:68px;flex-wrap:wrap;padding:10px 14px}.channel-chip{display:none}.resource-ribbon{overflow-x:auto;padding-left:0}.resource{min-width:105px}.population{min-width:190px}.world-stage{height:auto;min-height:980px}.three-host{height:570px;inset:0 0 auto 0}.council-panel{top:585px;left:10px;right:10px;bottom:auto;width:auto;height:380px}.scene-title{top:14px;left:14px}}@media(max-width:560px){.title-block h1{font-size:16px}.day-toggle{margin-left:auto}.profile-button{display:none}.resource-ribbon{height:62px}.world-stage{min-height:910px}.three-host{height:500px}.council-panel{top:510px}.scene-title h2{font-size:18px}.scene-title p{display:none}}
 
 .shared-mine .mine-limit{display:block;margin-top:4px;opacity:.62;line-height:1.45}
+
+/* Nüfus defteri: halkın nereye gittiği ve nasıl geri geleceği. */
+.pop-ledger{margin:14px 0;padding:14px;border:1px solid rgba(90,60,30,.28);border-radius:6px;background:rgba(255,248,230,.42)}
+.pop-ledger .section-head b.gain{color:#3f6b34}
+.pop-ledger .section-head b.loss{color:#8d2b21}
+.ledger-rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 14px;margin:10px 0}
+.ledger-rows>div{display:flex;justify-content:space-between;gap:10px;font-size:.82rem;padding:3px 0;border-bottom:1px dotted rgba(90,60,30,.2)}
+.ledger-rows span{opacity:.72}
+.ledger-rows b.gain{color:#3f6b34}
+.ledger-rows b.loss{color:#8d2b21}
+.ledger-note{margin:8px 0 12px;font-size:.82rem;line-height:1.5;opacity:.8}
+.pop-options{display:grid;gap:8px}
+.pop-option{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px;border:1px solid rgba(90,60,30,.22);border-radius:5px;background:rgba(255,255,255,.3)}
+.pop-option.ready{border-color:rgba(63,107,52,.45);background:rgba(233,244,225,.5)}
+.pop-option b{display:block;font-size:.88rem}
+.pop-option span{display:block;font-size:.76rem;opacity:.75;margin-top:2px}
+.pop-option small{display:block;font-size:.74rem;opacity:.62;margin-top:3px;line-height:1.4}
+.pop-option button{flex:0 0 auto;padding:7px 12px;font-size:.72rem;letter-spacing:.06em}

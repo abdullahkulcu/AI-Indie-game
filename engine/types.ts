@@ -70,6 +70,13 @@ export type Game = {
   /** Ortak madene gönderilen işçi. Bunlar halkın içinden çıkar: tarlada değil
    *  madende çalışırlar, yani yerel üretime katkı vermezler ama yemek yerler. */
   mineWorkers?: number;
+  /** Nüfus defteri: krallık kurulduğundan beri kapıdan giren ve çıkan insan sayısı. */
+  peopleJoined?: number;
+  peopleLeft?: number;
+  /** Deftere henüz tam sayı olarak yazılmamış kesirli hareket. */
+  migrationDrift?: number;
+  /** Son göçmen çağrısı; ard arda çağrı yapılmasın diye bekleme süresi buradan sayılır. */
+  lastSettlerCallAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

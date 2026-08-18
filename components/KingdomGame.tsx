@@ -7,7 +7,7 @@ import AccountGate, { type Account } from "./AccountGate";
 import { applyActions } from "@/engine/actions";
 import { catalog, keepSeconds, keepUpgradeCosts, resourceLabels, terrainCatalog } from "@/engine/catalog";
 import { affordable, costFor, keep, rates, tick } from "@/engine/tick";
-import { armySize, hourlyDemand, moodState, NEED, rationsOf, suppression } from "@/engine/populace";
+import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
 import type { Building as EngineBuilding, Game, GameAction, Key as EngineKey, Res as EngineRes, TerrainId as EngineTerrainId } from "@/engine/types";
@@ -47,9 +47,12 @@ export default function KingdomGame(){
   useEffect(()=>{if(game&&ready&&account)localStorage.setItem(storeKey(account.id),JSON.stringify(game));if(!game||!cloudReady||saving.current||Date.now()-lastCloudSave.current<5000)return;saving.current=true;lastCloudSave.current=Date.now();setCloudStatus("KAYDEDİLİYOR");void fetch("/api/save",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({game})}).then(response=>{if(!response.ok)throw new Error();setCloudStatus("BULUTA KAYDEDİLDİ")}).catch(()=>setCloudStatus("YEREL YEDEK")).finally(()=>{saving.current=false})},[game,ready,cloudReady,account]);
  const lv=game?keep(game):1,rt=useMemo(()=>game?rates(game):null,[game]);
  // Halkin durumu: uretim carpani ve is birakma esigi buradan okunur.
- const mood=useMemo(()=>game?moodState(game.popularity,suppression(armySize(game.units),game.population,game.soldierUnrest??0)):{id:"uneasy",label:"—",production:1,populationPerHour:0},[game]);
+ const mood=useMemo(()=>game?moodState(game.popularity,suppression(armySize(game.units),game.population,game.soldierUnrest??0)):{id:"uneasy" as const,label:"—",production:1,populationRate:0,populationPerHour:0},[game]);
  function found(connected:boolean,introduction?:string){const t=Date.now(),terrainInfo=terrainCatalog[terrain];const g:Game={version:2,kingdomName:name.trim(),rulerName:ruler.trim(),channel:selected.name,channelId:selected.id,speed:selected.speed,terrain,foundedAt:t,lastTickAt:t,protectionEndsAt:t+4*86_400_000,resources:{gold:1000,food:500,stone:300,wood:300,iron:100,ale:0},population:100,capacity:150,popularity:50,reputation:50,loyalty:75,taxRate:15,quota:2,quotaAt:t,buildings:[{type:"keep",name:"Kale",category:"Yönetim",level:1},{type:"wheat_farm",name:"Buğday Tarlası",category:"Ekonomi",level:1},{type:"lumberjack",name:"Oduncu Kulübesi",category:"Ekonomi",level:1}],units:{spearman:0},foodRation:100,aleRation:0,soldierPay:100,soldierUnrest:0,queue:null,notices:[{kind:"ARAZİ",text:`${terrainInfo.label} parseli tahsis edildi: ${terrainInfo.bonus}.`,at:t},{kind:"KURULUŞ",text:"Krallığınız dış çeperdeki boş parsele kuruldu. Dört günlük korumanız başladı.",at:t}],provider:connected?provider:null,model:connected?model:null,generalConnected:connected,strategyNote:"Ekonomiyi dengede tut, halkı aç bırakma ve koruma bitene kadar savunmayı hazırla."};void fetch("/api/channels",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({channelId:selected.id})}).then(async response=>{if(!response.ok){const data=await response.json() as {error?:string};setToast(data.error||"Channel katılımı kaydedilemedi.")}});setGame(g);setChat([{who:connected?"General Aldric":"Saray Kâtibi",text:connected?(introduction||"Bağlantı doğrulandı. İlk hedefinizi ve yönetim doktrinimizi belirleyin."):"General henüz sessiz. Üretim ve kuyruklar çalışır; yeni yönetim kararları için BYOK General'i bağlamalısınız."}]);if(!localStorage.getItem("demirkale.tutorial.done"))setTutorialStep(0)}
- function kingdomContext(g:Game|null){if(!g)return{name:name.trim(),ruler:ruler.trim(),terrain:terrainCatalog[terrain],keepLevel:1,population:100,popularity:50,loyalty:75,quota:2,strategyNote:"Henüz belirlenmedi",resources:{gold:1000,food:500,stone:300,wood:300,iron:100,ale:0},hourlyRates:{gold:3.3,food:14.5,stone:0,wood:22,iron:0,ale:0},buildings:[{name:"Kale",level:1},{name:"Buğday Tarlası",level:1},{name:"Oduncu Kulübesi",level:1}],units:{spearman:0},channelSpeed:selected.speed,channelId:selected.id,activeConstruction:null};const level=keep(g),buildTimes:Array<{type:string;name:string;nextLevel:number;seconds:number;cost:Partial<Res>}>=catalog.filter(item=>item.unlock<=level).map(item=>{const current=g.buildings.find(b=>b.type===item.type)?.level??0;return{type:item.type,name:item.name,nextLevel:current+1,seconds:Math.round(item.seconds/g.speed),cost:costFor(item.cost,current)}});if(level<6){buildTimes.unshift({type:"keep",name:"Kale",nextLevel:level+1,seconds:Math.round(keepSeconds[level]/g.speed),cost:keepUpgradeCosts[level]})}return{name:g.kingdomName,ruler:g.rulerName,terrain:terrainCatalog[g.terrain]??terrainCatalog.plain,keepLevel:level,population:g.population,popularity:g.popularity,loyalty:g.loyalty,quota:g.quota,strategyNote:g.strategyNote??"Ekonomiyi dengede tut ve halkı aç bırakma.",resources:g.resources,hourlyRates:rates(g),buildings:g.buildings.map(b=>({name:b.name,level:b.level})),units:g.units,channelSpeed:g.speed,channelId:g.channelId??availableChannels.find(channel=>channel.name===g.channel)?.id,activeConstruction:g.queue?{name:g.queue.name,secondsRemaining:Math.max(0,Math.ceil((g.queue.completesAt-Date.now())/1000))}:null,buildTimes,
+ function kingdomContext(g:Game|null){if(!g)return{name:name.trim(),ruler:ruler.trim(),terrain:terrainCatalog[terrain],keepLevel:1,population:100,popularity:50,loyalty:75,quota:2,strategyNote:"Henüz belirlenmedi",resources:{gold:1000,food:500,stone:300,wood:300,iron:100,ale:0},hourlyRates:{gold:3.3,food:14.5,stone:0,wood:22,iron:0,ale:0},buildings:[{name:"Kale",level:1},{name:"Buğday Tarlası",level:1},{name:"Oduncu Kulübesi",level:1}],units:{spearman:0},channelSpeed:selected.speed,channelId:selected.id,activeConstruction:null};const level=keep(g),buildTimes:Array<{type:string;name:string;nextLevel:number;seconds:number;cost:Partial<Res>}>=catalog.filter(item=>item.unlock<=level).map(item=>{const current=g.buildings.find(b=>b.type===item.type)?.level??0;return{type:item.type,name:item.name,nextLevel:current+1,seconds:Math.round(item.seconds/g.speed),cost:costFor(item.cost,current)}});if(level<6){buildTimes.unshift({type:"keep",name:"Kale",nextLevel:level+1,seconds:Math.round(keepSeconds[level]/g.speed),cost:keepUpgradeCosts[level]})}const gMood=moodState(g.popularity,suppression(armySize(g.units),g.population,g.soldierUnrest??0));
+  // Nüfusun gerçek defteri: General uydurmak zorunda kalmasın.
+  const nufus={mevcut:Math.round(g.population),kapasite:g.capacity,bosKonut:Math.floor(g.capacity-g.population),gunlukDegisim:Math.round(populationChange(gMood,g.population,g.capacity,g.buildings,24)),kurulustanBeriYerlesen:Math.round(g.peopleJoined??0),kurulustanBeriGocEden:Math.round(g.peopleLeft??0),madende:Math.round(g.mineWorkers??0),silahAltinda:armySize(g.units),halkinDurumu:gMood.label};
+  return{name:g.kingdomName,ruler:g.rulerName,terrain:terrainCatalog[g.terrain]??terrainCatalog.plain,keepLevel:level,population:g.population,nufus,popularity:g.popularity,loyalty:g.loyalty,quota:g.quota,strategyNote:g.strategyNote??"Ekonomiyi dengede tut ve halkı aç bırakma.",resources:g.resources,hourlyRates:rates(g),buildings:g.buildings.map(b=>({name:b.name,level:b.level})),units:g.units,channelSpeed:g.speed,channelId:g.channelId??availableChannels.find(channel=>channel.name===g.channel)?.id,activeConstruction:g.queue?{name:g.queue.name,secondsRemaining:Math.max(0,Math.ceil((g.queue.completesAt-Date.now())/1000))}:null,buildTimes,
    // Maden, komşular ve nöbet durumu olmadan General bu alanlarda körlemesine karar verir.
    mine:sharedMine?{workers:sharedMine.participants.find(p=>p.self)?.workers??0,totalWorkers:sharedMine.mine.totalWorkers,oreRemaining:sharedMine.mine.oreRemaining}:null,
    neighbors:otherKingdoms.map((kingdom,index)=>({ordinal:index+1,name:kingdom.discovered&&kingdom.name?kingdom.name:"Bilinmeyen Sancak",discovered:kingdom.discovered,scouting:kingdom.mission?.status==="pending"})),
@@ -148,6 +151,38 @@ export default function KingdomGame(){
     <div><span>Nüfus</span><b>{Math.round(game.population)} / {game.capacity}</b></div>
     <div><span>Günlük yiyecek ihtiyacı</span><b>{daily(game.population*NEED.food)}</b></div>
    </div>
+
+   {(()=>{const perDay=populationChange(mood,game.population,game.capacity,game.buildings,24);
+     const room=Math.floor(game.capacity-game.population),joined=Math.round(game.peopleJoined??0),lost=Math.round(game.peopleLeft??0);
+     const options=[
+      {ok:game.popularity>=45&&room>=8,label:"Göçmen çağır",detail:`220 altın + 320 yiyecek · ${Math.max(8,Math.round(game.population*.25))} kişi getirir`,
+       why:room<8?"Boş konut yok; önce kapasite büyütün.":game.popularity<45?`Rıza ${Math.round(game.popularity)}; kimse taşınmaz, en az 45 gerekli.`:"Kervan hazır.",
+       order:"Çevre köylerden göçmen çağır."},
+      {ok:mood.populationRate>0,label:"Halkı doyur",detail:"İstihkakı %100'e çek, vergiyi indir",
+       why:mood.populationRate>0?"Halk memnun; nüfus kendiliğinden büyüyor.":"Rıza 40'ın altındayken nüfus artmaz, 25'in altında erir.",order:"Yiyecek istihkakını %100 yap."},
+      {ok:room>0,label:"Kapasiteyi büyüt",detail:`Meydan +80 · Kale her seviye +50 · şu an ${room} kişilik boş yer`,
+       why:room>0?"Yer var; büyüme bu tavana kadar sürer.":"Kapasite dolu; nüfus artık büyümez.",order:"Meydan kur."},
+      {ok:game.buildings.some(b=>b.type==="marriage_hall"),label:"Evlilik Dairesi",detail:"Büyüme hızını %15 artırır",
+       why:game.buildings.some(b=>b.type==="marriage_hall")?"Kurulu; büyüme hızlanıyor.":"Henüz kurulmadı (Kale Sv.2 gerekir).",order:"Evlilik Dairesi kur."},
+     ];
+     return <div className="pop-ledger">
+      <div className="section-head"><span>NÜFUS DEFTERİ</span><b className={perDay<0?"loss":perDay>0?"gain":""}>{perDay>=0?"+":""}{Math.round(perDay)} kişi/gün</b></div>
+      <div className="ledger-rows">
+       <div><span>Kuruluştan beri yerleşen</span><b className="gain">+{joined}</b></div>
+       <div><span>Kuruluştan beri göç eden</span><b className="loss">−{lost}</b></div>
+       <div><span>Boş konut</span><b>{room} kişilik</b></div>
+       <div><span>Madende çalışan</span><b>{Math.round(game.mineWorkers??0)} kişi</b></div>
+       <div><span>Silah altında</span><b>{army} kişi</b></div>
+      </div>
+      <p className="ledger-note">{perDay<0
+        ? `Halk ${mood.label.toLocaleLowerCase("tr-TR")} durumda ve krallığı terk ediyor. Göç, huzur düzelene kadar durmaz.`
+        : perDay===0?"Nüfus sabit: ya rıza büyümeye yetmiyor ya da kapasite dolu."
+        :`Bu hızla ${room>0?`kapasitenin dolmasına ${Math.max(1,Math.ceil(room/Math.max(1,perDay)))} gün var`:"kapasite zaten dolu"}.`}</p>
+      <div className="pop-options">{options.map(option=><article key={option.label} className={option.ok?"pop-option ready":"pop-option"}>
+        <div><b>{option.label}</b><span>{option.detail}</span><small>{option.why}</small></div>
+        <button disabled={!option.ok||connecting} onClick={()=>void submitOrder(option.order)}>{option.ok?"EMRET":"HAZIR DEĞİL"}</button>
+      </article>)}</div>
+     </div>})()}
 
    <div className="ration-list">
     {([

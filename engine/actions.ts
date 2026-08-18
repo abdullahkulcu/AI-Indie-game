@@ -27,6 +27,13 @@ const MAX_ACTIONS_PER_TURN = 3;
  * kaynak taşır: harcanan kaynaklar, aynı anda tek iş alan kuyruk ve General'in
  * kendi risk yargısı (bkz. server/general-risk.ts).
  */
+/**
+ * Göçmen çağrısı: nüfusu beklemeden büyütmenin tek doğrudan yolu. Bedeli
+ * ambardan çıkar ve üç koşulu vardır — boş konut, kabul edilebilir rıza ve
+ * bekleme süresi. Böylece nüfus, hazineyle sınırsızca satın alınamaz.
+ */
+const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 };
+
 export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
   let next = tick(base, now);
   const results: string[] = [], remote: GameAction[] = [];
@@ -122,6 +129,28 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         queue: { kind: "unit", type: "spearman", name: `${count} Mızrakçı`, count, startedAt: now, completesAt: now + count * 1200 / next.speed * 1000 },
       };
       success(`${count} Mızrakçının eğitimi başlatıldı.`);
+      continue;
+    }
+
+    if (action.name === "call_settlers") {
+      const room = Math.floor(next.capacity - next.population);
+      if (room < SETTLERS.minRoom) { blocked(`Göçmen çağrısı engellendi: boş konut yok (${room} kişilik yer var, en az ${SETTLERS.minRoom} gerekli). Önce Meydan veya konut yükseltin.`); continue; }
+      if (next.popularity < SETTLERS.minMood) { blocked(`Göçmen çağrısı engellendi: halkın rızası ${Math.round(next.popularity)}. Aç ve huzursuz bir krallığa kimse taşınmaz; en az ${SETTLERS.minMood} gerekli.`); continue; }
+      const waited = now - (next.lastSettlerCallAt ?? 0);
+      if (waited < SETTLERS.cooldownMs) { blocked(`Göçmen çağrısı engellendi: kervan yolda, ${Math.ceil((SETTLERS.cooldownMs - waited) / 3_600_000)} saat sonra tekrar çağırabilirsiniz.`); continue; }
+      if (!affordable(next.resources, SETTLERS.cost)) { blocked(`Göçmen çağrısı engellendi: ${SETTLERS.cost.gold} altın ve ${SETTLERS.cost.food} yiyecek gerekli.`); continue; }
+
+      // Gelen sayı boş konutla sınırlı; yerleşecek yer yoksa kervan geri döner.
+      const arrivals = Math.min(room, Math.max(SETTLERS.minRoom, Math.round(next.population * SETTLERS.share)));
+      next = {
+        ...next,
+        resources: debit(next.resources, SETTLERS.cost),
+        population: next.population + arrivals,
+        peopleJoined: (next.peopleJoined ?? 0) + arrivals,
+        lastSettlerCallAt: now,
+        notices: [{ kind: "GÖÇ", text: `Çevre köylerden ${arrivals} kişi çağrıya uyup krallığa yerleşti.`, at: now }, ...next.notices],
+      };
+      success(`Göçmen çağrısı yapıldı; ${arrivals} kişi yerleşti. Nüfus ${Math.round(next.population)}.`);
       continue;
     }
 
