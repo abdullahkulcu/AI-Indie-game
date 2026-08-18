@@ -163,7 +163,7 @@ export default function ChannelWorldMap({ channelName, homeName, homeTerrain, ho
   const regionCount = kingdoms.length + 1 + (sharedMine ? 1 : 0);
 
   return <div className="channel-map-overlay" role="dialog" aria-modal="true" aria-label={`${channelName} channel haritası`}>
-    <header className="channel-map-header"><div><span>STRATEJİK DÜNYA GÖRÜNÜMÜ</span><h2>{channelName}</h2><p>{regionCount} bölge · Krallık isimleri başarılı keşiften sonra açılır</p></div><button onClick={onClose}>BAŞKENTE DÖN ✕</button></header>
+    <header className="channel-map-header"><div><span>STRATEJİK DÜNYA GÖRÜNÜMÜ</span><h2>{channelName}</h2><p>{regionCount === 1 ? "Bu channel'da yalnızca sizin bölgeniz görünüyor" : `${regionCount} bölge`} · Krallık isimleri başarılı keşiften sonra açılır</p></div><button onClick={onClose}>BAŞKENTE DÖN ✕</button></header>
     <div className="channel-map-layout">
       <section className="channel-map-canvas">
         <MapSymbols/>

@@ -122,7 +122,10 @@ export default function KingdomScene({
       return true;
     };
 
-    const detail=new THREE.Group(), castle=new THREE.Group(); scene.add(detail,castle);
+    const detail=new THREE.Group(), castle=new THREE.Group();
+    // Figürler ayrı gruptadır: uzaklaşınca yalnızca onlar gizlenir. Eskiden
+    // binalar da bu gruptaydı ve Kral uzaklaşınca şehir tamamen kayboluyordu.
+    const figures=new THREE.Group(); scene.add(detail,castle,figures);
     const spinners:THREE.Object3D[]=[]; // Değirmen kanadı gibi dönen parçalar.
     // Dağda kasaba bir sahanlığın üstünde durur: çevre zemin AŞAĞI iner, kasaba
     // y=0'da kalır. Zemini yukarı kaldırmak düz yapıları (tarla gibi) gömüyordu.
@@ -544,7 +547,7 @@ export default function KingdomScene({
       if(villagerMesh.instanceColor)villagerMesh.instanceColor.needsUpdate=true;
       // Matrisler her karede değişiyor; sınır küresi güncellenmediği için kırpma
       // kapatılmazsa figürler bir anda yok oluyor.
-      villagerMesh.frustumCulled=false;villagerMesh.castShadow=true;detail.add(villagerMesh);
+      villagerMesh.frustumCulled=false;villagerMesh.castShadow=true;figures.add(villagerMesh);
     }
 
     // Devriye hattı: sur varsa surun hemen dışındaki KARE, yoksa çekirdek çevresi.
@@ -575,7 +578,7 @@ export default function KingdomScene({
       const tones=[0x8d2f33,0x616b78,0x7a2529,0x4f5866];
       for(let i=0;i<soldierCount;i++)soldierMesh.setColorAt(i,new THREE.Color(tones[i%tones.length]));
       if(soldierMesh.instanceColor)soldierMesh.instanceColor.needsUpdate=true;
-      soldierMesh.frustumCulled=false;soldierMesh.castShadow=true;detail.add(soldierMesh);
+      soldierMesh.frustumCulled=false;soldierMesh.castShadow=true;figures.add(soldierMesh);
     }
 
     /** Figürleri ilerletir. Ruh hâli ve nöbet oranı her karede ref'ten okunur. */
@@ -650,15 +653,18 @@ export default function KingdomScene({
     terrainLabels.forEach(([text,x,y,z])=>label(text,x,y,z,true));
 
     const update=()=>{camera.position.set(Math.sin(theta)*46,35,Math.cos(theta)*46);camera.lookAt(0,1,0);camera.zoom=zoom;camera.updateProjectionMatrix();};update();let dragging=false,lastX=0,raf=0;
-    const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.25,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
+    const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.12,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
     const resize=()=>{const w=host.clientWidth,h=host.clientHeight;renderer.setSize(w,h);const a=w/Math.max(h,1);/* Dikey gorus sabit kalirsa genis ekranda yatay 130+ birime aciliyor ve krallik bos zeminin icinde kayboluyor. Orani bozmadan tek care yakinlasmak. */const half=Math.max(13,Math.min(22,22/Math.max(1,a/1.6)));camera.left=-half*a;camera.right=half*a;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();};const observer=new ResizeObserver(resize);observer.observe(host);resize();const clock=new THREE.Clock();
+    // Uzaklaşınca yalnızca insanlar silinir; şehrin kendisi çok uzakta bile
+    // durur. Eskiden binalar da figürlerle aynı gruptaydı ve Kral biraz
+    // uzaklaşınca kale dışında hiçbir şey kalmıyordu.
     const animate=()=>{raf=requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);const time=clock.elapsedTime;if(!dragging&&autoRotateRef.current){theta+=dt*.1;update();}
       spinners.forEach(blades=>{blades.rotation.z+=dt*.9});
-      if(detail.visible)stepWalkers(dt); // Uzaklaşınca figürler gizli; matris yazmaya da gerek yok.
+      if(figures.visible)stepWalkers(dt); // Uzaklaşınca figürler gizli; matris yazmaya da gerek yok.
       water.forEach(({mesh,base})=>{(mesh.material as THREE.MeshStandardMaterial).opacity=base+Math.sin(time*.7)*.06});
       if(constructionName)constructionCrane.rotation.y+=dt*.12;
       const dark=nightRef.current;ambient.intensity+=((dark ? .5 : 1.8)-ambient.intensity)*.04;sun.intensity+=((dark ? .25 : 2.6)-sun.intensity)*.04;scene.fog!.color.lerp(new THREE.Color(dark?0x101b2d:plan.fog),.04);
-      detail.visible=zoom>.48;network.forEach(l=>l.visible=zoom<.78);labels.forEach(({el,pos,wide})=>{const p=pos.clone().project(camera);el.style.left=`${(p.x*.5+.5)*host.clientWidth}px`;el.style.top=`${(-p.y*.5+.5)*host.clientHeight}px`;el.classList.toggle("visible",wide?zoom<.78:zoom>.43);});renderer.render(scene,camera);};animate();
+      figures.visible=zoom>.48;detail.visible=zoom>.16;network.forEach(l=>l.visible=zoom<.78);labels.forEach(({el,pos,wide})=>{const p=pos.clone().project(camera);el.style.left=`${(p.x*.5+.5)*host.clientWidth}px`;el.style.top=`${(-p.y*.5+.5)*host.clientHeight}px`;el.classList.toggle("visible",wide?zoom<.78:zoom>.43);});renderer.render(scene,camera);};animate();
     return()=>{
       cancelAnimationFrame(raf);observer.disconnect();
       renderer.domElement.removeEventListener("pointerdown",down);window.removeEventListener("pointerup",up);window.removeEventListener("pointermove",move);renderer.domElement.removeEventListener("wheel",wheel);

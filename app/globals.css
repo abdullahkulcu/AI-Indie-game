@@ -76,3 +76,10 @@
 /* Dar ekranda sahne 570px'de bitiyor; dock sahnenin altında kalmasın. */
 @media(max-width:900px){.market-dock{top:498px;bottom:auto;left:14px}.market-sheet{max-height:300px}}
 @media(max-width:560px){.market-dock{top:428px}}
+
+/* Dünya isteği başarısızsa sessiz kalmasın: eskiden harita 0 komşu gösterip
+   konumu merkeze düşürüyor, sebebini hiçbir yerde söylemiyordu. */
+.world-error{margin:10px 12px;padding:10px 11px;border-left:3px solid #9b3439;background:#f3e0dc}
+.world-error b{display:block;font-size:.84rem;color:#8d2b21}
+.world-error span{display:block;margin-top:3px;font-size:.78rem}
+.world-error small{display:block;margin-top:5px;font-size:.73rem;opacity:.7;line-height:1.45}
