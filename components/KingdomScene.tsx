@@ -157,6 +157,12 @@ export default function KingdomScene({
       return trunks.length;
     };
 
+    /** Şehrin ötesindeki kuşak. Zemin 94 yarıçapında, ağaçlar ise 34'te
+     *  bitiyordu; aradaki 60 birim düz yeşil bir tabak gibi duruyordu. Bu kuşak
+     *  yapı yerleşimine karışmaz (avoid=false), çünkü orada zaten yapı olmaz. */
+    const outskirts=(salt:string,count:number,trunkColor:number,crownColor:number,scale:number)=>
+      treeBelt(salt,count,38,88,trunkColor,crownColor,scale,false);
+
     // --- Önce yer, sonra dekor --------------------------------------------
     // Bu sıra kritik: kale, su ve YAPI YUVALARI dekordan ÖNCE rezerve edilir.
     // Tersi yapıldığında dağ arazisinde kayalar yapıların üstüne kuruluyor ve
@@ -167,10 +173,16 @@ export default function KingdomScene({
     reserve(0,0,coreRadius,false,true);
 
     // Araziye ait KATI engeller (su, doruk, damar) yuvalardan önce yerini alır.
+    /** Nehrin merkez ekseni. İki frekanslı kıvrım: uzaktan geniş bir menderes,
+     *  yakında küçük bir salınım. Deterministik, tohuma bağlı değil. */
+    const riverX=(z:number)=>-12+Math.sin(z*.031)*9.5+Math.sin(z*.087+1.3)*2.6;
+
     const peaks:Array<{x:number;z:number;height:number;width:number}>=[];
     const veins:Array<[number,number]>=[];
     if(terrain==="riverbank"){
-      for(let i=-6;i<=6;i++)reserve(-12+i*1.1,i*8,7.6,false,true); // Nehir yatağı yapıya ve eve kapalı.
+      // Nehir yatağı yapıya ve eve kapalı. Rezerv, aşağıdaki geometriyle AYNI
+      // riverX eğrisini kullanır; ayrı hesaplanırsa bina suyun içine düşer.
+      for(let i=-12;i<=12;i++){const z=i*8;reserve(riverX(z),z,7.6,false,true);}
     }else if(terrain==="mountain"){
       const peakRandom=makeRandom("peaks");
       for(let i=0;i<9;i++){const angle=i/9*Math.PI*2+peakRandom()*.3,radius=31+peakRandom()*11,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
@@ -224,9 +236,21 @@ export default function KingdomScene({
     const water:Array<{mesh:THREE.Mesh;base:number}>=[];
     if(terrain==="riverbank"){
       // Su sahneye hâkim: geniş yatak, sığ kıyı bandı, sazlık, iskele ve iki köprü.
-      const river=slab(15,110,0x2c5f74,-12,.02,0);river.rotation.z=.1;
-      const shallow=slab(19,110,0x3f7d8a,-12,.012,0);shallow.rotation.z=.1;
-      const shimmer=slab(13,110,0x8fc7cf,-12,.03,0);shimmer.rotation.z=.1;(shimmer.material as THREE.Material).dispose();shimmer.material=glass(0x9fd6dd,.16);water.push({mesh:shimmer,base:.16});
+      // Nehir tek bir düz levha değil: kıvrımı takip eden parçalardan kurulur ve
+      // sahnenin görüş alanının dışına kadar sürer, yani ortada bitmez.
+      const RIVER_SPAN=210,RIVER_STEP=6;
+      const band=(width:number,color:number,y:number,glassy?:number)=>{
+        for(let z=-RIVER_SPAN/2;z<RIVER_SPAN/2;z+=RIVER_STEP){
+          const mid=z+RIVER_STEP/2,tilt=Math.atan2(riverX(z+RIVER_STEP)-riverX(z),RIVER_STEP);
+          // Eğik parçalar arasında boşluk kalmasın diye pay bırakılır.
+          const piece=slab(width,RIVER_STEP*1.35,color,riverX(mid),y,mid);
+          piece.rotation.z=-tilt;
+          if(glassy!==undefined){(piece.material as THREE.Material).dispose();piece.material=glass(0x9fd6dd,glassy);water.push({mesh:piece,base:glassy});}
+        }
+      };
+      band(19,0x3f7d8a,.012);
+      band(15,0x2c5f74,.02);
+      band(13,0x8fc7cf,.03,.16);
       // Nemli kıyı: koyu, çamurlu bir bant.
       for(let i=-4;i<=4;i++)disc(4.4,0x46603d,-3.6+i*.35,.006,i*11);
       const reedRandom=makeRandom("reeds"),reeds:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
@@ -239,7 +263,7 @@ export default function KingdomScene({
       const boat=box(1.5,.55,3.4,0x6d4c30,-7,.35,13.4);boat.rotation.y=.2;box(.16,1.9,.16,0x53381f,-7,1.3,13.4);
       terrainLabels.push(["NEHİR BÖLGESİ",-18,4,-14],["TAHTA KÖPRÜ",-11.5,3,1],["İSKELE",-4.6,3,13]);
       // Kıyı ormanlık değil nemli otlaktır: ağaç seyrek, su ve sazlık baskın kalsın.
-      treeBelt("willow",34,20,34,0x5a4029,0x2f6038,1.1,true);
+      treeBelt("willow",34,20,34,0x5a4029,0x2f6038,1.1,true);outskirts("riverOutskirts",210,0x5a4029,0x2f6038,1.25);
       treeBelt("bankTrees",14,10,18,0x5a4029,0x357045,.85,true);
     }else if(terrain==="mountain"){
       // Yükselti kasabanın ÇEVRESİNDEDİR: sahanlık zaten kuruldu, doruklar
@@ -261,10 +285,10 @@ export default function KingdomScene({
         for(let i=0;i<4;i++)ball(.26,0xb4894a,x+(i-1.5)*.85,1.7,z+(i%2)*.7)});
       terrainLabels.push(["DAĞ BÖLGESİ",0,9,-30]);
       veins.forEach(([x,z],i)=>terrainLabels.push([i?"DEMİR DAMARI":"CEVHER DAMARI",x,3.4,z]));
-      treeBelt("hardyPine",34,11,23,0x4f3a28,0x2f4a33,.72,true);
+      treeBelt("hardyPine",34,11,23,0x4f3a28,0x2f4a33,.72,true);outskirts("mountainOutskirts",120,0x4f3a28,0x3b5a3d,1.05);
     }else if(terrain==="forest"){
       // Sahneyi çevreleyen ağaç duvarı, gölgeli zemin ve içeride açıklıklar.
-      treeBelt("wallOuter",150,20,36,0x3f2b1c,0x18351d,1.45,false);
+      treeBelt("wallOuter",150,20,36,0x3f2b1c,0x18351d,1.45,false);outskirts("deepForest",380,0x3f2b1c,0x18351d,1.5);
       treeBelt("wallInner",90,15,21,0x4a3220,0x1f4425,1.2,true);
       treeBelt("scattered",44,8,15,0x4a3220,0x27502b,.95,true);
       const shadeRandom=makeRandom("shade");
@@ -297,7 +321,7 @@ export default function KingdomScene({
       const hayRandom=makeRandom("hay");
       for(let i=0;i<9;i++){const angle=hayRandom()*Math.PI*2,radius=13+hayRandom()*14,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,1.4))continue;const bale=cylinder(.75,1.5,0xc8a95e,x,.75,z,detail);bale.rotation.z=Math.PI/2;reserve(x,z,1.4)}
       terrainLabels.push(["OVA BÖLGESİ",-20,4,13],["KERVAN YOLU",14,4,10],["HASAT TARLASI",17,4,-16]);
-      treeBelt("plainEdge",30,20,34,0x5f3e25,0x33643a,1,true);
+      treeBelt("plainEdge",30,20,34,0x5f3e25,0x33643a,1,true);outskirts("plainOutskirts",150,0x5f3e25,0x33643a,1.15);
     }
 
     // Çimen bütün arazilerde var ama yoğunluğu ve rengi araziye göre değişir.

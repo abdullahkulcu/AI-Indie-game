@@ -53,7 +53,10 @@ export async function GET(request: Request) {
     const kingdom = projectPublicKingdom(row.userId, row.gameState, value.channel.name);
     return kingdom ? [{ id: row.userId, name: kingdom.name, workers: row.workers, self: row.userId === user.id }] : [];
   });
-  const own = personalCap(rows.find(row => row.userId === user.id)?.gameState);
+  // Tavan oyuncunun kendi kaydından okunur. Eskiden madendeki işçi listesinden
+  // aranıyordu; madende işçisi olmayan oyuncu kendi tavanını göremiyordu.
+  const [ownSave] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
+  const own = personalCap(ownSave?.gameState);
   return response({ personalCap: own.cap, channelSlots: CHANNEL_SLOTS, mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } }, participants });
 }
 
