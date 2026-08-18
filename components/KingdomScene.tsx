@@ -19,6 +19,9 @@ type Props = {
   watchRatio?: number;
   /** Halkın ruh hâli: content | uneasy | simmering | strike | revolt. */
   mood?: string;
+  /** Pasif kamera dönüşü. false verilirse kendiliğinden dönüş durur; sürükleyerek
+   *  çevirmek her hâlükârda çalışmaya devam eder. */
+  autoRotate?: boolean;
   /** Determinizm tohumu: aynı krallık her açılışta aynı sahneyi üretir. */
   seedKey?: string;
 };
@@ -41,13 +44,13 @@ const terrainPlans: Record<string, {
 export default function KingdomScene({
   night, keepLevel = 1, developed = false, terrain = "plain", constructionName,
   kingdoms = [], sharedMine, buildings = [], population = 0, capacity = 0,
-  army = 0, watchRatio = 40, mood = "content", seedKey = "demirkale",
+  army = 0, watchRatio = 40, mood = "content", autoRotate = true, seedKey = "demirkale",
 }: Props) {
   const mount = useRef<HTMLDivElement>(null); const nightRef = useRef(night);
   // Ruh hâli ve nöbet oranı sık değişir; imzaya girselerdi sahne her değişimde
   // baştan kurulurdu. Bunlar ref'ten okunur, animasyon döngüsü davranışı CANLI
   // günceller ve tek bir geometri bile yeniden yaratılmaz.
-  const moodRef = useRef(mood), watchRef = useRef(watchRatio);
+  const moodRef = useRef(mood), watchRef = useRef(watchRatio), autoRotateRef = useRef(autoRotate);
   const worldSignature = kingdoms.map(kingdom=>`${kingdom.id}:${kingdom.name??"?"}:${kingdom.discovered}:${kingdom.terrain}:${kingdom.position.x}:${kingdom.position.z}`).join("|")+`|mine:${sharedMine?.name??""}:${sharedMine?.position.x??""}:${sharedMine?.position.z??""}:${sharedMine?.totalWorkers??0}`;
   // Nüfus her tick'te ondalık oynar. Sahne 10 saniyede bir yeniden kurulmasın diye
   // ham sayı değil, ondan türeyen EV SAYISI ve doluluk kuşağı bağımlılık olur.
@@ -60,6 +63,8 @@ export default function KingdomScene({
   const soldierCount = Math.max(0, Math.min(28, Math.round(Math.max(0, army) / 5)));
   useEffect(() => { nightRef.current = night; }, [night]);
   useEffect(() => { moodRef.current = mood; watchRef.current = watchRatio; }, [mood, watchRatio]);
+  // Dönüşü açıp kapatmak sahneyi yeniden kurmamalı; ref'ten okunur.
+  useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
   useEffect(() => {
     const host = mount.current; if (!host) return;
     const plan = terrainPlans[terrain] ?? terrainPlans.plain;
@@ -99,9 +104,23 @@ export default function KingdomScene({
     //  - katı: su, yapı, kale. Hem dekor hem ev buradan uzak durur.
     //  - yumuşak: sokak koridorları. Dekor girmez ama EVLER oraya kurulur;
     //    aksi hâlde kendi sokağı evi engellerdi.
-    const reserved:Array<{x:number;z:number;r:number;soft:boolean}>=[];
-    const reserve=(x:number,z:number,r:number,soft=false)=>{reserved.push({x,z,r,soft})};
+    const reserved:Array<{x:number;z:number;r:number;soft:boolean;solid:boolean}>=[];
+    const reserve=(x:number,z:number,r:number,soft=false,solid=false)=>{reserved.push({x,z,r,soft,solid})};
     const isFree=(x:number,z:number,r:number,respectSoft=true)=>{for(const zone of reserved){if(zone.soft&&!respectSoft)continue;if((x-zone.x)**2+(z-zone.z)**2<(zone.r+r)**2)return false}return true};
+    /**
+     * Yürüyen figür için geçilebilirlik. Yerleşim rezervleri yapı GÖVDESİ değil
+     * yerleştirme marjıdır; insan bir binanın iki adım yanından geçebilir, o
+     * yüzden marjlar daraltılır. `solid` işaretli alanlar (su, kaya, kale) ise
+     * fiziksel engeldir ve asla daraltılmaz.
+     */
+    const walkable=(x:number,z:number,pad=.35)=>{
+      for(const zone of reserved){
+        if(zone.soft)continue;
+        const radius=zone.solid?zone.r:Math.max(zone.r*.55,Math.min(zone.r,.7));
+        if((x-zone.x)**2+(z-zone.z)**2<(radius+pad)**2)return false;
+      }
+      return true;
+    };
 
     const detail=new THREE.Group(), castle=new THREE.Group(); scene.add(detail,castle);
     const spinners:THREE.Object3D[]=[]; // Değirmen kanadı gibi dönen parçalar.
@@ -142,19 +161,19 @@ export default function KingdomScene({
     // Kale + sur + hendek tek bir çekirdek alandır; dekor da yapı da dışında kalır.
     const hasWall=buildings.some(item=>item.type==="wall");
     const coreRadius=hasWall?(keepLevel>=4?13.6:11):keepLevel>=4?10.4:keepLevel>=3?8.4:6.2;
-    reserve(0,0,coreRadius);
+    reserve(0,0,coreRadius,false,true);
 
     // Araziye ait KATI engeller (su, doruk, damar) yuvalardan önce yerini alır.
     const peaks:Array<{x:number;z:number;height:number;width:number}>=[];
     const veins:Array<[number,number]>=[];
     if(terrain==="riverbank"){
-      for(let i=-6;i<=6;i++)reserve(-12+i*1.1,i*8,7.6); // Nehir yatağı yapıya ve eve kapalı.
+      for(let i=-6;i<=6;i++)reserve(-12+i*1.1,i*8,7.6,false,true); // Nehir yatağı yapıya ve eve kapalı.
     }else if(terrain==="mountain"){
       const peakRandom=makeRandom("peaks");
       for(let i=0;i<9;i++){const angle=i/9*Math.PI*2+peakRandom()*.3,radius=31+peakRandom()*11,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
-        peaks.push({x,z,height:7+peakRandom()*7,width:3+peakRandom()*2.4});reserve(x,z,5)}
+        peaks.push({x,z,height:7+peakRandom()*7,width:3+peakRandom()*2.4});reserve(x,z,5,false,true)}
       const veinRandom=makeRandom("veins");
-      for(let i=0;i<2;i++){const angle=veinRandom()*Math.PI*2,x=Math.cos(angle)*21,z=Math.sin(angle)*21;veins.push([x,z]);reserve(x,z,4.4)}
+      for(let i=0;i<2;i++){const angle=veinRandom()*Math.PI*2,x=Math.cos(angle)*21,z=Math.sin(angle)*21;veins.push([x,z]);reserve(x,z,4.4,false,true)}
     }
 
     // Yapı yuvaları: kale çevresinde bir halka. Yuva doluysa (su, kaya) yapı
@@ -233,7 +252,7 @@ export default function KingdomScene({
       const ridgeRandom=makeRandom("ridge");
       for(let i=0;i<46;i++){const angle=ridgeRandom()*Math.PI*2,radius=18+ridgeRandom()*5.5,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius,size=.9+ridgeRandom()*1.3;
         if(!isFree(x,z,size+.4))continue;
-        const rock=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(ridgeRandom()<.4?0x7b7a70:0x63625a),x,size*.4,z);rock.scale.set(size,size*.75,size);rock.rotation.set(ridgeRandom(),ridgeRandom()*Math.PI,ridgeRandom());reserve(x,z,size)}
+        const rock=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(ridgeRandom()<.4?0x7b7a70:0x63625a),x,size*.4,z);rock.scale.set(size,size*.75,size);rock.rotation.set(ridgeRandom(),ridgeRandom()*Math.PI,ridgeRandom());reserve(x,z,size,false,true)}
       // Cevher damarı: koyu kaya ve içinde parlayan demir.
       veins.forEach(([x,z])=>{const vein=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(0x4a4740),x,.85,z);vein.scale.set(2.2,1.5,2.2);
         for(let i=0;i<4;i++)ball(.26,0xb4894a,x+(i-1.5)*.85,1.7,z+(i%2)*.7)});
@@ -315,7 +334,7 @@ export default function KingdomScene({
     }
     // Hendek surun DIŞINDA kalmalı; sabit yarıçapta bırakılınca sur duvarının
     // içinden geçip mavi bir halka gibi görünüyordu.
-    if(keepLevel>=4){const inner=hasWall?11.6:8.4;const moat=add(geom(`moat${inner}`,()=>new THREE.RingGeometry(inner,inner+1.6,48)),mat(0x315f70),0,.005,0);moat.rotation.x=-Math.PI/2;moat.castShadow=false;reserve(0,0,inner+1.8)}
+    if(keepLevel>=4){const inner=hasWall?11.6:8.4;const moat=add(geom(`moat${inner}`,()=>new THREE.RingGeometry(inner,inner+1.6,48)),mat(0x315f70),0,.005,0);moat.rotation.x=-Math.PI/2;moat.castShadow=false;reserve(0,0,inner+1.8,false,true)}
 
     // --- Yapı silüetleri ---------------------------------------------------
     // Her tür uzaktan tanınacak kendi silüetini kurar; seviye hem ölçekle hem de
@@ -432,7 +451,7 @@ export default function KingdomScene({
       scatter(geom(`merlon${thickness}`,()=>new THREE.BoxGeometry(.6,.55,thickness)),mat(0x6f6a61),merlons);
       for(let i=0;i<4;i++){const angle=i*Math.PI/2+Math.PI/4,x=Math.cos(angle)*radius*1.08,z=Math.sin(angle)*radius*1.08;
         cylinder(1.2,height+1.6,0x7f776a,x,(height+1.6)/2,z);cone(1.5,1.5,0x641d26,x,height+2.5,z)}
-      reserve(0,0,radius+1.4);placed.push({type:"wall",level,x:0,z:-radius-1});
+      reserve(0,0,radius+1.4,false,true);placed.push({type:"wall",level,x:0,z:-radius-1});
     }
 
     // --- Halkın evleri -----------------------------------------------------
@@ -481,11 +500,17 @@ export default function KingdomScene({
     // Yürüyüş hattı: sokak ekseni. Sokak koridoru zaten dekordan arındırılmış ve
     // evler yanlara dizilmiş durumda. Hat, KATI engele (su, kaya, yapı) çarptığı
     // yerde biter; böylece kimse nehre girmez ya da yapının içinden geçmez.
+    // Hattın EN UZUN kesintisiz boş parçası aranır. İlk engelde durulursa yapı
+    // yuvasının 4.6'lık rezervi sokağı ortasından kesiyor ve hiçbir hat elde
+    // edilemiyordu (nehir kıyısında dört sokağın dördü de eleniyordu).
     const routes=streets.map(angle=>{
-      const cos=Math.cos(angle),sin=Math.sin(angle),inner=coreRadius+1.4;
-      let outer=inner;
-      for(let d=inner;d<=villageReach;d+=.7){if(!isFree(cos*d,sin*d,.5,false))break;outer=d}
-      return {angle,cos,sin,inner,outer};
+      const cos=Math.cos(angle),sin=Math.sin(angle);
+      let best=0,bestStart=0,runStart=-1;
+      for(let d=coreRadius+1.2;d<=villageReach;d+=.5){
+        if(walkable(cos*d,sin*d)){if(runStart<0)runStart=d;const run=d-runStart;if(run>best){best=run;bestStart=runStart}}
+        else runStart=-1;
+      }
+      return {angle,cos,sin,inner:bestStart,outer:bestStart+best};
     }).filter(route=>route.outer-route.inner>=3);
     // Grev toplanma yeri: Meydan varsa orası, yoksa kale önü.
     const square=placed.find(item=>item.type==="town_square");
@@ -493,16 +518,24 @@ export default function KingdomScene({
       :routes.length?{x:routes[0].cos*(coreRadius+2.4),z:routes[0].sin*(coreRadius+2.4)}
       :{x:coreRadius+2.4,z:0};
 
+    // İsyan hedefi kurulum anında BİR KEZ doğrulanır: dışa doğru itilen nokta
+    // suya ya da kayaya düşerse itiş kısaltılır. Döngüde ekstra kontrol olmaz.
+    const fleeFrom=(x:number,z:number):[number,number]=>{
+      const reach=Math.hypot(x,z)||1;
+      for(const push of[6,4.5,3,1.5]){const scale=(reach+push)/reach,fx=x*scale,fz=z*scale;
+        if(Math.hypot(fx,fz)<=villageReach+2&&walkable(fx,fz,.4))return[fx,fz]}
+      return[x,z];
+    };
     const villagerCount=homes.length?Math.max(3,Math.min(44,Math.round(homes.length*.8))):0;
-    const villagers=Array.from({length:villagerCount},(unused,i)=>({
-      route:routes.length?i%routes.length:-1,
-      home:homes.length?i%homes.length:-1,
-      lateral:(walkRandom()-.5)*2.1,
-      phase:walkRandom(),
-      pace:.75+walkRandom()*.55,
-      blend:0,
-      ox:(walkRandom()-.5)*3.6,oz:(walkRandom()-.5)*3.6,
-    }));
+    const villagers=Array.from({length:villagerCount},(unused,i)=>{
+      const route=routes.length?i%routes.length:-1,home=homes.length?i%homes.length:-1;
+      const lateral=(walkRandom()-.5)*2.1;
+      const escape:[number,number]=route>=0
+        ?[routes[route].cos*routes[route].outer-routes[route].sin*lateral*1.8,routes[route].sin*routes[route].outer+routes[route].cos*lateral*1.8]
+        :home>=0?fleeFrom(homes[home].x,homes[home].z):[0,0];
+      return {route,home,lateral,phase:walkRandom(),pace:.75+walkRandom()*.55,blend:0,
+        ox:(walkRandom()-.5)*3.6,oz:(walkRandom()-.5)*3.6,fx:escape[0],fz:escape[1]};
+    });
     let villagerMesh:THREE.InstancedMesh|null=null;
     if(villagerCount){
       villagerMesh=new THREE.InstancedMesh(geom("villager",()=>new THREE.CapsuleGeometry(.21,.53,4,7)),tinted(0xffffff),villagerCount);
@@ -568,7 +601,7 @@ export default function KingdomScene({
           }else continue;
           let tx=x,tz=z,pull=0;
           if(gathering){tx=rally.x+walker.ox;tz=rally.z+walker.oz;pull=1}
-          else if(fleeing&&walker.route>=0){const route=routes[walker.route];tx=route.cos*route.outer-route.sin*walker.lateral*1.8;tz=route.sin*route.outer+route.cos*walker.lateral*1.8;pull=1}
+          else if(fleeing){tx=walker.fx;tz=walker.fz;pull=1}
           walker.blend+=(pull-walker.blend)*Math.min(1,dt*.7);
           dummy.position.set(x+(tx-x)*walker.blend,VILLAGER_Y,z+(tz-z)*walker.blend);
           dummy.rotation.set(0,facing,0);dummy.scale.setScalar(1);dummy.updateMatrix();
@@ -619,7 +652,7 @@ export default function KingdomScene({
     const update=()=>{camera.position.set(Math.sin(theta)*46,35,Math.cos(theta)*46);camera.lookAt(0,1,0);camera.zoom=zoom;camera.updateProjectionMatrix();};update();let dragging=false,lastX=0,raf=0;
     const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.25,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
     const resize=()=>{const w=host.clientWidth,h=host.clientHeight;renderer.setSize(w,h);const a=w/Math.max(h,1);/* Dikey gorus sabit kalirsa genis ekranda yatay 130+ birime aciliyor ve krallik bos zeminin icinde kayboluyor. Orani bozmadan tek care yakinlasmak. */const half=Math.max(13,Math.min(22,22/Math.max(1,a/1.6)));camera.left=-half*a;camera.right=half*a;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();};const observer=new ResizeObserver(resize);observer.observe(host);resize();const clock=new THREE.Clock();
-    const animate=()=>{raf=requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);const time=clock.elapsedTime;if(!dragging){theta+=dt*.1;update();}
+    const animate=()=>{raf=requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05);const time=clock.elapsedTime;if(!dragging&&autoRotateRef.current){theta+=dt*.1;update();}
       spinners.forEach(blades=>{blades.rotation.z+=dt*.9});
       if(detail.visible)stepWalkers(dt); // Uzaklaşınca figürler gizli; matris yazmaya da gerek yok.
       water.forEach(({mesh,base})=>{(mesh.material as THREE.MeshStandardMaterial).opacity=base+Math.sin(time*.7)*.06});
