@@ -44,6 +44,25 @@ export function isConfirmationReply(message = "") {
   return words.length <= 3 && CONFIRMATION_WORD.test(words[0] ?? "");
 }
 
+/**
+ * Araçlar bu tura verilsin mi?
+ *
+ * Artık anahtar kelimeye bakmıyoruz. Kralın cümlesinin emir mi soru mu
+ * olduğunu General'in kendisi anlar; kural sistem talimatında yazılı ve
+ * çağırdığı her eylem ayrıca risk incelemesinden ve motorun doğrulamasından
+ * geçer. Kelime listesi iki kez sessizce kırıldı: "sat" ve "çağır" fiilleri
+ * eksik olduğu için var olan araçlar Kral tarafından hiç tetiklenemedi.
+ * Bağlantı testinde (mode: "test") araç gönderilmez.
+ */
+export function shouldOfferTools(mode: string | undefined) {
+  return mode === "chat";
+}
+
+/**
+ * Cümle emir gibi mi duruyor? ARTIK BİR KAPI DEĞİL, yalnızca kurtarma
+ * sezgisidir: General işi yaptığını söyleyip hiçbir araç çağırmadığında
+ * uyarı basmak için kullanılır. Yanlış negatifi zararsızdır.
+ */
 export function isExplicitOrder(message = "") {
   const normalized = message.toLocaleLowerCase("tr-TR");
   if (HYPOTHETICAL.test(normalized)) return false;

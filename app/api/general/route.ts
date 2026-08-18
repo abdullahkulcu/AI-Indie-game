@@ -109,7 +109,8 @@ function gamePrompt(body: GeneralRequest) {
     "Belirsiz ama stratejik bir talimatta ayrıntıyı Kral'a geri yıkma; mevcut duruma göre en makul rutin eylemi kendin seç. Yalnızca gerçek anlamda eksik hedef veya büyük risk varsa soru sor.",
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
-    "Soru, varsayım, sohbet, fikir alma, olasılık tartışması ve 'şöyle olsa ne yaparsın?' cümleleri emir değildir. Bunlarda hiçbir araç çağırma. Yalnızca Kral açıkça bir eylemin yapılmasını emrettiğinde araç çağır.",
+    "Araçlar her turda elinin altındadır; emir ile sohbeti AYIRT ETMEK SENİN İŞİNDİR. Soru, varsayım, fikir alma, olasılık tartışması, durum raporu isteği ve 'şöyle olsa ne yaparsın?' cümlelerinde hiçbir araç çağırma — bunlarda yalnızca konuş. Aracı, Kral bir işin yapılmasını istediğinde çağır; bunu cümlenin kelimelerinden değil niyetinden anla. 'Biraları satabilirsin', 'sat', 'o zaman odun sat' gibi kısa ve dolaylı cümleler de emirdir.",
+    "Kararsız kaldığında sor, uydurma: emir mi sohbet mi belli değilse aracı çağırmadan ne yapacağını söyle ve teyit iste. Ama Kral bir kez emri netleştirdiyse ikinci kez sorma, uygula.",
     "Kralın kaç emir verebileceğine dair bir sayaç YOKTUR. Konuşmanın, danışmanın ya da emir vermenin sayısal bir bedeli yok; Kralı 'hakkını harcama' diye uyarma, kota/hak/sayaç diye bir şeyden hiç söz etme. Sınır yalnızca gerçek olanlardır: kaynaklar, aynı anda tek iş alan kuyruk ve senin kendi yargın.",
     "Rutin eylemler: standart bina kurma/yükseltme, küçük birlik eğitimi, şenlik, makul vergi ayarı, açıkça istenmiş inşaat hızlandırma, ölçülü nöbet ayarı, ortak madene işçi gönderme/geri çekme ve karşı-istihbarat nöbeti. Bunları kaynak uygunsa uygula.",
     "KRALLIK_DURUMU.nufus alanı nüfusun tam defteridir: mevcut, kapasite, günlük değişim, kuruluştan beri yerleşen ve göç eden. Nüfus sorulduğunda bu rakamları kullan, asla tahmin yürütme veya sebep uydurma. Kapasite bir tavandır, kayıp değil. Nüfusu artırmanın yolları: rızayı yükseltmek, kapasite büyütmek (Meydan/Kale), Evlilik Dairesi ve call_settlers ile göçmen çağırmak.",
@@ -152,7 +153,7 @@ function conversation(body: GeneralRequest) {
  * açılmazsa General onayı uygulayamaz ve Kral "onay verdim, yapmadı" der.
  */
 async function openAI(body: GeneralRequest) {
-  const toolsEnabled = body.mode === "chat" && isExplicitOrder(body.message);
+  const toolsEnabled = shouldOfferTools(body.mode);
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -177,7 +178,7 @@ async function openAI(body: GeneralRequest) {
 }
 
 async function anthropic(body: GeneralRequest) {
-  const toolsEnabled = body.mode === "chat" && isExplicitOrder(body.message);
+  const toolsEnabled = shouldOfferTools(body.mode);
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -493,7 +494,7 @@ export async function POST(request: Request) {
         // General itiraz etti ya da teyit istiyor: kendi gerekçesi korunur, uydurma sonuç üretilmez.
         ? `${cleaned}${verdictNotes}`.trim()
         : orderWithoutAction
-          ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, istihkak ve maaş ayarı, nöbet oranı, şenlik, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
+          ? `${cleaned}\n\n_Not: Bu emri gerçek bir oyun aracına dönüştüremedim, dolayısıyla uygulanmadı. Doğrudan yürütebildiklerim: bina kurma/yükseltme, inşaat hızlandırma, birlik eğitimi, vergi ayarı, istihkak ve maaş ayarı, nöbet oranı, şenlik, göçmen çağırma, pazarda alım-satım, doktrin kaydı, ortak madene işçi gönderme ve karşı-istihbarat nöbeti._`.trim()
           : cleaned;
     // Defter turun sonunda güncellenir; Kralın bu turdaki davranışı buraya işlenir.
     await recordTurn(user.id, body, {
@@ -526,4 +527,4 @@ import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";
-import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder } from "../../../server/general-intent";
+import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";

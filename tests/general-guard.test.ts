@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { guardFires, isExplicitOrder } from "../server/general-intent";
+import { guardFires, isExplicitOrder, shouldOfferTools } from "../server/general-intent";
 
 // Kural artık burada kopyalanmıyor: route.ts ile testler AYNI modülü kullanır.
 // Eskiden kopyaydı ve sessizce ayrıştı — "sat" fiili gerçek kapıda hiç yoktu,
@@ -37,16 +37,12 @@ test("satış emri araçları açar", () => {
   assert.equal(isExplicitOrder("200 taşı nakde çevir"), true);
 });
 
-test("her aracın tetikleyici bir fiili vardır", () => {
-  const orders = [
-    "Taş Ocağı kur.", "5 mızrakçı eğit.", "Göçmen çağır.", "Şenlik düzenle.",
-    "Vergiyi %20 yap.", "İnşaatı hızlandır.", "Doktrini belirle.",
-    "Yiyecek istihkakını %100 yap.", "Bira istihkakını artır.", "Asker maaşını yükselt.",
-    "Nöbet oranını %60 ayarla.", "Gece emri ver.", "Madene 10 işçi gönder.",
-    "İşçileri geri çek.", "Ajan gönder.", "Karşı-istihbarat kur.", "Pazarda odun sat.",
-  ];
-  const missed = orders.filter(order => !isExplicitOrder(order));
-  assert.deepEqual(missed, [], `bu emirler araçları açmıyor: ${missed.join(" | ")}`);
+test("araçlar sohbette her zaman açıktır; ayrımı General yapar", () => {
+  // Eskiden kelime listesi kapıydı ve "sat"/"çağır" eksik olduğu için var olan
+  // araçlar hiç tetiklenemiyordu. Artık kapı yok; kural sistem talimatında.
+  assert.equal(shouldOfferTools("chat"), true);
+  assert.equal(shouldOfferTools("test"), false, "bağlantı testinde araç gönderilmez");
+  assert.equal(shouldOfferTools(undefined), false);
 });
 
 test("soru ve varsayım hâlâ emir değildir", () => {
