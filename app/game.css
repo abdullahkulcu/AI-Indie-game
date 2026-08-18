@@ -88,3 +88,25 @@
 .general-requests .request button{flex:0 0 auto;padding:5px 10px;font-size:.62rem;letter-spacing:.12em;border:1px solid #a9834a;background:#e6d6ae;color:#4a3a20;cursor:pointer}
 .general-requests .request button:hover:not(:disabled){background:#6d3325;color:#f2e7cb}
 .general-requests .request button:disabled{opacity:.4;cursor:not-allowed}
+
+/* ---- Meclis: kompakt rozetler + bilgi popup'ı ---- */
+.council-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.council-chips button{padding:5px 10px;font-size:.64rem;letter-spacing:.1em;border:1px solid #cbb488;background:#f2e7cb;color:#6d3325;cursor:pointer}
+.council-chips button:hover{background:#6d3325;color:#f2e7cb;border-color:#6d3325}
+
+/* Sohbet kalan yüksekliği kaplar ve kendi içinde kayar; uzun konuşmada son
+   mesaj alta itilip görünmez kalıyordu. min-height:0 flex çocuğunun taşmasını
+   engellemek için şart. */
+.council-content{display:flex;flex-direction:column;min-height:0;flex:1}
+.council-content .chat-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+
+.info-overlay{position:fixed;inset:0;background:#12100bcc;display:flex;align-items:center;justify-content:center;padding:24px;z-index:60}
+.info-card{position:relative;max-width:520px;width:100%;max-height:80vh;overflow-y:auto;background:#f2e7cb;border:1px solid #a9834a;box-shadow:0 18px 48px #0b0a07aa;padding:22px 24px}
+.info-card .eyebrow{display:block;font-size:.6rem;letter-spacing:.18em;color:#8a6a12;margin-bottom:6px}
+.info-card h3{margin:0 0 10px;font-size:1.15rem;color:#3a2f1d}
+.info-card p{margin:0 0 10px;font-size:.8rem;line-height:1.6;color:#4a3a20}
+.info-card p.info-note{padding-top:8px;border-top:1px solid #dcc9a0;color:#6d5a35}
+.info-close{position:absolute;top:10px;right:12px;border:0;background:none;font-size:1rem;color:#8a6a12;cursor:pointer}
+.info-close:hover{color:#6d3325}
+.authority-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.authority-list i{font-style:normal;font-size:.66rem;padding:4px 8px;border:1px solid #cbb488;background:#e9dcb8;color:#5c4a2c}
