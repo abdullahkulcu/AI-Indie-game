@@ -1,16 +1,85 @@
+# Demirkale'yi tek komutla ayağa kaldırır: oyun sunucusu + gece vardiyası cron'u.
+#
+#   cp .env.example .env   (CRON_SECRET'i .dev.vars ile aynı yapın)
+#   docker compose up
+#
+# `app` vinext/miniflare çalıştırır; veritabanı Cloudflare D1'in yerel karşılığı
+# olduğu için ayrı bir Postgres gerekmez. `cron` yalnızca saatte bir /api/cron'u
+# çağırır; asıl karar sunucuda verilir.
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17
     environment:
       POSTGRES_DB: demirkale
       POSTGRES_USER: demirkale
       POSTGRES_PASSWORD: demirkale
-    ports: ["5432:5432"]
-    healthcheck: {test: ["CMD-SHELL", "pg_isready -U demirkale"], interval: 3s, timeout: 3s, retries: 20}
-    volumes: ["postgres_data:/var/lib/postgresql/data", "./migrations:/docker-entrypoint-initdb.d:ro"]
-  redis:
-    image: redis:7.4-alpine
-    ports: ["6379:6379"]
-    command: redis-server --appendonly yes
-    volumes: ["redis_data:/data"]
-volumes: {postgres_data: {}, redis_data: {}}
+    ports: ["5433:5432"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U demirkale"], interval: 3s, timeout: 3s, retries: 30}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+
+  app:
+    # glibc tabanlı TAM imaj şart:
+    #  - workerd binary'si glibc'ye bağlıdır; Alpine'ın musl'ında ELF yükleyicisi
+    #    bulunamadığı için `spawn ... ENOENT` verir.
+    #  - workerd TLS için SİSTEM CA deposunu kullanır (node kendi deposunu taşır).
+    #    bookworm-slim'de /etc/ssl/certs boştur, bu yüzden sağlayıcıya giden her
+    #    istek "internal error" ile düşer. Tam imajda 285 sertifika hazır gelir.
+    image: node:22-bookworm
+    working_dir: /app
+    # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
+    # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
+    ports: ["3000:3000"]
+    volumes:
+      - .:/app
+      # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
+      - node_modules:/app/node_modules
+      - vinext_cache:/app/.vinext
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://demirkale:demirkale@postgres:5432/demirkale
+      # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
+      # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
+      VINEXT_NO_DEV_LOCK: "1"
+    healthcheck:
+      # node her zaman var; curl/wget imaja göre değişir.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # Gece vardiyasını tetikler. Emri olmayan hesap sunucuda hiç işlenmez;
+  # bu servis yalnızca "şimdi kontrol et" demekten ibarettir.
+  cron:
+    image: alpine:3.20
+    depends_on:
+      app: {condition: service_healthy}
+    # Sır, Worker'ın okuduğu dosyanın aynısından gelir. Ayrı bir .env tutulsaydı
+    # iki dosya ayrışabilir ve cron sessizce 401 alırdı.
+    env_file: [.dev.vars]
+    environment:
+      CRON_TARGET: ${CRON_TARGET:-http://app:3000/api/cron}
+      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-3600}
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl >/dev/null
+        echo "gece vardiyası tetikleyicisi hazır: $$CRON_TARGET her $$CRON_INTERVAL_SECONDS saniyede"
+        while true; do
+          printf '%s ' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          curl -sS -X POST "$$CRON_TARGET" \
+            -H "x-cron-secret: $$CRON_SECRET" \
+            -H 'content-type: application/json' \
+            --max-time 120 || echo "tetikleme başarısız"
+          echo
+          sleep "$$CRON_INTERVAL_SECONDS"
+        done
+
+volumes:
+  postgres_data: {}
+  node_modules: {}
+  vinext_cache: {}

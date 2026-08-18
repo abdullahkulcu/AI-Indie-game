@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves, sessions, users } from "../../../db/schema";
 import { currentAdminUser } from "../../../server/account-auth";
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
   if (name.length < 3 || ![1, 4, 24].includes(speed) || durationDays < 1 || durationDays > 365 || maxPlayers < 2 || maxPlayers > 10_000) return Response.json({ error: "Channel alanları geçersiz." }, { status: 400, headers: noStore });
   const slug = `${name.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${Date.now().toString(36)}`;
   const startsAt = new Date(), endsAt = new Date(startsAt.getTime() + durationDays * 86_400_000);
-  const row = { id: crypto.randomUUID(), name, slug, speed, durationDays, maxPlayers, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), createdBy: actor.id };
+  const row = { id: crypto.randomUUID(), name, slug, speed, durationDays, maxPlayers, startsAt, endsAt, createdBy: actor.id };
   await getDb().insert(channels).values(row);
   return Response.json({ channel: { ...row, status: "active", playerCount: 0 } }, { status: 201, headers: noStore });
 }

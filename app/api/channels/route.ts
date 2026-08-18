@@ -1,6 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels } from "../../../db/schema";
+import { channelMembers, channels, gameSaves } from "../../../db/schema";
+import { parseStoredSave } from "../../../server/save-validation";
 import { currentUser } from "../../../server/account-auth";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,30 @@ export async function GET(request: Request) {
   const rows = await getDb().select({ id: channels.id, name: channels.name, slug: channels.slug, speed: channels.speed, durationDays: channels.durationDays, maxPlayers: channels.maxPlayers, startsAt: channels.startsAt, endsAt: channels.endsAt, players: sql<number>`count(${channelMembers.userId})` })
     .from(channels).leftJoin(channelMembers, and(eq(channelMembers.channelId, channels.id), eq(channelMembers.status, "active")))
     .where(eq(channels.status, "active")).groupBy(channels.id).orderBy(channels.createdAt);
-  return Response.json({ channels: rows }, { headers: noStore });
+  // Oyuncunun fiilen üye olduğu channel da dönülür: istemci bunu yerel
+  // kaydından tahmin etmek zorunda kalmasın. Yerel kayıt eskiyse dünya ve
+  // maden istekleri yanlış channel'a gidip 403 alıyor, harita boş kalıyordu.
+  let [membership] = await getDb().select({ channelId: channelMembers.channelId })
+    .from(channelMembers).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.status, "active"))).limit(1);
+
+  // Onarım: krallığı olan ama üyelik satırı olmayan oyuncu. Kuruluşta katılım
+  // isteği beklenmeden gönderiliyordu; başarısız olduğunda krallık kuruluyor
+  // ama üyelik yazılmıyor ve dünya/maden istekleri 403 alıp harita boş kalıyor.
+  if (!membership) {
+    const [save] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
+    const claimed = save ? parseStoredSave(save.gameState)?.channelId : null;
+    const target = claimed ? rows.find(row => row.id === claimed) : null;
+    if (target) {
+      const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(channelMembers)
+        .where(and(eq(channelMembers.channelId, target.id), eq(channelMembers.status, "active"), ne(channelMembers.userId, user.id)));
+      if (Number(count) < target.maxPlayers) {
+        await getDb().insert(channelMembers).values({ userId: user.id, channelId: target.id })
+          .onConflictDoUpdate({ target: [channelMembers.userId, channelMembers.channelId], set: { status: "active" } });
+        membership = { channelId: target.id };
+      }
+    }
+  }
+  return Response.json({ channels: rows, activeChannelId: membership?.channelId ?? null }, { headers: noStore });
 }
 
 export async function POST(request: Request) {

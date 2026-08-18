@@ -10,13 +10,6 @@ export type PublicKingdom = {
   resources: Record<string, number>;
 };
 
-export function worldPosition(channelId: string, userId: string) {
-  let hash = 2166136261;
-  for (const char of `${channelId}:${userId}`) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
-  const unsigned = hash >>> 0, angle = (unsigned % 360) * Math.PI / 180, radius = 34 + ((unsigned >>> 9) % 3) * 12;
-  return { x: Math.round(Math.cos(angle) * radius * 10) / 10, z: Math.round(Math.sin(angle) * radius * 10) / 10 };
-}
-
 export function projectPublicKingdom(userId: string, gameState: string, expectedChannelName: string): PublicKingdom | null {
   try {
     const game = JSON.parse(gameState) as {
