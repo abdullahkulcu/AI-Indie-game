@@ -19,16 +19,27 @@ export const costFor = (base: Partial<Res>, level: number): Partial<Res> =>
   Object.fromEntries(Object.entries(base).map(([key, value]) => [key, Math.ceil((value ?? 0) * Math.pow(1.65, level))])) as Partial<Res>;
 
 /** Ham üretim: halkın tüketimi ve iş bırakma etkisi hesaba katılmadan önce. */
+/**
+ * Madende çalışan halk yerel üretime katkı vermez. Askerler nüfustan düşüldüğü
+ * için ayrıca hesaba katılmaz; madenci ise nüfusta kalır (yemek yer) ama tarlada
+ * değildir. Oran, üretimi ölçeklendirir.
+ */
+export function laborFactor(g: Pick<Game, "population" | "mineWorkers">) {
+  const away = Math.max(0, Math.min(g.population, g.mineWorkers ?? 0));
+  return g.population > 0 ? Math.max(0, (g.population - away) / g.population) : 1;
+}
+
 export function grossRates(g: Game): Res {
   const levels = Object.fromEntries(g.buildings.map(b => [b.type, b.level]));
   const terrain = terrainCatalog[g.terrain] ?? terrainCatalog.plain;
+  const labor = laborFactor(g);
   return {
-    gold: g.population * g.taxRate / 100 * .22,
-    food: ((levels.wheat_farm ?? 0) * 18 + (levels.apple_orchard ?? 0) * 10) * terrain.food,
-    stone: (levels.quarry ?? 0) * 16 * terrain.stone,
-    wood: (levels.lumberjack ?? 0) * 22 * terrain.wood,
-    iron: (levels.mine ?? 0) * 7 * terrain.iron,
-    ale: (levels.brewery ?? 0) * 9,
+    gold: g.population * g.taxRate / 100 * .22 * labor,
+    food: ((levels.wheat_farm ?? 0) * 18 + (levels.apple_orchard ?? 0) * 10) * terrain.food * labor,
+    stone: (levels.quarry ?? 0) * 16 * terrain.stone * labor,
+    wood: (levels.lumberjack ?? 0) * 22 * terrain.wood * labor,
+    iron: (levels.mine ?? 0) * 7 * terrain.iron * labor,
+    ale: (levels.brewery ?? 0) * 9 * labor,
   };
 }
 

@@ -67,6 +67,9 @@ export type Game = {
   soldierPay?: number;
   /** Maaşı eksik ödenen askerlerin biriken huzursuzluğu (0-100). */
   soldierUnrest?: number;
+  /** Ortak madene gönderilen işçi. Bunlar halkın içinden çıkar: tarlada değil
+   *  madende çalışırlar, yani yerel üretime katkı vermezler ama yemek yerler. */
+  mineWorkers?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

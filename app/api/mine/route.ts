@@ -1,8 +1,21 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves, sharedMines, sharedMineWorkers } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { projectPublicKingdom } from "../../../server/world-projection";
+import { parseStoredSave } from "../../../server/save-validation";
+
+/** Madende çalışabilecek halkın oranı ve channel genelindeki toplam yuva. */
+const PERSONAL_SHARE = .2;
+const PERSONAL_FLOOR = 3;
+const CHANNEL_SLOTS = 60;
+
+/** Oyuncunun kaç işçi ayırabileceği kendi nüfusundan türer; sabit bir sayı değil. */
+function personalCap(gameState: string | undefined) {
+  const game = gameState ? parseStoredSave(gameState) : null;
+  if (!game) return { cap: PERSONAL_FLOOR, population: 0 };
+  return { cap: Math.max(PERSONAL_FLOOR, Math.floor(game.population * PERSONAL_SHARE)), population: Math.round(game.population) };
+}
 
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
@@ -40,7 +53,8 @@ export async function GET(request: Request) {
     const kingdom = projectPublicKingdom(row.userId, row.gameState, value.channel.name);
     return kingdom ? [{ id: row.userId, name: kingdom.name, workers: row.workers, self: row.userId === user.id }] : [];
   });
-  return response({ mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } }, participants });
+  const own = personalCap(rows.find(row => row.userId === user.id)?.gameState);
+  return response({ personalCap: own.cap, channelSlots: CHANNEL_SLOTS, mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } }, participants });
 }
 
 export async function POST(request: Request) {
@@ -53,10 +67,28 @@ export async function POST(request: Request) {
   await tickMine(value.mine, value.channel.speed);
   if (body.action === "leave") {
     await getDb().delete(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, value.mine.id), eq(sharedMineWorkers.userId, user.id)));
-    return response({ working: false });
+    return response({ working: false, workers: 0 });
   }
   if (body.action !== "join") return response({ error: "Geçersiz maden emri." }, 400);
-  const workers = Math.max(1, Math.min(20, Math.floor(Number(body.workers) || 5)));
-  await getDb().insert(sharedMineWorkers).values({ mineId: value.mine.id, userId: user.id, workers }).onConflictDoUpdate({ target: [sharedMineWorkers.mineId, sharedMineWorkers.userId], set: { workers } });
-  return response({ working: true, workers });
+
+  // Tavan istemciden değil, sunucudaki kayıttan okunan nüfustan türer.
+  const [save] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
+  const { cap, population } = personalCap(save?.gameState);
+  const requested = Math.max(1, Math.floor(Number(body.workers) || 5));
+  if (requested > cap) {
+    return response({ error: `Bu kadar insan ayıramazsınız: ${population} nüfusla en fazla ${cap} işçi gönderebilirsiniz.`, cap }, 409);
+  }
+
+  // Maden rakip bir kaynaktır: channel genelinde sınırlı yuva var, biri çok
+  // alırsa diğerine az kalır. Kendi mevcut işçini hesaptan düş.
+  const [taken] = await getDb().select({ total: sql<number>`coalesce(sum(${sharedMineWorkers.workers}), 0)` })
+    .from(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, value.mine.id), ne(sharedMineWorkers.userId, user.id)));
+  const othersUse = Number(taken?.total ?? 0);
+  const free = Math.max(0, CHANNEL_SLOTS - othersUse);
+  if (requested > free) {
+    return response({ error: `Madende yer kalmadı: ${CHANNEL_SLOTS} yuvanın ${othersUse}'i başka krallıklarca tutuluyor, size ${free} kaldı.`, free }, 409);
+  }
+
+  await getDb().insert(sharedMineWorkers).values({ mineId: value.mine.id, userId: user.id, workers: requested }).onConflictDoUpdate({ target: [sharedMineWorkers.mineId, sharedMineWorkers.userId], set: { workers: requested } });
+  return response({ working: true, workers: requested, cap, channelFree: free - requested, channelSlots: CHANNEL_SLOTS });
 }

@@ -145,3 +145,22 @@ test("akın halkı bir süre sarsılmış bırakır, bir günde düzelir", () =>
   assert.ok(moodTarget({ ...base, hoursSinceRaid: 8 }) > justRaided, "zamanla toparlamalı");
   assert.ok(calm - moodTarget({ ...base, hoursSinceRaid: 24 }) < 2, "bir günde neredeyse tamamen düzelmeli");
 });
+
+test("madenciler halkın içinden çıkar: yerel üretim düşer", () => {
+  const home = newGame({ population: 100 });
+  const mining = newGame({ population: 100, mineWorkers: 20 });
+  // %20'si madende → tarlada %80 el kalır.
+  assert.equal(Math.round(grossRates(mining).wood * 100) / 100, Math.round(grossRates(home).wood * .8 * 100) / 100);
+  assert.ok(grossRates(mining).gold < grossRates(home).gold, "vergi geliri de düşmeli");
+});
+
+test("madenciler yemek yemeye devam eder", () => {
+  const mining = newGame({ population: 100, mineWorkers: 20 });
+  // Madenci nüfustan silinmez; hâlâ senin halkın ve istihkakını yer.
+  assert.equal(hourlyDemand(mining).food, hourlyDemand(newGame({ population: 100 })).food);
+});
+
+test("madenci sayısı nüfusu aşamaz", () => {
+  const absurd = newGame({ population: 10, mineWorkers: 999 });
+  assert.equal(grossRates(absurd).wood, 0, "bütün halk madendeyse tarlada üretim kalmaz");
+});

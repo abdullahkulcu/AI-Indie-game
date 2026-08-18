@@ -140,6 +140,7 @@ export const gameSaveSchema = z.object({
   aleRation: finite(200).optional(),
   soldierPay: finite(200).optional(),
   soldierUnrest: finite(100).optional(),
+  mineWorkers: finite(CAPS.population).optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
