@@ -144,6 +144,9 @@ export const gameSaveSchema = z.object({
   peopleJoined: finite(1e9).optional(),
   peopleLeft: finite(1e9).optional(),
   migrationDrift: z.number().finite().optional(),
+  lastSettlerCallAt: z.number().finite().optional(),
+  marketVolume: finite(1e7).optional(),
+  marketDayAt: z.number().finite().optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),

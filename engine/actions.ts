@@ -1,4 +1,4 @@
-import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL } from "./catalog";
+import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { armySize, clampRation } from "./populace";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, rates, tick } from "./tick";
@@ -33,6 +33,29 @@ const MAX_ACTIONS_PER_TURN = 3;
  * bekleme süresi. Böylece nüfus, hazineyle sınırsızca satın alınamaz.
  */
 const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 };
+
+/**
+ * Pazar: kaynağı altına, altını kaynağa çevirir.
+ *
+ * Alış fiyatı satıştan yüksektir (makas), yani bir kaynağı satıp geri almak
+ * hep zarardır — pazar bedava altın makinesi değil, sıkışıklık çözer. Günlük
+ * hacim Pazar seviyesiyle sınırlıdır; ambarı bir seferde boşaltamazsın.
+ */
+const MARKET = {
+  price: { food: .25, wood: .3, stone: .4, iron: 1.2, ale: .8 } as Record<string, number>,
+  spread: 1.6,
+  dailyPerLevel: 500,
+};
+
+const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? key;
+
+export function marketState(game: Game, now: number) {
+  const level = game.buildings.find(building => building.type === "market")?.level ?? 0;
+  const fresh = now - (game.marketDayAt ?? 0) >= 86_400_000;
+  const used = fresh ? 0 : game.marketVolume ?? 0;
+  const limit = level * MARKET.dailyPerLevel;
+  return { level, used, limit, left: Math.max(0, limit - used), dayAt: fresh ? now : game.marketDayAt ?? now, price: MARKET.price, spread: MARKET.spread };
+}
 
 export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
   let next = tick(base, now);
@@ -129,6 +152,37 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         queue: { kind: "unit", type: "spearman", name: `${count} Mızrakçı`, count, startedAt: now, completesAt: now + count * 1200 / next.speed * 1000 },
       };
       success(`${count} Mızrakçının eğitimi başlatıldı.`);
+      continue;
+    }
+
+    if (action.name === "trade_resource") {
+      const resource = String(action.arguments?.resource ?? "");
+      const amount = Math.floor(Number(action.arguments?.amount) || 0);
+      const buying = String(action.arguments?.direction ?? "sell") === "buy";
+      const market = marketState(next, now);
+
+      if (!MARKET.price[resource]) { blocked(`Pazar emri geçersiz: ${resource || "kaynak"} pazarda işlem görmez. Yalnızca yiyecek, odun, taş, demir ve bira alınıp satılır.`); continue; }
+      if (market.level < 1) { blocked("Pazar emri engellendi: Pazarımız yok. Önce Pazar kurulmalı (Kale Sv.2)."); continue; }
+      if (amount < 1) { blocked("Pazar emri engellendi: miktar belirtilmedi."); continue; }
+      if (amount > market.left) { blocked(`Pazar emri engellendi: Sv.${market.level} Pazarın günlük hacmi ${market.limit} birim, bugün ${market.used} birim işlem gördü; ${market.left} birim kaldı.`); continue; }
+
+      const key = resource as keyof Res;
+      const unit = MARKET.price[resource];
+      if (buying) {
+        const cost = Math.ceil(amount * unit * MARKET.spread);
+        if (next.resources.gold < cost) { blocked(`Alım engellendi: ${amount} ${labelOf(key)} için ${cost} altın gerekli, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
+        next = { ...next, resources: { ...next.resources, gold: next.resources.gold - cost, [key]: next.resources[key] + amount },
+          marketVolume: market.used + amount, marketDayAt: market.dayAt,
+          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} satın alındı; ${cost} altın ödendi.`, at: now }, ...next.notices] };
+        success(`Pazardan ${amount} ${labelOf(key)} alındı; ${cost} altın ödendi. Günlük hacimden ${market.left - amount} birim kaldı.`);
+      } else {
+        if (next.resources[key] < amount) { blocked(`Satış engellendi: ambarda ${Math.floor(next.resources[key])} ${labelOf(key)} var, ${amount} satılamaz.`); continue; }
+        const earned = Math.floor(amount * unit);
+        next = { ...next, resources: { ...next.resources, gold: next.resources.gold + earned, [key]: next.resources[key] - amount },
+          marketVolume: market.used + amount, marketDayAt: market.dayAt,
+          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} satıldı; ${earned} altın alındı.`, at: now }, ...next.notices] };
+        success(`${amount} ${labelOf(key)} satıldı; hazineye ${earned} altın girdi. Günlük hacimden ${market.left - amount} birim kaldı.`);
+      }
       continue;
     }
 

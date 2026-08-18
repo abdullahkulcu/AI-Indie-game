@@ -204,3 +204,37 @@ test("göç deftere geçer: sessiz erime olmaz", () => {
   assert.ok((after.peopleLeft ?? 0) > 0, "kaybedilen insan deftere yazılmalı");
   assert.match(after.notices[0].text, /terk etti/);
 });
+
+test("Pazar olmadan hiçbir şey satılamaz", () => {
+  const { results } = applyActions(newGame(), [{ name: "trade_resource", arguments: { resource: "wood", amount: 100, direction: "sell" } }], T0);
+  assert.match(results[0], /Pazarımız yok/);
+});
+
+test("Pazar kaynağı altına çevirir ve deftere yazar", () => {
+  const trader = newGame({ buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
+  const { game, results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "sell" } }], T0);
+  assert.match(results[0], /^✓/);
+  assert.equal(game.resources.wood, 100);
+  assert.equal(game.resources.gold, 1060);
+  assert.equal(game.notices[0].kind, "PAZAR");
+});
+
+test("satıp geri almak zarardır: pazar bedava altın basmaz", () => {
+  const trader = newGame({ buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 2 }] });
+  const sold = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "sell" } }], T0);
+  const back = applyActions(sold.game, [{ name: "trade_resource", arguments: { resource: "wood", amount: 200, direction: "buy" } }], T0);
+  assert.equal(back.game.resources.wood, trader.resources.wood, "odun geri gelmeli");
+  assert.ok(back.game.resources.gold < trader.resources.gold, "tur bitince hazine azalmalı");
+});
+
+test("günlük pazar hacmi seviyeyle sınırlıdır", () => {
+  const trader = newGame({ resources: { gold: 1000, food: 9000, stone: 300, wood: 300, iron: 100, ale: 0 }, buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
+  const { results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "food", amount: 800, direction: "sell" } }], T0);
+  assert.match(results[0], /günlük hacmi 500 birim/);
+});
+
+test("ambarda olmayan kaynak satılamaz", () => {
+  const trader = newGame({ buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
+  const { results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "iron", amount: 400, direction: "sell" } }], T0);
+  assert.match(results[0], /ambarda 100 DEMİR var/);
+});

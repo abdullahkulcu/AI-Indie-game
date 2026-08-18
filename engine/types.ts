@@ -77,6 +77,9 @@ export type Game = {
   migrationDrift?: number;
   /** Son göçmen çağrısı; ard arda çağrı yapılmasın diye bekleme süresi buradan sayılır. */
   lastSettlerCallAt?: number;
+  /** Pazarda bugün alınıp satılan toplam birim ve o günün başlangıcı. */
+  marketVolume?: number;
+  marketDayAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

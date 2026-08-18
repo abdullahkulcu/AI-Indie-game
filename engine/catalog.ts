@@ -18,7 +18,7 @@ export const catalog = [
   { type: "barracks", name: "Kışla", category: "Askerî", unlock: 1, seconds: 9000, cost: { wood: 170, stone: 140 }, detail: "Temel birlikleri açar" },
   { type: "apple_orchard", name: "Elma Bahçesi", category: "Ekonomi", unlock: 1, seconds: 4200, cost: { wood: 90, gold: 30 }, detail: "+10 yiyecek/sa" },
   { type: "mill", name: "Değirmen", category: "Ekonomi", unlock: 2, seconds: 10800, cost: { wood: 100, stone: 120 }, detail: "Buğday zincirini büyütür" },
-  { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "3 açık teklif yuvası" },
+  { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "Kaynak alıp satar · seviye başına 500 birim/gün" },
   { type: "wall", name: "Sur", category: "Askerî", unlock: 3, seconds: 28800, cost: { stone: 500, wood: 100 }, detail: "+%20 savunma" },
   { type: "mine", name: "Maden", category: "Ekonomi", unlock: 1, seconds: 10800, cost: { wood: 150, stone: 80 }, detail: "50.000 cevher rezervi" },
   { type: "park", name: "Park", category: "Halk", unlock: 1, seconds: 3000, cost: { wood: 60, gold: 40 }, detail: "Halkın rızasını yükseltir" },
