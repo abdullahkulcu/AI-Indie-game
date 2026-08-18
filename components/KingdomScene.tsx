@@ -390,11 +390,15 @@ export default function KingdomScene({
     const walls=buildings.filter(item=>item.type==="wall");
     if(walls.length){
       const level=Math.max(1,Math.min(6,walls[0].level||1)),radius=9.4,height=1.9+level*.45,thickness=.7+level*.12;
-      for(let i=0;i<4;i++){const angle=i*Math.PI/2,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
+      // Mazgal dişleri tek tek Mesh olunca sur başına ~50 çizim çağrısı ediyordu;
+      // hepsi tek InstancedMesh'te toplanır.
+      const merlons:Array<{x:number;z:number;y:number;rot:number}>=[];
+      for(let i=0;i<4;i++){const angle=i*Math.PI/2,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius,facing=-angle+Math.PI/2;
         // Sur parçası yarıçapa DİK durmalı; `-angle` onu radyal çeviriyor ve dört
         // parça kaleyi saracağına artı işareti gibi duruyordu.
-        const segment=box(radius*1.5,height,thickness,0x8e8578,x,height/2,z);segment.rotation.y=-angle+Math.PI/2;
-        for(let c=-radius*.7;c<=radius*.7;c+=1.5){const merlon=box(.6,.55,thickness,0x6f6a61,x+Math.cos(-angle+Math.PI/2)*c,height+.28,z+Math.sin(-angle+Math.PI/2)*c);void merlon}}
+        const segment=box(radius*1.5,height,thickness,0x8e8578,x,height/2,z);segment.rotation.y=facing;
+        for(let c=-radius*.7;c<=radius*.7;c+=1.5)merlons.push({x:x+Math.cos(facing)*c,z:z+Math.sin(facing)*c,y:height+.28,rot:facing})}
+      scatter(geom(`merlon${thickness}`,()=>new THREE.BoxGeometry(.6,.55,thickness)),mat(0x6f6a61),merlons);
       for(let i=0;i<4;i++){const angle=i*Math.PI/2+Math.PI/4,x=Math.cos(angle)*radius*1.08,z=Math.sin(angle)*radius*1.08;
         cylinder(1.2,height+1.6,0x7f776a,x,(height+1.6)/2,z);cone(1.5,1.5,0x641d26,x,height+2.5,z)}
       reserve(0,0,radius+1.4);placed.push({type:"wall",level,x:0,z:-radius-1});
