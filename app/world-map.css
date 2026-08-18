@@ -1,19 +1,42 @@
 .channel-map-overlay{position:fixed;z-index:90;inset:0;background:#17140f;color:#eadbb8;display:flex;flex-direction:column}.channel-map-header{height:84px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid #a77d3b;background:linear-gradient(90deg,#211811,#34251a)}.channel-map-header span,.inspector-kicker{font:600 7px JetBrains Mono;letter-spacing:.14em;color:#c79b49}.channel-map-header h2{margin:4px 0 1px;font:600 22px Cinzel;color:#f0dfb9}.channel-map-header p{margin:0;font:8px JetBrains Mono;color:#a99471}.channel-map-header button{border:1px solid #b98b42;background:#64252a;color:#f0dfb9;padding:10px 13px;font:600 8px Cinzel;cursor:pointer}.channel-map-layout{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 310px}.channel-map-canvas{position:relative;overflow:hidden;background:#46583a;box-shadow:inset 0 0 140px #10150d66}.map-river{position:absolute;left:17%;top:-18%;width:7%;height:145%;background:#365d65;transform:rotate(17deg);box-shadow:inset 6px 0 #8bb0a433,inset -5px 0 #1c3b42aa}.map-road{position:absolute;height:12px;background:#9a7a47aa;border:1px solid #c7a66a66;transform-origin:left center}.road-a{left:6%;top:72%;width:90%;transform:rotate(-10deg)}.road-b{left:35%;top:14%;width:70%;transform:rotate(64deg)}.map-region{position:absolute;transform:translate(-50%,-50%);min-width:0;max-width:104px;padding:6px 8px;border:1px solid #d0a552;background:#2a2018e8;color:#f0dfba;box-shadow:0 8px 18px #10130ca8,0 0 0 6px #2b3c2866;cursor:pointer;text-align:left;transition:transform .2s,box-shadow .2s}.map-region:hover,.map-region.selected{transform:translate(-50%,-50%) scale(1.13);box-shadow:0 10px 25px #10130ccc,0 0 0 8px #d3a64966}.map-region i{float:left;margin-right:8px;font:normal 20px serif;color:#d9ad52}.map-region b,.map-region small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.map-region b{font:600 8px Cinzel}.map-region small{margin-top:3px;font:6px JetBrains Mono;color:#b9a57b}.map-region.forest{box-shadow:0 8px 18px #10130ca8,0 0 0 8px #315d3866}.map-region.mountain{box-shadow:0 8px 18px #10130ca8,0 0 0 8px #77756e66}.map-region.riverbank{box-shadow:0 8px 18px #10130ca8,0 0 0 8px #3e718077}.map-region.unknown{border-style:dashed;filter:saturate(.5)}.map-region.mine{background:#4d3b25;border-color:#d1a548}.map-compass{position:absolute;right:25px;top:25px;display:grid;place-items:center;width:54px;height:75px;color:#e2c27c}.map-compass b,.map-compass small{font:600 8px Cinzel}.map-compass span{font-size:30px}.channel-map-legend{position:absolute;left:22px;bottom:20px;display:flex;gap:15px;padding:9px 11px;background:#1d1711d9;border:1px solid #a27b3d;font:7px JetBrains Mono}.channel-map-legend span{display:flex;align-items:center;gap:5px}.channel-map-legend i{width:8px;height:8px;border-radius:50%;background:#8f2f32}.channel-map-legend .legend-unknown{background:#716a5b}.channel-map-legend .legend-mine{background:#c09b50}.region-inspector{overflow:auto;padding:25px 22px;background:linear-gradient(#e6d8b8,#cdb88e);color:#38281f;border-left:2px solid #aa7d3c}.region-portrait{height:150px;margin:12px 0 17px;display:grid;place-items:center;border:1px solid #957343;background:radial-gradient(circle,#819454 0 28%,#52683d 29% 60%,#34462f 61%);box-shadow:inset 0 0 35px #14201766}.region-portrait.forest{background:radial-gradient(circle,#526f3a,#294d32)}.region-portrait.mountain{background:radial-gradient(circle,#818178,#4f554e)}.region-portrait.riverbank{background:linear-gradient(110deg,#5c764a 0 42%,#47757a 43% 58%,#6c7e4b 59%)}.region-portrait.mine{background:radial-gradient(circle,#8b744d,#4b4438)}.region-portrait i{font:normal 55px serif;color:#f0d393;text-shadow:0 5px 12px #0007}.region-inspector h3{margin:0 0 6px;font:600 18px Cinzel}.region-inspector>p{margin:0 0 15px;font:10px/1.45 Spectral;color:#6a5137}.region-inspector dl{margin:0 0 16px;border:1px solid #ae9266}.region-inspector dl div{display:flex;justify-content:space-between;padding:8px 9px;border-bottom:1px solid #bba678}.region-inspector dl div:last-child{border:0}.region-inspector dt{font:7px JetBrains Mono;color:#795e3e}.region-inspector dd{margin:0;font:600 8px JetBrains Mono}.fog-report,.mine-roster{padding:11px;margin-bottom:14px;background:#c6b186;border-left:3px solid #7b2b30;font:8px/1.55 JetBrains Mono}.mine-roster{display:grid;gap:4px;border-left-color:#8d6f3f}.inspector-action{width:100%;border:1px solid #d0a956;background:#64252a;color:#f3dfb6;padding:11px;font:600 8px Cinzel;cursor:pointer}.inspector-action:disabled{opacity:.5;cursor:not-allowed}@media(max-width:800px){.channel-map-header{padding:0 14px}.channel-map-header p{display:none}.channel-map-layout{grid-template-columns:1fr;grid-template-rows:minmax(360px,58vh) minmax(0,1fr)}.region-inspector{border-left:0;border-top:2px solid #aa7d3c;padding:16px}.region-portrait{height:80px}.map-region{min-width:94px;padding:7px}.channel-map-legend{display:none}}
 
-/* ---- Biyom kuşakları: dünyanın sabit coğrafyası ---- */
-.map-biomes{position:absolute;inset:-40%;pointer-events:none;opacity:.95}
-.map-biome-labels{position:absolute;inset:0;pointer-events:none}
+/* ---- Çizilmiş harita katmanı ----
+   Biyom lekeleri, nehir ve yollar tek bir SVG'de. preserveAspectRatio="none"
+   olduğu için 0-100 uzayı yüzdelerle birebir örtüşür ve işaretçilerle hizalı
+   kalır; çizgi kalınlıkları vectorEffect ile eziklikten korunur. */
+.map-art{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.map-art-rings ellipse{fill:none;stroke:rgba(226,214,182,.13);stroke-width:1;stroke-dasharray:3 4}
+.map-art-roads .road-casing{fill:none;stroke:#5d4a2c;stroke-width:7;stroke-linecap:round;opacity:.55}
+.map-art-roads .road-track{fill:none;stroke:#b08f55;stroke-width:4;stroke-linecap:round;stroke-dasharray:9 5;opacity:.9}
+
+/* Sembol tanımları görünmez; her öğe <use> ile bunlara bağlanır. */
+.map-symbol-defs{position:absolute;width:0;height:0;overflow:hidden}
+
+/* Köprüler: yol nehri geçtiği yerde. Sabit piksel boyutlu, ezilmezler. */
+.map-bridges{position:absolute;inset:0;pointer-events:none}
+.map-bridges span{position:absolute;width:26px;height:15px;display:block}
+.map-bridges svg{width:100%;height:100%;display:block}
+.map-bridges rect{fill:#8a6a3e;stroke:#4b3720;stroke-width:1.2}
+.map-bridges path{stroke:#4b3720;stroke-width:1;fill:none}
+
+/* Bölge adları: işaretçi halkasının dışında, harita yazısı gibi aralıklı. */
+.map-biome-labels{position:absolute;inset:0;pointer-events:none;z-index:6}
 .map-biome-labels em{
   position:absolute;transform:translate(-50%,-50%);
   font-style:normal;font-size:.6rem;letter-spacing:.24em;text-transform:uppercase;
-  color:rgba(238,229,203,.42);white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.6);
+  color:rgba(240,231,205,.58);white-space:nowrap;
+  text-shadow:0 1px 3px rgba(0,0,0,.85),0 0 8px rgba(0,0,0,.6);
 }
-
-/* Merkezden dışa doğru halkalar; dünyanın sonsuz uzandığı hissini verir. */
-.map-rings{position:absolute;inset:0;pointer-events:none}
-.map-rings i{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  border:1px dashed rgba(226,214,182,.13);border-radius:50%;
+/* Dar ekranda %47 yarıçap adı kenardan taşırıyor; dört biyomun adı içeri alınır. */
+@media(max-width:800px){
+  .map-biome-labels em{
+    font-size:.48rem;letter-spacing:.1em;line-height:1.35;
+    white-space:normal;max-width:34%;text-align:center;
+  }
+  .map-biome-labels em.mountain{left:26%!important;top:23%!important}
+  .map-biome-labels em.riverbank{left:74%!important;top:31%!important}
+  .map-biome-labels em.forest{left:26%!important;top:77%!important}
+  .map-biome-labels em.plain{left:74%!important;top:77%!important}
 }
 
 /* ---- Kaleler ---- */
@@ -36,11 +59,11 @@
    böylece dünya çerçeveli bir ada değil sürüp giden bir diyar gibi okunur. */
 .map-features{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .map-features span{
-  position:absolute;transform:translate(-50%,-50%);
-  font:normal 13px serif;line-height:1;user-select:none;
-  text-shadow:0 1px 2px rgba(0,0,0,.45);
+  position:absolute;transform:translate(-50%,-50%);display:block;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.45));
 }
-.map-features span.forest{color:#2f5133}
+.map-features svg{width:100%;height:100%;display:block}
+.map-features span.forest{color:#27492c}
 .map-features span.mountain{color:#8d8579}
 .map-features span.riverbank{color:#5d93a8}
 .map-features span.plain{color:#93a259}
