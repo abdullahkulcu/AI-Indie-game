@@ -12,7 +12,12 @@ export async function GET(request: Request) {
   const rows = await getDb().select({ id: channels.id, name: channels.name, slug: channels.slug, speed: channels.speed, durationDays: channels.durationDays, maxPlayers: channels.maxPlayers, startsAt: channels.startsAt, endsAt: channels.endsAt, players: sql<number>`count(${channelMembers.userId})` })
     .from(channels).leftJoin(channelMembers, and(eq(channelMembers.channelId, channels.id), eq(channelMembers.status, "active")))
     .where(eq(channels.status, "active")).groupBy(channels.id).orderBy(channels.createdAt);
-  return Response.json({ channels: rows }, { headers: noStore });
+  // Oyuncunun fiilen üye olduğu channel da dönülür: istemci bunu yerel
+  // kaydından tahmin etmek zorunda kalmasın. Yerel kayıt eskiyse dünya ve
+  // maden istekleri yanlış channel'a gidip 403 alıyor, harita boş kalıyordu.
+  const [membership] = await getDb().select({ channelId: channelMembers.channelId })
+    .from(channelMembers).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.status, "active"))).limit(1);
+  return Response.json({ channels: rows, activeChannelId: membership?.channelId ?? null }, { headers: noStore });
 }
 
 export async function POST(request: Request) {

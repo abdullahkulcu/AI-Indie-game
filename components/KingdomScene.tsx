@@ -175,7 +175,7 @@ export default function KingdomScene({
     // Araziye ait KATI engeller (su, doruk, damar) yuvalardan önce yerini alır.
     /** Nehrin merkez ekseni. İki frekanslı kıvrım: uzaktan geniş bir menderes,
      *  yakında küçük bir salınım. Deterministik, tohuma bağlı değil. */
-    const riverX=(z:number)=>-12+Math.sin(z*.031)*9.5+Math.sin(z*.087+1.3)*2.6;
+    const riverX=(z:number)=>-12+Math.sin(z*.018)*7;
 
     const peaks:Array<{x:number;z:number;height:number;width:number}>=[];
     const veins:Array<[number,number]>=[];
@@ -238,19 +238,32 @@ export default function KingdomScene({
       // Su sahneye hâkim: geniş yatak, sığ kıyı bandı, sazlık, iskele ve iki köprü.
       // Nehir tek bir düz levha değil: kıvrımı takip eden parçalardan kurulur ve
       // sahnenin görüş alanının dışına kadar sürer, yani ortada bitmez.
-      const RIVER_SPAN=210,RIVER_STEP=6;
-      const band=(width:number,color:number,y:number,glassy?:number)=>{
-        for(let z=-RIVER_SPAN/2;z<RIVER_SPAN/2;z+=RIVER_STEP){
-          const mid=z+RIVER_STEP/2,tilt=Math.atan2(riverX(z+RIVER_STEP)-riverX(z),RIVER_STEP);
-          // Eğik parçalar arasında boşluk kalmasın diye pay bırakılır.
-          const piece=slab(width,RIVER_STEP*1.35,color,riverX(mid),y,mid);
-          piece.rotation.z=-tilt;
-          if(glassy!==undefined){(piece.material as THREE.Material).dispose();piece.material=glass(0x9fd6dd,glassy);water.push({mesh:piece,base:glassy});}
+      // Nehir tek parça sürekli bir şerittir. Eğimli levhalardan kurulduğunda
+      // aralarda basamak ve dikiş görünüyordu; artık eğriyi takip eden tek bir
+      // üçgen şeridi üretilir, yani kıvrım pürüzsüzdür.
+      const RIVER_SPAN=220,RIVER_SEGMENTS=110;
+      const ribbon=(width:number,color:number,y:number,glassy?:number)=>{
+        const positions=new Float32Array((RIVER_SEGMENTS+1)*2*3),indices:number[]=[];
+        for(let i=0;i<=RIVER_SEGMENTS;i++){
+          const z=-RIVER_SPAN/2+(RIVER_SPAN*i)/RIVER_SEGMENTS,cx=riverX(z);
+          // Genişlik akış yönüne dik ölçülür, yoksa kıvrımda nehir incelir.
+          const slope=(riverX(z+.5)-riverX(z-.5)),normal=1/Math.hypot(1,slope),half=width/2;
+          const offsetX=half*normal,offsetZ=-half*slope*normal;
+          positions.set([cx-offsetX,0,z-offsetZ],i*6);
+          positions.set([cx+offsetX,0,z+offsetZ],i*6+3);
+          if(i<RIVER_SEGMENTS){const a=i*2;indices.push(a,a+1,a+2,a+1,a+3,a+2);}
         }
+        const geometry=new THREE.BufferGeometry();
+        geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));
+        geometry.setIndex(indices);geometry.computeVertexNormals();
+        const material=glassy===undefined?mat(color):glass(0x9fd6dd,glassy);
+        const mesh=new THREE.Mesh(geometry,material);mesh.position.y=y;mesh.receiveShadow=true;mesh.castShadow=false;
+        detail.add(mesh); // Temizlikte scene.traverse geometriyi kendisi bırakır.
+        if(glassy!==undefined)water.push({mesh,base:glassy});
       };
-      band(19,0x3f7d8a,.012);
-      band(15,0x2c5f74,.02);
-      band(13,0x8fc7cf,.03,.16);
+      ribbon(19,0x3f7d8a,.012);
+      ribbon(15,0x2c5f74,.02);
+      ribbon(13,0x8fc7cf,.03,.16);
       // Nemli kıyı: koyu, çamurlu bir bant.
       for(let i=-4;i<=4;i++)disc(4.4,0x46603d,-3.6+i*.35,.006,i*11);
       const reedRandom=makeRandom("reeds"),reeds:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
@@ -677,7 +690,7 @@ export default function KingdomScene({
     terrainLabels.forEach(([text,x,y,z])=>label(text,x,y,z,true));
 
     const update=()=>{camera.position.set(Math.sin(theta)*46,35,Math.cos(theta)*46);camera.lookAt(0,1,0);camera.zoom=zoom;camera.updateProjectionMatrix();};update();let dragging=false,lastX=0,raf=0;
-    const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.12,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
+    const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.38,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
     const resize=()=>{const w=host.clientWidth,h=host.clientHeight;renderer.setSize(w,h);const a=w/Math.max(h,1);/* Dikey gorus sabit kalirsa genis ekranda yatay 130+ birime aciliyor ve krallik bos zeminin icinde kayboluyor. Orani bozmadan tek care yakinlasmak. */const half=Math.max(13,Math.min(22,22/Math.max(1,a/1.6)));camera.left=-half*a;camera.right=half*a;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();};const observer=new ResizeObserver(resize);observer.observe(host);resize();const clock=new THREE.Clock();
     // Uzaklaşınca yalnızca insanlar silinir; şehrin kendisi çok uzakta bile
     // durur. Eskiden binalar da figürlerle aynı gruptaydı ve Kral biraz
