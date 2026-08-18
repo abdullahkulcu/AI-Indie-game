@@ -93,8 +93,10 @@ export default function KingdomScene({
     // y=0'da kalır. Zemini yukarı kaldırmak düz yapıları (tarla gibi) gömüyordu.
     const groundY=terrain==="mountain"?-2.7:-.08;
     const ground=disc(94,plan.ground,0,groundY,0); ground.receiveShadow=true;
-    if(terrain==="mountain"){const plateau=add(geom("plateau",()=>new THREE.CylinderGeometry(19.5,22.5,3,44)),mat(plan.region),0,-1.5,0);plateau.receiveShadow=true}
-    const homeRegion=disc(terrain==="mountain"?18.6:26,plan.region,0,terrain==="mountain"?.012:-.03,0); homeRegion.receiveShadow=true;
+    // Sahanlık kasabaya YER açacak kadar geniş olmalı; dar tutulunca 280 nüfuslu
+    // krallık 15 haneye sıkışıyordu.
+    if(terrain==="mountain"){const plateau=add(geom("plateau",()=>new THREE.CylinderGeometry(24,27,3.1,48)),mat(plan.region),0,-1.55,0);plateau.receiveShadow=true}
+    const homeRegion=disc(terrain==="mountain"?23:26,plan.region,0,terrain==="mountain"?.012:-.03,0); homeRegion.receiveShadow=true;
 
     /** Ortak dağıtıcı: konumları verilen bir InstancedMesh kurar. */
     const scatter=(geometry:THREE.BufferGeometry,material:THREE.Material,spots:Array<{x:number;z:number;y?:number;s?:number;sy?:number;rot?:number;tilt?:number}>,parent:THREE.Object3D=detail)=>{
@@ -132,10 +134,10 @@ export default function KingdomScene({
       for(let i=-6;i<=6;i++)reserve(-12+i*1.1,i*8,7.6); // Nehir yatağı yapıya ve eve kapalı.
     }else if(terrain==="mountain"){
       const peakRandom=makeRandom("peaks");
-      for(let i=0;i<9;i++){const angle=i/9*Math.PI*2+peakRandom()*.3,radius=27+peakRandom()*11,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
+      for(let i=0;i<9;i++){const angle=i/9*Math.PI*2+peakRandom()*.3,radius=31+peakRandom()*11,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
         peaks.push({x,z,height:7+peakRandom()*7,width:3+peakRandom()*2.4});reserve(x,z,5)}
       const veinRandom=makeRandom("veins");
-      for(let i=0;i<2;i++){const angle=veinRandom()*Math.PI*2,x=Math.cos(angle)*17,z=Math.sin(angle)*17;veins.push([x,z]);reserve(x,z,4.4)}
+      for(let i=0;i<2;i++){const angle=veinRandom()*Math.PI*2,x=Math.cos(angle)*21,z=Math.sin(angle)*21;veins.push([x,z]);reserve(x,z,4.4)}
     }
 
     // Yapı yuvaları: kale çevresinde bir halka. Yuva doluysa (su, kaya) yapı
@@ -190,7 +192,7 @@ export default function KingdomScene({
       // Yükselti kasabanın ÇEVRESİNDEDİR: sahanlık zaten kuruldu, doruklar
       // sahanlığın dışında ve alçak zeminde durur. Böylece dağ çerçeveler,
       // kasabanın üstünü örtmez.
-      const skirt=add(geom("skirt",()=>new THREE.CylinderGeometry(22.5,26,1.6,44)),mat(0x636557),0,groundY+.8,0);skirt.receiveShadow=true;
+      const skirt=add(geom("skirt",()=>new THREE.CylinderGeometry(27,31,1.6,48)),mat(0x636557),0,groundY+.8,0);skirt.receiveShadow=true;
       peaks.forEach((peak,i)=>{const {x,z,height,width}=peak;
         cone(width,height,i%2?0x5d6158:0x6b6a60,x,groundY+height/2,z);
         cone(width*.5,height*.36,0xa8a89e,x,groundY+height*.8,z); // açık renkli kaya kapağı
@@ -198,7 +200,7 @@ export default function KingdomScene({
       // Sahanlık kenarındaki kaya sırtı; yapı yuvaları zaten rezerve olduğu için
       // kayalar boşluklara oturur, yapıların üstüne binmez.
       const ridgeRandom=makeRandom("ridge");
-      for(let i=0;i<40;i++){const angle=ridgeRandom()*Math.PI*2,radius=14.5+ridgeRandom()*5,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius,size=.9+ridgeRandom()*1.2;
+      for(let i=0;i<46;i++){const angle=ridgeRandom()*Math.PI*2,radius=18+ridgeRandom()*5.5,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius,size=.9+ridgeRandom()*1.3;
         if(!isFree(x,z,size+.4))continue;
         const rock=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(ridgeRandom()<.4?0x7b7a70:0x63625a),x,size*.4,z);rock.scale.set(size,size*.75,size);rock.rotation.set(ridgeRandom(),ridgeRandom()*Math.PI,ridgeRandom());reserve(x,z,size)}
       // Cevher damarı: koyu kaya ve içinde parlayan demir.
@@ -206,7 +208,7 @@ export default function KingdomScene({
         for(let i=0;i<4;i++)ball(.26,0xb4894a,x+(i-1.5)*.85,1.7,z+(i%2)*.7)});
       terrainLabels.push(["DAĞ BÖLGESİ",0,9,-30]);
       veins.forEach(([x,z],i)=>terrainLabels.push([i?"DEMİR DAMARI":"CEVHER DAMARI",x,3.4,z]));
-      treeBelt("hardyPine",26,10,18,0x4f3a28,0x2f4a33,.7,true);
+      treeBelt("hardyPine",34,11,23,0x4f3a28,0x2f4a33,.72,true);
     }else if(terrain==="forest"){
       // Sahneyi çevreleyen ağaç duvarı, gölgeli zemin ve içeride açıklıklar.
       treeBelt("wallOuter",150,20,36,0x3f2b1c,0x18351d,1.45,false);
@@ -259,8 +261,14 @@ export default function KingdomScene({
     // --- Kale -------------------------------------------------------------
     if(keepLevel===1){
       // İlk seviye bir taş şato değil: küçük ahşap bir hükümdar konağı ve çıplak bir avlu.
-      box(4.8,2.5,3.8,0x765239,0,1.25,0,castle);const roof=cone(3.5,2.1,0x4c2d24,0,3.45,0,castle);roof.rotation.y=Math.PI/4;
-      box(.7,3.6,.7,0x5a402d,-1.65,1.8,-1.25,castle);box(.7,3.6,.7,0x5a402d,1.65,1.8,-1.25,castle);
+      // Çatı gövdeden geniş olursa konak kahverengi bir yığına dönüşüyor; dört yüzlü
+      // piramit gövdeye oturtulur ki ahşap duvarlar ve kapı görünsün.
+      box(5,2.9,4,0x7d5940,0,1.45,0,castle);
+      const roof=add(geom("keepRoof",()=>new THREE.ConeGeometry(3.4,1.9,4)),mat(0x4c2d24),0,3.85,0,castle);roof.rotation.y=Math.PI/4;
+      box(.34,2.9,4.1,0x5f432e,-2.5,1.45,0,castle);box(.34,2.9,4.1,0x5f432e,2.5,1.45,0,castle); // köşe direkleri
+      box(1.1,1.8,.2,0x3f2a1c,0,.9,2.02,castle);box(1.5,.2,.5,0x5f432e,0,1.9,2.1,castle); // kapı ve sundurma
+      for(const x of[-1.9,1.9])box(.62,3.9,.62,0x5a402d,x,1.95,-1.6,castle); // gözcü kuleleri
+      cylinder(.1,2.2,0x6b4a30,2.6,3.9,-1.6,castle);const banner=box(.05,.9,1.1,0x6d2028,2.6,4.5,-1.1,castle);void banner;
     }else{
       const castleScale=.76+Math.min(6,keepLevel)*.055;castle.scale.setScalar(castleScale);
       if(keepLevel===2){
@@ -396,7 +404,7 @@ export default function KingdomScene({
     // Nüfus arttıkça sokaklar dışa doğru büyür, azaldığında en dıştaki haneler
     // boşalır. Konumlar sokak eksenine göre dizilir; üst üste binme rezervle biter.
     // Sokak dağda sahanlığın dışına taşmamalı; taşarsa alçak zeminin üstünde asılı kalır.
-    const villageReach=terrain==="mountain"?18:27;
+    const villageReach=terrain==="mountain"?22.5:27;
     if(houseCount>0)streets.forEach(angle=>{const street=slab(2.2,villageReach,0x7d6a48,Math.cos(angle)*villageReach/2,.012,Math.sin(angle)*villageReach/2);street.rotation.z=-angle+Math.PI/2;street.receiveShadow=false});
     const houseRandom=makeRandom("houses");
     const candidates:Array<{x:number;z:number;angle:number;variant:number}>=[];
@@ -443,7 +451,8 @@ export default function KingdomScene({
     if(constructionName)label(`⚒ İNŞAAT · ${constructionName}`,constructionName.startsWith("Kale")?0:16,7,constructionName.startsWith("Kale")?0:-4);
     // Her yapı kendi adını ve seviyesini taşır; oyuncu "7 yapım var" dediğinde 7 etiket görür.
     placed.forEach(item=>label(`${(buildingNames.get(item.type)??item.type).toLocaleUpperCase("tr")} · SV.${item.level}`,item.x,item.type==="wall"?4.5:5.2,item.z));
-    if(homes.length)label(`⌂ MAHALLE · ${homes.length} HANE`,0,3.4,Math.max(9,6.6*(1.18-crowdBand*.035)));
+    // Etiket mahallenin AĞIRLIK MERKEZİNE otursun; sabit nokta evleri ıskalıyordu.
+    if(homes.length)label(`⌂ MAHALLE · ${homes.length} HANE`,homes.reduce((sum,home)=>sum+home.x,0)/homes.length,3.4,homes.reduce((sum,home)=>sum+home.z,0)/homes.length);
     kingdoms.slice(0,40).forEach(kingdom=>label(kingdom.name??"BİLİNMEYEN SANCAK",kingdom.position.x,5,kingdom.position.z,true));
     if(sharedMine)label(`⛏ ${sharedMine.name} · ${sharedMine.totalWorkers} İŞÇİ`,sharedMine.position.x,5,sharedMine.position.z,true);
     terrainLabels.forEach(([text,x,y,z])=>label(text,x,y,z,true));
