@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { riverRibbon } from "@/engine/river";
 import { catalog } from "@/engine/catalog";
 
 type MapKingdom = { id: string; name: string | null; terrain: string; position: { x: number; z: number }; discovered: boolean };
@@ -243,16 +244,7 @@ export default function KingdomScene({
       // üçgen şeridi üretilir, yani kıvrım pürüzsüzdür.
       const RIVER_SPAN=220,RIVER_SEGMENTS=110;
       const ribbon=(width:number,color:number,y:number,glassy?:number)=>{
-        const positions=new Float32Array((RIVER_SEGMENTS+1)*2*3),indices:number[]=[];
-        for(let i=0;i<=RIVER_SEGMENTS;i++){
-          const z=-RIVER_SPAN/2+(RIVER_SPAN*i)/RIVER_SEGMENTS,cx=riverX(z);
-          // Genişlik akış yönüne dik ölçülür, yoksa kıvrımda nehir incelir.
-          const slope=(riverX(z+.5)-riverX(z-.5)),normal=1/Math.hypot(1,slope),half=width/2;
-          const offsetX=half*normal,offsetZ=-half*slope*normal;
-          positions.set([cx-offsetX,0,z-offsetZ],i*6);
-          positions.set([cx+offsetX,0,z+offsetZ],i*6+3);
-          if(i<RIVER_SEGMENTS){const a=i*2;indices.push(a,a+1,a+2,a+1,a+3,a+2);}
-        }
+        const {positions,indices}=riverRibbon(riverX,width,RIVER_SPAN,RIVER_SEGMENTS);
         const geometry=new THREE.BufferGeometry();
         geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));
         geometry.setIndex(indices);geometry.computeVertexNormals();
@@ -265,16 +257,19 @@ export default function KingdomScene({
       ribbon(15,0x2c5f74,.02);
       ribbon(13,0x8fc7cf,.03,.16);
       // Nemli kıyı: koyu, çamurlu bir bant.
-      for(let i=-4;i<=4;i++)disc(4.4,0x46603d,-3.6+i*.35,.006,i*11);
+      // Kıyı, sazlık, köprü ve iskele nehrin ekseninden türer. Eskiden hepsi
+      // x=-12 sabitine çakılıydı; nehir kıvrılınca iskele karada kalırdı.
+      for(let i=-4;i<=4;i++){const z=i*11;disc(4.4,0x46603d,riverX(z)+8.4,.006,z);}
       const reedRandom=makeRandom("reeds"),reeds:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
-      for(let i=0;i<260;i++){const along=(reedRandom()-.5)*96,side=reedRandom()<.5?-1:1,offset=(7.4+reedRandom()*2.6)*side,x=-12+offset+along*.1,z=along,size=.6+reedRandom()*.85;reeds.push({x,z,y:.45*size,s:size,rot:reedRandom()*Math.PI})}
+      for(let i=0;i<260;i++){const along=(reedRandom()-.5)*96,side=reedRandom()<.5?-1:1,offset=(7.4+reedRandom()*2.6)*side,z=along,x=riverX(z)+offset,size=.6+reedRandom()*.85;reeds.push({x,z,y:.45*size,s:size,rot:reedRandom()*Math.PI})}
       scatter(geom("reed",()=>new THREE.ConeGeometry(.1,1.5,4)),mat(0x7f8f3c),reeds);
-      const bridge=(z:number,width:number)=>{box(17,.4,width,0x7a5738,-11.5,.55,z);for(let i=-7;i<=7;i+=1.4){box(.22,1.1,.22,0x5d402c,-11.5+i,1.05,z-width/2);box(.22,1.1,.22,0x5d402c,-11.5+i,1.05,z+width/2)}box(15,.16,.16,0x6b4a30,-11.5,1.6,z-width/2);box(15,.16,.16,0x6b4a30,-11.5,1.6,z+width/2)};
+      const bridge=(z:number,width:number)=>{const bx=riverX(z);box(17,.4,width,0x7a5738,bx,.55,z);for(let i=-7;i<=7;i+=1.4){box(.22,1.1,.22,0x5d402c,bx+i,1.05,z-width/2);box(.22,1.1,.22,0x5d402c,bx+i,1.05,z+width/2)}box(15,.16,.16,0x6b4a30,-11.5,1.6,z-width/2);box(15,.16,.16,0x6b4a30,-11.5,1.6,z+width/2)};
       bridge(1,3.2);bridge(-19,2.2);
       // İskele ve bağlı kayık.
-      box(3,.3,7,0x7d5a3a,-4.6,.5,13);for(const z of[10.5,13,15.5])cylinder(.2,1.6,0x5b3f2a,-4.6,.8,z);
-      const boat=box(1.5,.55,3.4,0x6d4c30,-7,.35,13.4);boat.rotation.y=.2;box(.16,1.9,.16,0x53381f,-7,1.3,13.4);
-      terrainLabels.push(["NEHİR BÖLGESİ",-18,4,-14],["TAHTA KÖPRÜ",-11.5,3,1],["İSKELE",-4.6,3,13]);
+      const pierX=riverX(13)+7.4;
+      box(3,.3,7,0x7d5a3a,pierX,.5,13);for(const z of[10.5,13,15.5])cylinder(.2,1.6,0x5b3f2a,pierX,.8,z);
+      const boat=box(1.5,.55,3.4,0x6d4c30,pierX-2.4,.35,13.4);boat.rotation.y=.2;box(.16,1.9,.16,0x53381f,pierX-2.4,1.3,13.4);
+      terrainLabels.push(["NEHİR BÖLGESİ",riverX(-14)-6,4,-14],["TAHTA KÖPRÜ",riverX(1),3,1],["İSKELE",pierX,3,13]);
       // Kıyı ormanlık değil nemli otlaktır: ağaç seyrek, su ve sazlık baskın kalsın.
       treeBelt("willow",34,20,34,0x5a4029,0x2f6038,1.1,true);outskirts("riverOutskirts",210,0x5a4029,0x2f6038,1.25);
       treeBelt("bankTrees",14,10,18,0x5a4029,0x357045,.85,true);
