@@ -125,7 +125,8 @@ export default function KingdomScene({
     // krallığın yapıları sahnede kayboluyordu.
     // Kale + sur + hendek tek bir çekirdek alandır; dekor da yapı da dışında kalır.
     const hasWall=buildings.some(item=>item.type==="wall");
-    reserve(0,0,hasWall?(keepLevel>=4?13.6:11):keepLevel>=4?10.4:keepLevel>=3?8.4:6.2);
+    const coreRadius=hasWall?(keepLevel>=4?13.6:11):keepLevel>=4?10.4:keepLevel>=3?8.4:6.2;
+    reserve(0,0,coreRadius);
 
     // Araziye ait KATI engeller (su, doruk, damar) yuvalardan önce yerini alır.
     const peaks:Array<{x:number;z:number;height:number;width:number}>=[];
@@ -145,14 +146,28 @@ export default function KingdomScene({
     const slotCount=14,slotPhase=hash(`${seedKey}|slots`)%360/360*Math.PI*2;
     const builtTypes=buildings.filter(item=>item.type!=="wall");
     const slots:Array<{item:SceneBuilding;x:number;z:number;angle:number}>=[];
+    const SLOT_R=4.6;
+    // İlk halka çekirdeğin DIŞINDA başlamalı. Sabit 12.4 kullanılırken Sv.4 + Sur
+    // krallığında üç halkanın üçü de yasak alanın içinde kalıyor, arama hiçbir
+    // boşluk bulamıyor ve yapı surun içine ya da nehrin üstüne kuruluyordu.
+    const firstRing=coreRadius+SLOT_R+1.2;
     builtTypes.slice(0,slotCount).forEach((item,index)=>{
-      const wanted=slotPhase+index*(Math.PI*2/slotCount),base=12.4+(index%3)*1.5;
-      let picked={x:Math.cos(wanted)*base,z:Math.sin(wanted)*base,angle:wanted};
-      search:for(const dr of[0,-1.6,1.6,-3.2,3.2,-4.6])for(const da of[0,.11,-.11,.22,-.22,.34,-.34,.46,-.46]){
-        const radius=base+dr,angle=wanted+da,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
-        if(isFree(x,z,4.6)){picked={x,z,angle};break search}
+      const wanted=slotPhase+index*(Math.PI*2/slotCount);
+      const base=firstRing+(index%3)*1.9;
+      let picked:{x:number;z:number;angle:number}|null=null;
+      // Halka halka dışa doğru tam tur tara. Eski arama yalnızca +3.2 birim
+      // dışarı itebiliyordu; ihtiyaç ondan çok daha fazlaydı.
+      search:for(let ring=0;ring<16&&!picked;ring++){
+        const radius=base+ring*2.1;
+        for(let step=0;step<24;step++){
+          const da=(step%2?-1:1)*Math.ceil(step/2)*(Math.PI*2/28);
+          const angle=wanted+da,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;
+          if(isFree(x,z,SLOT_R)){picked={x,z,angle};break search}
+        }
       }
-      slots.push({item,x:picked.x,z:picked.z,angle:picked.angle});reserve(picked.x,picked.z,4.6);
+      // Hiçbir boşluk kalmadıysa en dışa at; asla kontrolsüz konuma kurma.
+      if(!picked){const radius=base+16*2.1;picked={x:Math.cos(wanted)*radius,z:Math.sin(wanted)*radius,angle:wanted}}
+      slots.push({item,x:picked.x,z:picked.z,angle:picked.angle});reserve(picked.x,picked.z,SLOT_R);
     });
 
     // Sokaklar yumuşak rezerv: dekor girmez, evler tam da oraya dizilir.
