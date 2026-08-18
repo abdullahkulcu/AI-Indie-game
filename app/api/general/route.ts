@@ -140,11 +140,23 @@ function conversation(body: GeneralRequest) {
   return [...history, { role: "user" as const, content: body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message! }];
 }
 
+/**
+ * Kralın "evet/tamam/onay veriyorum" gibi kısa onayları. Bunlar tek başına emir
+ * cümlesi değildir ama General'in kendi önerisine verilmiş cevaptır; araçlar
+ * açılmazsa General onayı uygulayamaz ve Kral "onay verdim, yapmadı" der.
+ */
+function isConfirmationReply(message = "") {
+  const normalized = message.toLocaleLowerCase("tr-TR").trim();
+  return /(^|\s)(evet|tamam|olur|onay|onaylıyorum|onayladım|kabul|peki|hadi|başla|devam)(\b|$)/.test(normalized)
+    || /onay ver/.test(normalized);
+}
+
 function isExplicitOrder(message = "") {
   const normalized = message.toLocaleLowerCase("tr-TR");
   if (/(dersem|desem|olsaydı|olursa ne|ne yaparsın|sence|mantıklı mı|doğru mu|farz et|varsayalım)/.test(normalized)) return false;
+  if (isConfirmationReply(normalized)) return true;
   // Maden, ajan ve nöbet emirleri de buraya girmeli; aksi halde modele araç hiç iletilmez.
-  return /(kur|inşa et|yükselt|seviyeye çıkar|çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|hemen yap|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|nöbete|yükselt)(\b|$)/.test(normalized);
+  return /(kur|inşa et|yükselt|seviyeye çıkar|çıkar|eğit|asker bas|düzenle|ayarla|düşür|artır|hızlandır|bitir|harca|başlat|uygula|yap|yapalım|gönder|yolla|görevlendir|geri çek|geri çağır|çek|kes|ver|dağıt|belirle|nöbete|yükselt)(\b|$)/.test(normalized);
 }
 
 async function openAI(body: GeneralRequest) {

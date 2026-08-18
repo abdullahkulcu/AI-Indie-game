@@ -9,6 +9,7 @@ import { catalog, keepSeconds, keepUpgradeCosts, resourceLabels, terrainCatalog 
 import { affordable, costFor, keep, rates, tick } from "@/engine/tick";
 import { armySize, hourlyDemand, moodState, NEED, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
+import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
 import type { Building as EngineBuilding, Game, GameAction, Key as EngineKey, Res as EngineRes, TerrainId as EngineTerrainId } from "@/engine/types";
 
 type Key=EngineKey; type Res=EngineRes;
@@ -99,6 +100,14 @@ export default function KingdomGame(){
   return results;
  }
  async function submitOrder(order:string){if(!game||!order.trim()||connecting)return;setChat(x=>[...x,{who:game.rulerName,text:order.trim()}]);setMessage("");setTab("meclis");if(!game.generalConnected){setChat(x=>[...x,{who:"Saray Kâtibi",text:"General bağlantısı etkin değil. Hesabındaki BYOK bağlantısını yenilemelisin."}]);setShowConnect(true);return}setConnecting(true);try{const answer=await askGeneral("chat",order.trim()),execution=applyActions(game,answer.actions,Date.now());if(answer.actions.length)setGame(execution.game);const remoteResults=await executeRemoteActions(execution.remote,game.channelId??availableChannels.find(channel=>channel.name===game.channel)?.id);const merged=[...execution.results,...remoteResults];const outcome=merged.length?`\n\n${merged.join("\n")}`:"";setChat(x=>[...x,{who:"General Aldric",text:`${answer.text}${outcome}`}]);if(remoteResults.some(line=>line.startsWith("✓")))worldRefresh.current?.()}catch(error){setChat(x=>[...x,{who:"Saray Kâtibi",text:error instanceof Error?error.message:"General yanıt veremedi."}]);setGame({...game,generalConnected:false});setShowConnect(true)}finally{setConnecting(false)}}
+ // Kral politikayı doğrudan çevirir; General uygulamaz ama görüşünü söyler.
+ function setPolicy(key:PolicyKey,value:number){
+  if(!game)return;
+  const result=applyPolicy(game,{key,value:clampPolicy(key,value)});
+  setGame(result.game);
+  setChat(x=>[...x,{who:"General Aldric",text:result.comment}]);
+  setTab("meclis");
+ }
  async function send(e:React.FormEvent){e.preventDefault();await submitOrder(message)}
  function reset(){if(confirm("Krallığınız hem buluttan hem bu cihazdan silinsin ve yeniden başlansın mı?")){void fetch("/api/save",{method:"DELETE"});if(account)localStorage.removeItem(storeKey(account.id));setGame(null);setSetup("welcome");setCloudStatus("BULUT HAZIR")}}
  async function logout(){await fetch("/api/auth",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"logout"})});if(account)localStorage.removeItem(storeKey(account.id));location.reload()}
@@ -135,18 +144,31 @@ export default function KingdomGame(){
 
    <div className="ration-list">
     {([
-      {key:"food",label:"Yiyecek istihkakı",value:r.food,cost:`${daily(demand.food)} yiyecek/gün`,hint:"%100 tam doyum. Altına inmek ucuzdur ama rıza çöker.",order:(v:number)=>`Yiyecek istihkakını %${v} yap.`,locked:false},
-      {key:"ale",label:"Bira istihkakı",value:r.ale,cost:`${daily(demand.ale)} bira/gün`,hint:brewery?"Moral verir ama açlığı telafi etmez.":"Önce Bira Evi kurulmalı.",order:(v:number)=>`Bira istihkakını %${v} yap.`,locked:!brewery},
-      {key:"pay",label:"Asker maaşı",value:r.soldierPay,cost:`${daily(demand.gold)} altın/gün`,hint:army?"Askerler huzursuzluğu bastırır; maaşsız kalırsa firar ederler.":"Henüz askeriniz yok.",order:(v:number)=>`Asker maaşını %${v} yap.`,locked:!army},
+      {key:"food",label:"Yiyecek istihkakı",value:r.food,cost:`${daily(demand.food)} yiyecek/gün`,hint:"%100 tam doyum. Altına inmek ucuzdur ama rıza çöker.",order:(v:number)=>`Yiyecek istihkakını %${v} yap.`,locked:false,policy:"foodRation" as PolicyKey},
+      {key:"ale",label:"Bira istihkakı",value:r.ale,cost:`${daily(demand.ale)} bira/gün`,hint:brewery?"Moral verir ama açlığı telafi etmez.":"Önce Bira Evi kurulmalı.",order:(v:number)=>`Bira istihkakını %${v} yap.`,locked:!brewery,policy:"aleRation" as PolicyKey},
+      {key:"pay",label:"Asker maaşı",value:r.soldierPay,cost:`${daily(demand.gold)} altın/gün`,hint:army?"Askerler huzursuzluğu bastırır; maaşsız kalırsa firar ederler.":"Henüz askeriniz yok.",order:(v:number)=>`Asker maaşını %${v} yap.`,locked:!army,policy:undefined},
     ]).map(row=><div className="ration-row" key={row.key}>
      <div className="ration-head"><b>{row.label}</b><strong>%{row.value}</strong></div>
      <div className="ration-bar"><i style={{width:`${Math.min(100,row.value/2)}%`}}/></div>
      <small>{row.cost} · {row.hint}</small>
      <div className="ration-actions">
-      <button disabled={row.locked||connecting||row.value<=0} onClick={()=>void submitOrder(row.order(step(row.value,-25)))}>AZALT</button>
-      <button disabled={row.locked||connecting||row.value>=200} onClick={()=>void submitOrder(row.order(step(row.value,25)))}>ARTIR</button>
+      {row.policy
+        ? <><button disabled={row.value<=0} onClick={()=>setPolicy(row.policy!,step(row.value,-25))}>−25</button>
+            <button disabled={row.value>=200} onClick={()=>setPolicy(row.policy!,step(row.value,25))}>+25</button></>
+        : <><button disabled={row.locked||connecting||row.value<=0} onClick={()=>void submitOrder(row.order(step(row.value,-25)))}>AZALT</button>
+            <button disabled={row.locked||connecting||row.value>=200} onClick={()=>void submitOrder(row.order(step(row.value,25)))}>ARTIR</button></>}
      </div>
     </div>)}
+   </div>
+
+   <div className="ration-row">
+    <div className="ration-head"><b>Vergi oranı</b><strong>%{game.taxRate}</strong></div>
+    <div className="ration-bar"><i style={{width:`${game.taxRate*2}%`}}/></div>
+    <small>{Math.round(rt?.gold??0)} altın/sa · %15 nötr kabul edilir; üstü rızayı aşındırır, %40 üstü isyan davetidir.</small>
+    <div className="ration-actions">
+     <button disabled={game.taxRate<=0} onClick={()=>setPolicy("taxRate",game.taxRate-5)}>−5</button>
+     <button disabled={game.taxRate>=50} onClick={()=>setPolicy("taxRate",game.taxRate+5)}>+5</button>
+    </div>
    </div>
 
    {army>0&&<div className={`soldier-mood${unrest>=60?" alarm":unrest>=30?" warn":""}`}>
