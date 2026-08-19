@@ -64,7 +64,7 @@ const actionTools = [
   { name: "set_ale_ration", description: "Bira istihkakını yüzde olarak belirler; halkın moralini yükseltir ama açlığı telafi etmez. Bira Evi kurulu değilse uygulanamaz.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 } }, required: ["percent"], additionalProperties: false } },
   { name: "set_soldier_pay", description: "Asker maaşını yüzde olarak belirler. Eksik ödenen askerler önce maaş ister, sonra firar eder, en sonunda isyan eder ve halkı zapt etmeyi bırakır. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
   { name: "set_watch_ratio", description: "Ordunun ne kadarının sürekli nöbet tutacağını yüzde olarak belirler. Nöbetteki asker dağdan inen kurt, haydut ve akıncıları karşılar; ama nöbette olduğu için halkın huzursuzluğunu bastırmaya daha az kalır. %30'un altı kaleyi akınlara açar, %85'in üstü halkı zapt edecek kuvvet bırakmaz; iki uç da Kralın açık teyidini gerektirir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 100 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
-  { name: "set_night_order", description: "Kral 'ben yokken', 'gece', 'çevrimdışıyken' veya 'sen idare et' diyerek kalıcı bir gece emri verdiğinde çağır. Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar. Onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
+  { name: "set_night_order", description: "Kral ŞU ANLA SINIRLI OLMAYAN bir talimat verdiğinde çağır. Belirli kelimeleri bekleme; cümlenin biçimine değil, zamana yayılıp yayılmadığına bak. Kalıcı sayılanlar: koşullu talimat ('kışla biter bitmez Meydana geç'), sıralı plan ('önce X sonra Y'), süregelen ilke ('halkı aç bırakma', 'hazineyi 500 altının altına düşürme') ve hedef ('Kale Sv.5 olana kadar ekonomiyi büyüt'). Kalıcı SAYILMAYAN: şu an yapılacak tek bir iş ('Taş Ocağı kur'). Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar ve onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
   { name: "cancel_night_order", description: "Kral gece emrini iptal ettiğinde veya 'artık ben yokken bir şey yapma' dediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. İşçiler halkın içinden çıkar: madene giden her el tarlada eksilir ama yine de istihkakını yer. En fazla nüfusun %20'si gönderilebilir, ayrıca channel'daki yuva sayısı sınırlıdır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 200 } }, required: ["workers"], additionalProperties: false } },
   { name: "recall_miners", description: "Ortak madendeki bütün işçileri geri çeker. Kral işçileri geri çağırmayı emrettiğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
@@ -111,6 +111,8 @@ function gamePrompt(body: GeneralRequest) {
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Araçlar her turda elinin altındadır; emir ile sohbeti AYIRT ETMEK SENİN İŞİNDİR. Soru, varsayım, fikir alma, olasılık tartışması, durum raporu isteği ve 'şöyle olsa ne yaparsın?' cümlelerinde hiçbir araç çağırma — bunlarda yalnızca konuş. Aracı, Kral bir işin yapılmasını istediğinde çağır; bunu cümlenin kelimelerinden değil niyetinden anla. 'Biraları satabilirsin', 'sat', 'o zaman odun sat' gibi kısa ve dolaylı cümleler de emirdir.",
+    "Kral kalıcı bir talimat verdiğinde bunu KENDİN fark et ve set_night_order ile deftere geçir; 'bunu gece emri olarak al' demesini bekleme. Ölçüt kelimeler değil, talimatın zamana yayılıp yayılmadığıdır: bir koşul ileride gerçekleşecekse, bir sıra takip edilecekse ya da bir ilke sürekli geçerli olacaksa bu kalıcı bir emirdir. Kaydettikten sonra Krala kısaca 'deftere geçirdim' de ve yetki sorusunu sor; kayıt tek başına gece çalışma izni değildir.",
+    "Aynı şeyi iki kez deftere geçirme. Kral zaten var olan bir emri tekrarlıyor ya da ayrıntısını değiştiriyorsa yeni emir açma, mevcut olanı güncellemeyi öner. Şu an yapılacak tek bir iş kalıcı emir değildir; onu doğrudan uygula.",
     "Kral emir kipi kullanmak zorunda değil. 'Altına ihtiyacım var', 'şu odunlar fazla', 'halk aç kalmasın', 'bir şeyler yapmalıyız' gibi cümleler de bir istek taşır. Böyle bir cümlede ne yapılması gerektiğini SEN çıkar, somut bir eyleme çevir ve propose_action ile Kralın onayına sun; kararı ona bırak ama seçeneği sen üret. 'Ne yapmamı istersiniz?' diye topu geri atma.",
     "propose_action ile sunduğun öneri beklemeye alınır. Kral 'onay', 'evet', 'tamam' derse eylem sen bir şey yapmadan uygulanır; 'iptal' derse düşer. Öneriyi sunduktan sonra aynı turda ayrıca aracı çağırma.",
     "Açık ve rutin emirlerde öneriye gerek yok: aracı doğrudan çağır. propose_action yalnızca niyeti yorumladığın, emrin açık olmadığı durumlar içindir.",
@@ -249,7 +251,13 @@ async function handleNightOrder(
     if (!channelId) return ["🌙 Gece emri için önce bir channel'a katılmalısınız."];
     // Her emir kendi satırında durur. Eskiden user_id birincil anahtardı ve
     // ikinci emir birincisini sessizce siliyordu.
-    const open = await db.select({ id: standingOrders.id }).from(standingOrders).where(eq(standingOrders.userId, userId));
+    const open = await db.select({ id: standingOrders.id, instruction: standingOrders.instruction }).from(standingOrders).where(eq(standingOrders.userId, userId));
+    // General artık kalıcı niyeti kendisi fark ediyor; aynı emri her turda
+    // yeniden deftere geçirmesin diye tekrar burada da engellenir.
+    const fingerprint = (text: string) => text.toLocaleLowerCase("tr-TR").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    if (open.some(entry => fingerprint(entry.instruction) === fingerprint(instruction))) {
+      return ["🌙 Bu emir zaten defterimde; ikinci kez yazmadım."];
+    }
     if (open.length >= MAX_STANDING_ORDERS) {
       return [`🌙 Zaten ${MAX_STANDING_ORDERS} kalıcı emriniz var. Yenisini almadan önce birini kaldırmalıyız; hangisinden vazgeçiyorsunuz?`];
     }
@@ -259,7 +267,7 @@ async function handleNightOrder(
       autonomy: "ask" as const, status: "pending_approval" as const,
       maxActionsPerWake: 1, dailyActionCap: 8, actionsToday: 0, dayStartedAt: Date.now(),
     });
-    notes.push(`🌙 Gece emrinizi not ettim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
+    notes.push(`🌙 Kalıcı emir olarak deftere geçirdim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
     return notes;
   }
 
