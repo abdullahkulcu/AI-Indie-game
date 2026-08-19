@@ -131,7 +131,9 @@ export default function KingdomScene({
     // Dağda kasaba bir sahanlığın üstünde durur: çevre zemin AŞAĞI iner, kasaba
     // y=0'da kalır. Zemini yukarı kaldırmak düz yapıları (tarla gibi) gömüyordu.
     const groundY=terrain==="mountain"?-2.7:-.08;
-    const ground=disc(94,plan.ground,0,groundY,0); ground.receiveShadow=true;
+    // Zemin 150'ye uzatıldı. 94'te bitince uzaklaşan Kral tabak kenarını ve
+    // arkasındaki dokusuz düz yeşili görüyordu; kenarı artık sis yutuyor.
+    const ground=disc(150,plan.ground,0,groundY,0); ground.receiveShadow=true;
     // Sahanlık kasabaya YER açacak kadar geniş olmalı; dar tutulunca 280 nüfuslu
     // krallık 15 haneye sıkışıyordu.
     if(terrain==="mountain"){const plateau=add(geom("plateau",()=>new THREE.CylinderGeometry(24,27,3.1,48)),mat(plan.region),0,-1.55,0);plateau.receiveShadow=true}
@@ -291,6 +293,31 @@ export default function KingdomScene({
       // Cevher damarı: koyu kaya ve içinde parlayan demir.
       veins.forEach(([x,z])=>{const vein=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(0x4a4740),x,.85,z);vein.scale.set(2.2,1.5,2.2);
         for(let i=0;i<4;i++)ball(.26,0xb4894a,x+(i-1.5)*.85,1.7,z+(i%2)*.7)});
+      // Maden ağzı, dekovil ve pasa: mockup'taki dağ kimliği. Yeni bina değil;
+      // sahanlığın kenarındaki damarlardan birine açılan görsel bir galeri.
+      if(veins.length){
+        const [vx,vz]=veins[0];
+        const toward=Math.atan2(-vz,-vx); // ağız avluya bakar
+        const mouth=new THREE.Group();mouth.position.set(vx,groundY,vz);mouth.rotation.y=toward;detail.add(mouth);
+        box(5.2,3.4,1.2,0x4b4842,0,1.7,0,mouth);                       // kaya alnı
+        box(2.6,2.4,1.6,0x241f1b,0,1.2,.5,mouth);                      // karanlık galeri
+        box(.45,2.6,.45,0x6b4a2c,-1.5,1.3,.75,mouth);box(.45,2.6,.45,0x6b4a2c,1.5,1.3,.75,mouth); // tahkimat
+        box(3.6,.4,.5,0x6b4a2c,0,2.7,.75,mouth);
+        // Dekovil: ağızdan avluya inen dar hat, üstünde bir vagon.
+        const railRandom=makeRandom("decauville");
+        const steps=13,tx=-vx/steps,tz=-vz/steps;
+        for(let i=1;i<=steps;i++){const x=vx+tx*i,z=vz+tz*i;
+          if(!isFree(x,z,.7))continue;
+          box(1.9,.12,.35,0x5a4633,x,groundY+.1,z);
+          if(i%3===0)box(.16,.5,.16,0x6d6a62,x,groundY+.35,z);}
+        const cart=box(1.1,.7,1.6,0x59422e,vx+tx*4,groundY+.55,vz+tz*4);cart.rotation.y=toward;
+        for(let i=0;i<3;i++)ball(.2,0x8d6f3f,vx+tx*4+(i-1)*.3,groundY+.95,vz+tz*4);
+        // Pasa yığını: ocaktan çıkan artık taş.
+        for(let i=0;i<3;i++){const spoil=cone(1.5+railRandom(),1+railRandom()*.7,0x5c5a52,vx+tx*2+(i-1)*2.6,groundY+.5,vz+tz*2+(i%2)*1.8);spoil.rotation.y=railRandom()*Math.PI;}
+        // Taş basamaklar: sahanlığa çıkan kademe.
+        for(let i=0;i<4;i++)box(6-i*.9,.55,2.2-i*.25,i%2?0x6f6d64:0x7a786e,vx*.45,groundY+.28+i*.5,vz*.45+i*1.5);
+        terrainLabels.push(["MADEN AĞZI",vx,4.2,vz]);
+      }
       terrainLabels.push(["DAĞ BÖLGESİ",0,9,-30]);
       veins.forEach(([x,z],i)=>terrainLabels.push([i?"DEMİR DAMARI":"CEVHER DAMARI",x,3.4,z]));
       treeBelt("hardyPine",34,11,23,0x4f3a28,0x2f4a33,.72,true);outskirts("mountainOutskirts",120,0x4f3a28,0x3b5a3d,1.05);
@@ -335,6 +362,18 @@ export default function KingdomScene({
     // Çimen bütün arazilerde var ama yoğunluğu ve rengi araziye göre değişir.
     const grassRandom=makeRandom("grass"),grassSpots:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
     for(let i=0;i<plan.grass*2&&grassSpots.length<plan.grass;i++){const angle=grassRandom()*Math.PI*2,radius=3+grassRandom()*26,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,.4))continue;const size=.7+grassRandom()*1.1;grassSpots.push({x,z,y:.26*size,s:size,rot:grassRandom()*Math.PI})}
+    // Çim eteği: şehrin ötesinde de tutam kalsın, ufka doğru seyrelerek. Renk
+    // değil doku olduğu için kenar düz bir yeşil tabak gibi durmuyor.
+    const skirtRandom=makeRandom("grassSkirt");
+    for(let i=0;i<plan.grass*3&&grassSpots.length<plan.grass*2.4;i++){
+      const angle=skirtRandom()*Math.PI*2;
+      // Karekök dağılımı halkayı eşit doldurur; seyrelme uzaklıkla gelsin diye
+      // dışa doğru bir eleme uygulanır.
+      const radius=32+Math.sqrt(skirtRandom())*96;
+      if(skirtRandom()>1-radius/190)continue;
+      const size=.6+skirtRandom()*.85;
+      grassSpots.push({x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,y:groundY+.3*size,s:size,rot:skirtRandom()*Math.PI});
+    }
     const grass=scatter(geom("grass",()=>new THREE.ConeGeometry(.17,.6,5)),mat(plan.grassColor),grassSpots);
     if(grass)grass.castShadow=false;
 
