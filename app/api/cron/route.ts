@@ -2,9 +2,10 @@ import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
 import { tick } from "../../../engine/tick";
-import type { Game, GameAction } from "../../../engine/types";
+import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
-import { channels, gameSaves, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { agreements, channels, gameSaves, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { duePayments, tributePayment } from "../../../engine/negotiation";
 import { decryptByok } from "../../../server/byok-crypto";
 import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
@@ -137,6 +138,59 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
   return finish(summary, succeeded, true);
 }
 
+/**
+ * Onaylanmış haraç anlaşmalarını öder.
+ *
+ * Ödeme ambardan çıkar ve karşı tarafın ambarına girer. Vadesi geçmiş ödemeler
+ * duePayments ile birikimli sayılır: cron bir tur gecikirse ödeme atlanmaz.
+ * Ambarda yoksa olan gider, borç birikmez — ve tek ödemede ambarın yarısından
+ * fazlası hiçbir koşulda çıkmaz.
+ */
+async function settleTributes(now: number) {
+  const db = getDb();
+  const deals = await db.select().from(agreements)
+    .where(and(eq(agreements.status, "active"), eq(agreements.topic, "tribute")));
+  let paid = 0;
+
+  for (const deal of deals) {
+    let terms: { resource?: Key; tributeRate?: number; tributeAmount?: number };
+    try { terms = JSON.parse(deal.terms) as typeof terms; } catch { continue; }
+    const due = duePayments({ startedAt: deal.startedAt, everyHours: deal.everyHours, paidCount: deal.paidCount, endsAt: deal.endsAt }, now);
+
+    if (due > 0) {
+      const [payerRow] = await db.select().from(gameSaves).where(eq(gameSaves.userId, deal.payerId)).limit(1);
+      const [payeeRow] = await db.select().from(gameSaves).where(eq(gameSaves.userId, deal.payeeId)).limit(1);
+      const payer = payerRow ? parseStoredSave(payerRow.gameState) : null;
+      const payee = payeeRow ? parseStoredSave(payeeRow.gameState) : null;
+      if (payer && payee) {
+        const key = (terms.resource ?? "gold") as Key;
+        let moved = 0;
+        // Her vade ayrı hesaplanır; ambar azaldıkça oranlı haraç da azalır.
+        let stock = payer.resources[key];
+        for (let i = 0; i < due; i++) {
+          const amount = tributePayment(stock, terms);
+          if (amount <= 0) break;
+          stock -= amount; moved += amount;
+        }
+        if (moved > 0) {
+          const nextPayer = { ...payer, resources: { ...payer.resources, [key]: stock },
+            notices: [{ kind: "HARAÇ", text: `Anlaşma gereği ${moved} ${key} ödendi.`, at: now }, ...payer.notices].slice(0, 20) };
+          const nextPayee = { ...payee, resources: { ...payee.resources, [key]: payee.resources[key] + moved },
+            notices: [{ kind: "HARAÇ", text: `Anlaşma gereği ${moved} ${key} tahsil edildi.`, at: now }, ...payee.notices].slice(0, 20) };
+          await db.update(gameSaves).set({ gameState: JSON.stringify(nextPayer), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(gameSaves.userId, deal.payerId));
+          await db.update(gameSaves).set({ gameState: JSON.stringify(nextPayee), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(gameSaves.userId, deal.payeeId));
+          paid += moved;
+        }
+      }
+      await db.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
+    }
+    if (now >= deal.endsAt) {
+      await db.update(agreements).set({ status: "completed" }).where(eq(agreements.id, deal.id));
+    }
+  }
+  return { deals: deals.length, paid };
+}
+
 export async function POST(request: Request) {
   const secret = env.CRON_SECRET;
   if (!secret) return Response.json({ error: "CRON_SECRET tanımlı değil." }, { status: 503, headers });
@@ -151,6 +205,8 @@ export async function POST(request: Request) {
     .innerJoin(channels, eq(channels.id, standingOrders.channelId))
     .where(and(eq(standingOrders.status, "active"), eq(channels.status, "active")));
 
+  const tributes = await settleTributes(now);
+
   const reports: WakeReport[] = [];
   for (const row of rows) {
     try { reports.push(await runOne(row.order, now)); }
@@ -159,6 +215,7 @@ export async function POST(request: Request) {
   return Response.json({
     ranAt: new Date(now).toISOString(),
     considered: rows.length,
+    tributes,
     acted: reports.filter(report => report.acted).length,
     llmCalls: reports.filter(report => report.tokensUsed).length,
     reports,

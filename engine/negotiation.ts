@@ -38,6 +38,8 @@ export type Terms = {
   tributeAmount?: number;
   /** Haraç hangi kaynaktan alınır. */
   resource?: "gold" | "food" | "stone" | "wood" | "iron" | "ale";
+  /** Haracı hangi taraf ÖDER. Yön yazılmazsa şart anlamsızdır. */
+  payerSide?: Side;
   /** Anlaşmanın kaç saat süreceği. */
   hours?: number;
   /** Ödeme aralığı (saat). */
@@ -104,6 +106,7 @@ export function clampTerms(terms: Terms): Terms {
   return {
     topic: terms.topic,
     resource: terms.resource ?? "gold",
+    payerSide: terms.payerSide,
     tributeRate: Math.max(0, Math.min(MAX_TRIBUTE_RATE, Number(terms.tributeRate) || 0)),
     tributeAmount: Math.max(0, Math.min(MAX_TRIBUTE_AMOUNT, Math.floor(Number(terms.tributeAmount) || 0))),
     hours,
@@ -117,6 +120,9 @@ export function validateTerms(terms: Terms): { ok: true; terms: Terms } | { ok: 
   if (next.topic === "tribute" || next.topic === "ultimatum") {
     if (!next.tributeRate && !next.tributeAmount) {
       return { ok: false, reason: "Haraç şartında ya sabit miktar ya da oran belirtilmeli." };
+    }
+    if (next.payerSide !== "initiator" && next.payerSide !== "target") {
+      return { ok: false, reason: "Haracı hangi tarafın ödeyeceği belirtilmeli." };
     }
   }
   if (next.topic === "non_aggression" || next.topic === "alliance" || next.topic === "passage") {

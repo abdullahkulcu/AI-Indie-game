@@ -104,13 +104,13 @@ test("sabit rakam oranı ezer", () => {
 });
 
 test("sabit haraçlı şart geçerlidir", () => {
-  const result = validateTerms({ topic: "tribute", tributeAmount: 60, hours: 24, everyHours: 1 });
+  const result = validateTerms({ topic: "tribute", tributeAmount: 60, payerSide: "target", hours: 24, everyHours: 1 });
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.terms.tributeAmount, 60);
 });
 
 test("ne oran ne miktar verilmeyen haraç reddedilir", () => {
-  assert.equal(validateTerms({ topic: "tribute", hours: 24 }).ok, false);
+  assert.equal(validateTerms({ topic: "tribute", payerSide: "target", hours: 24 }).ok, false);
 });
 
 test("gecikmiş cron turu ödeme atlamaz", () => {
@@ -123,4 +123,11 @@ test("gecikmiş cron turu ödeme atlamaz", () => {
 test("anlaşma bitince ödeme birikmez", () => {
   const agreement = { startedAt: T0, everyHours: 6, paidCount: 2, endsAt: T0 + 12 * 3_600_000 };
   assert.equal(duePayments(agreement, T0 + 100 * 3_600_000), 0, "süre dolduktan sonrası sayılmaz");
+});
+
+test("yönü olmayan haraç şartı reddedilir", () => {
+  // Kim kime ödüyor yazmazsa şart uygulanamaz; Krala hiç sunulmamalı.
+  const result = validateTerms({ topic: "tribute", tributeAmount: 60, hours: 24 });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /hangi taraf/);
 });
