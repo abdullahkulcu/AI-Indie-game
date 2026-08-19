@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIMITS, MAX_TRIBUTE_RATE, canBind, canOpen, canSpeak, clampTerms, duePayments, sideOf, tributePayment, validateTerms, type Negotiation } from "../engine/negotiation";
+import { KING_PRESENCE_MS, LIMITS, MAX_TRIBUTE_RATE, canBind, canOpen, canProposeTerms, canSpeak, clampTerms, duePayments, isKingPresent, shouldGeneralAnswer, sideOf, tributePayment, validateTerms, type Negotiation } from "../engine/negotiation";
 
 const T0 = 1_800_000_000_000;
 
@@ -123,6 +123,63 @@ test("gecikmiş cron turu ödeme atlamaz", () => {
 test("anlaşma bitince ödeme birikmez", () => {
   const agreement = { startedAt: T0, everyHours: 6, paidCount: 2, endsAt: T0 + 12 * 3_600_000 };
   assert.equal(duePayments(agreement, T0 + 100 * 3_600_000), 0, "süre dolduktan sonrası sayılmaz");
+});
+
+test("Kralın masada sayılması yalnızca kendi izine bakar", () => {
+  assert.equal(isKingPresent(T0, T0 + 1000), true);
+  assert.equal(isKingPresent(T0, T0 + KING_PRESENCE_MS), false, "süre dolunca Kral masada değildir");
+  assert.equal(isKingPresent(null, T0), false);
+  assert.equal(isKingPresent(undefined, T0), false, "izi olmayan Kral masada sayılmaz");
+});
+
+test("Kral masadayken General onun yerine konuşmaz", () => {
+  const decision = shouldGeneralAnswer({
+    negotiation: table({ turns: 1 }), side: "target", lastMessageSide: "initiator", kingPresent: true, now: T0,
+  });
+  assert.equal(decision.ok, false);
+  if (!decision.ok) assert.match(decision.reason, /Kral masada/);
+});
+
+test("Kral yokken General yalnızca sırası gelince konuşur", () => {
+  const base = { negotiation: table({ turns: 1 }), side: "target" as const, kingPresent: false, now: T0 };
+  assert.equal(shouldGeneralAnswer({ ...base, lastMessageSide: "initiator" }).ok, true, "son söz karşı taraftaysa cevap verilir");
+  assert.equal(shouldGeneralAnswer({ ...base, lastMessageSide: "target" }).ok, false, "arka arkaya iki mesaj yazılmaz");
+  assert.equal(shouldGeneralAnswer({ ...base, lastMessageSide: null }).ok, false, "boş masaya General söz açmaz");
+});
+
+test("General cevabı da masanın sınırlarına tabidir", () => {
+  const full = shouldGeneralAnswer({
+    negotiation: table({ turns: LIMITS.maxTurns }), side: "target", lastMessageSide: "initiator", kingPresent: false, now: T0,
+  });
+  assert.equal(full.ok, false, "tur tavanı General için de geçerlidir");
+  const expired = shouldGeneralAnswer({
+    negotiation: table({ turns: 1 }), side: "target", lastMessageSide: "initiator", kingPresent: false, now: T0 + LIMITS.lifetimeMs,
+  });
+  assert.equal(expired.ok, false, "süresi dolmuş masada General de konuşamaz");
+  const closed = shouldGeneralAnswer({
+    negotiation: table({ status: "agreed", turns: 2 }), side: "target", lastMessageSide: "initiator", kingPresent: false, now: T0,
+  });
+  assert.equal(closed.ok, false, "kapanmış masaya cevap yazılmaz");
+});
+
+test("Kral yokken General onun önündeki teklifi silemez", () => {
+  // Karşı taraf şart sundu: imza Kralındır. General üstüne yeni şart yazarsa
+  // Kral sabah onaylayacağı teklifi hiç görmez.
+  const waiting = table({ status: "awaiting_king", proposedBy: "initiator", turns: 2 });
+  const offline = canProposeTerms(waiting, "target", false, T0);
+  assert.equal(offline.ok, false);
+  if (!offline.ok) assert.match(offline.reason, /imzasını bekliyor/);
+  // Ama konuşabilir: Kralın kararı "cevap versin ama imza atamasın".
+  assert.equal(canSpeak(waiting, "target", T0).ok, true);
+  // Kral masadaysa karşı teklif vermek onun kendi kararıdır; teklifi görmüştür.
+  assert.equal(canProposeTerms(waiting, "target", true, T0).ok, true);
+});
+
+test("boş masada şart sunmak serbesttir, kapalı masada değildir", () => {
+  assert.equal(canProposeTerms(table({ turns: 1 }), "target", false, T0).ok, true);
+  assert.equal(canProposeTerms(table({ turns: LIMITS.maxTurns }), "target", false, T0).ok, false);
+  // Kendi teklifini bekleyen taraf ne konuşur ne de yeni şart sunar.
+  assert.equal(canProposeTerms(table({ status: "awaiting_king", proposedBy: "target" }), "target", false, T0).ok, false);
 });
 
 test("yönü olmayan haraç şartı reddedilir", () => {

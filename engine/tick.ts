@@ -1,6 +1,7 @@
 import { catalog, resourceLabels, terrainCatalog } from "./catalog";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
+import { applySpoilage, storageCaps } from "./storage";
 import type { Game, Key, Res } from "./types";
 
 /** Defteri gereksiz satırla doldurmamak için, hareket bu eşiği aşınca yazılır. */
@@ -111,7 +112,7 @@ export function tick(g: Game, now: number): Game {
   if (hours <= 0) return g;
 
   const gross = grossRates(g), demand = hourlyDemand(g), army = armySize(g.units ?? {});
-  const rt = rates(g), resources = { ...g.resources };
+  const rt = rates(g); let resources = { ...g.resources };
   resourceLabels.forEach(([key]) => { resources[key] = Math.max(0, resources[key] + rt[key] * hours); });
 
   let buildings = g.buildings, units = g.units, queue = g.queue, notices = g.notices;
@@ -183,6 +184,20 @@ export function tick(g: Game, now: number): Game {
     // Firar: maaşsız kalan askerlerin bir kısmı dağılır.
     mutinyLoss = Math.min(army, Math.ceil(army * (soldierUnrest >= SOLDIER_THRESHOLDS.mutiny ? .12 : .05) * hours));
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
+  }
+
+  // Depo tavanı: aşan stok saatte bir oranla bozulur. Anında kırpılmaz ki Kral
+  // depo kurmaya ya da Pazarda satmaya vakit bulsun.
+  const caps = storageCaps({ buildings });
+  const spoiled = applySpoilage(resources, caps, hours);
+  resources = spoiled.resources;
+  const spoiledEntries = (Object.entries(spoiled.lost) as Array<[Key, number]>).filter(([, amount]) => amount >= 1);
+  // Depo taşması sürerken her tick'te bildirim yazmak defteri doldurur ve
+  // akın gibi asıl kayıtları 20 satırlık pencereden dışarı iter. Halk
+  // sistemindeki gibi: en üstteki bildirim zaten AMBAR ise tekrar yazılmaz.
+  if (spoiledEntries.length && notices[0]?.kind !== "AMBAR") {
+    const text = spoiledEntries.map(([key, amount]) => `${Math.round(amount)} ${labelOf(key)}`).join(", ");
+    notices = [{ kind: "AMBAR", text: `Depo taştı; ${text} bozuldu. Ambar yükseltilmeli ya da fazlası satılmalı.`, at: now }, ...notices].slice(0, 20);
   }
 
   // Pazar teklifleri: süresi dolan teklif kapanır, karşılığı ancak şimdi gelir.

@@ -163,6 +163,62 @@ export function canBind(kingPresent: boolean): TurnDecision {
     : { ok: false, reason: "Kral masada değil; General şartı bağlayamaz, yalnızca onayına sunar." };
 }
 
+/**
+ * Kral masada mı?
+ *
+ * Ölçüt Kralın KENDİ istemcisinin bıraktığı iz olmalı: `lastTickAt` yalnızca
+ * tarayıcı tick attığında ilerler. Kayıt satırının `updated_at` sütunu sunucu
+ * yazdığında da tazelenir (haraç bildirimi, gece vardiyası); onu ölçüt yapmak
+ * "General bir not düştü, demek ki Kral masada" gibi kendi kuyruğunu yiyen bir
+ * sonuç doğururdu.
+ */
+export const KING_PRESENCE_MS = 15 * 60_000;
+
+export function isKingPresent(lastSeenAt: number | null | undefined, now: number): boolean {
+  if (typeof lastSeenAt !== "number" || !Number.isFinite(lastSeenAt)) return false;
+  return now - lastSeenAt < KING_PRESENCE_MS;
+}
+
+/**
+ * Kral çevrimdışıyken Generali masaya cevap versin mi?
+ *
+ * Kralın kararı: "Cevap versin ama imza atamasın." Bu yüzden burada yalnızca
+ * SÖZ hakkı sorulur; imza için canBind ayrı durur. General ancak son sözü karşı
+ * taraf söylediyse konuşur — böylece iki General birbirine art arda yazmaz ve
+ * bir turda bir taraf bir mesaj kuralı korunur.
+ */
+export function shouldGeneralAnswer(input: {
+  negotiation: Negotiation;
+  side: Side;
+  /** Masadaki son mesajı kim yazdı? Hiç mesaj yoksa null. */
+  lastMessageSide: Side | null;
+  kingPresent: boolean;
+  now: number;
+}): TurnDecision {
+  if (input.kingPresent) return { ok: false, reason: "Kral masada; sözü Kral söyler." };
+  if (input.lastMessageSide === null) return { ok: false, reason: "Masada henüz söz yok." };
+  if (input.lastMessageSide === input.side) return { ok: false, reason: "Son söz bizim; sıra karşı tarafta." };
+  return canSpeak(input.negotiation, input.side, input.now);
+}
+
+/**
+ * Bu tarafta YENİ bir şart sunulabilir mi?
+ *
+ * Karşı taraf şart sunmuşsa o şart bizim Kralımızın imzasını bekliyordur. Kral
+ * yokken Generalin üstüne yeni şart yazması, Kralın hiç görmediği bir teklifi
+ * siler: sabah masaya döndüğünde onaylayacağı şart ortada olmaz. Bu yüzden Kral
+ * çevrimdışıyken General yalnızca konuşur. Kral masadaysa karşı teklif vermek
+ * onun kendi kararıdır; teklifi görmüştür.
+ */
+export function canProposeTerms(negotiation: Negotiation, side: Side, kingPresent: boolean, now: number): TurnDecision {
+  const speak = canSpeak(negotiation, side, now);
+  if (!speak.ok) return speak;
+  if (negotiation.status === "awaiting_king" && negotiation.proposedBy === otherSide(side) && !kingPresent) {
+    return { ok: false, reason: "Karşı şart Kralın imzasını bekliyor; General onun önündeki teklifi silemez." };
+  }
+  return { ok: true };
+}
+
 /** Yeni masa açılabilir mi? Spam ve kredi yakma buradan engellenir. */
 export function canOpen(input: {
   openByInitiator: number;

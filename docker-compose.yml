@@ -28,7 +28,13 @@ services:
     working_dir: /app
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
-    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
+    # Şema açılışta uygulanır. Bu olmadan yeni bir VM'de tablolar eksik kalıyor
+    # ve uygulama "relation ... does not exist" ile 500 dönüyordu. Kapatmak için
+    # DB_AUTO_PUSH=0 verin; o zaman şemayı elle uygularsınız (./run.sh db:push).
+    command: >
+      sh -c "npm ci --no-audit --no-fund &&
+      if [ \"$$DB_AUTO_PUSH\" != \"0\" ]; then npx drizzle-kit push --force || echo 'şema uygulanamadı, elle deneyin: ./run.sh db:push'; fi &&
+      npm run dev -- --hostname 0.0.0.0"
     # Dışarıya nginx bakar. Uygulama 3000'i yalnızca compose ağına açar; 3000'i
     # hostta da görmek isterseniz aşağıdaki satırı açın (yerel hata ayıklama).
     # ports: ["3000:3000"]
@@ -46,6 +52,7 @@ services:
       # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
       # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
       VINEXT_NO_DEV_LOCK: "1"
+      DB_AUTO_PUSH: ${DB_AUTO_PUSH:-1}
     healthcheck:
       # node her zaman var; curl/wget imaja göre değişir.
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
