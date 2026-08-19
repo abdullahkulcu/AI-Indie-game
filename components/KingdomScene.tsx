@@ -378,7 +378,39 @@ export default function KingdomScene({
       // Saman balyaları hasat hissi verir.
       const hayRandom=makeRandom("hay");
       for(let i=0;i<9;i++){const angle=hayRandom()*Math.PI*2,radius=13+hayRandom()*14,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,1.4))continue;const bale=cylinder(.75,1.5,0xc8a95e,x,.75,z,detail);bale.rotation.z=Math.PI/2;reserve(x,z,1.4)}
-      terrainLabels.push(["OVA BÖLGESİ",-20,4,13],["KERVAN YOLU",14,4,10],["HASAT TARLASI",17,4,-16]);
+      // Otlak: çitli mera, içinde sürü ve yalak. Mockup'taki ova kimliği.
+      // Hepsi dekor — ağıl ve hayvancılık üretimi motoru değiştirir, o ayrı karar.
+      const herdRandom=makeRandom("herd");
+      const pasture=(cx:number,cz:number,radius:number,head:number,dark:boolean)=>{
+        if(!isFree(cx,cz,radius))return;
+        disc(radius,dark?0x6d8a45:0x789650,cx,.004,cz);
+        // Çit: halkanın üstünde direkler ve aralarını bağlayan yatay lataları.
+        const posts=Math.max(10,Math.round(radius*2.2));
+        for(let i=0;i<posts;i++){
+          const a=(i/posts)*Math.PI*2,x=cx+Math.cos(a)*radius,z=cz+Math.sin(a)*radius;
+          cylinder(.12,1.15,0x6b4a2c,x,.58,z);
+          const b=((i+1)/posts)*Math.PI*2,mx=cx+Math.cos((a+b)/2)*radius,mz=cz+Math.sin((a+b)/2)*radius;
+          const rail=box(radius*6.3/posts,.12,.1,0x7d5a3a,mx,.85,mz);rail.rotation.y=-(a+b)/2;
+        }
+        // Yalak.
+        box(2.6,.45,1,0x6b4a2c,cx+radius*.45,.25,cz-radius*.45);
+        // Sürü: gövde, baş ve dört bacak.
+        for(let i=0;i<head;i++){
+          const a=herdRandom()*Math.PI*2,r=herdRandom()*(radius-2.2);
+          const x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r,facing=herdRandom()*Math.PI*2;
+          const hide=herdRandom()<.45?0x8a6a4a:herdRandom()<.5?0x4a3b30:0xd8cdb8;
+          const body=box(.85,.75,1.7,hide,x,.85,z);body.rotation.y=facing;
+          const head3=box(.5,.45,.55,hide,x+Math.sin(facing)*1.05,.95,z+Math.cos(facing)*1.05);head3.rotation.y=facing;
+          for(const[ox,oz]of[[-.3,-.55],[.3,-.55],[-.3,.55],[.3,.55]]){
+            const lx=x+ox*Math.cos(facing)-oz*Math.sin(facing),lz=z+ox*Math.sin(facing)+oz*Math.cos(facing);
+            cylinder(.09,.9,0x4b3a2a,lx,.45,lz);
+          }
+        }
+        reserve(cx,cz,radius+.6);
+      };
+      pasture(-26,-9,9.5,12,false);
+      pasture(21,19,7.5,7,true);
+      terrainLabels.push(["OVA BÖLGESİ",-20,4,13],["OTLAK · SÜRÜ 12 BAŞ",-26,4.6,-9],["KERVAN YOLU",14,4,10],["HASAT TARLASI",17,4,-16]);
       treeBelt("plainEdge",30,20,34,0x5f3e25,0x33643a,1,true);outskirts("plainOutskirts",150,0x5f3e25,0x33643a,1.15);
     }
 
