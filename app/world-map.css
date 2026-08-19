@@ -67,3 +67,10 @@
 .map-features span.mountain{color:#8d8579}
 .map-features span.riverbank{color:#5d93a8}
 .map-features span.plain{color:#93a259}
+
+/* Üretim rozeti: arazinin gerçek çarpanından türer (orman odun, dağ demir,
+   nehir kıyısı yiyecek). Ova dengelidir, rozeti yoktur. */
+.map-region .produce{position:absolute;right:-7px;top:-7px;display:flex;align-items:center;gap:3px;padding:2px 6px 2px 4px;border:1px solid rgba(214,168,80,.55);border-radius:9px;background:rgba(24,17,10,.92);color:#e8c583;font-style:normal;font-size:8px;letter-spacing:.08em;line-height:1;white-space:nowrap}
+.map-region .produce span{font-size:7px;opacity:.85}
+.map-region.unknown .produce{opacity:.62}
+@media (max-width:720px){.map-region .produce span{display:none}}

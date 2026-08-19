@@ -357,7 +357,48 @@ export default function KingdomScene({
       const fernRandom=makeRandom("ferns"),ferns:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
       for(let i=0;i<180;i++){const angle=fernRandom()*Math.PI*2,radius=7+fernRandom()*24,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,.6))continue;const size=.55+fernRandom()*.9;ferns.push({x,z,y:.3*size,s:size,rot:fernRandom()*Math.PI})}
       scatter(geom("fern",()=>new THREE.SphereGeometry(.55,7,5)),mat(0x2b5029),ferns);
-      terrainLabels.push(["ORMAN BÖLGESİ",-20,7,16],["AV YOLU",12,4,-14],["AÇIKLIK",13,3,-11]);
+      // Kütük istifi, bıçkı çukuru ve tüten kömür mili: ormanın kimliği.
+      // Hepsi dekor — kömür ocağı üretimi girdi tüketen bina gerektirir, o ayrı karar.
+      const logRandom=makeRandom("logging");
+      const logPile=(cx:number,cz:number,rows:number)=>{
+        if(!isFree(cx,cz,3.2))return;
+        for(let row=0;row<rows;row++){
+          const count=rows-row;
+          for(let i=0;i<count;i++){
+            const log=cylinder(.28,3.4,logRandom()<.5?0x8a6640:0x7a5738,cx+(i-(count-1)/2)*.62,.3+row*.54,cz);
+            log.rotation.z=Math.PI/2;log.rotation.y=(logRandom()-.5)*.12;
+          }
+        }
+        reserve(cx,cz,3.2);
+      };
+      logPile(-13,-15,3);logPile(16,9,2);
+
+      // Bıçkı çukuru: kızak, üstünde kesilmekte olan kütük ve talaş.
+      if(isFree(-19,4,3.4)){
+        disc(3,0x6a5334,-19,.01,4);
+        box(4.6,.35,.55,0x6b4a2c,-19,.9,3);box(4.6,.35,.55,0x6b4a2c,-19,.9,5);
+        for(const oz of[3,5]){cylinder(.14,1,0x5b3f2a,-21,.5,oz);cylinder(.14,1,0x5b3f2a,-17,.5,oz);}
+        const trunk=cylinder(.42,4.4,0x8a6640,-19,1.3,4);trunk.rotation.z=Math.PI/2;
+        for(let i=0;i<10;i++)box(.3,.06,.3,0xc9ab72,-19+(logRandom()-.5)*5.2,.06,4+(logRandom()-.5)*5.2);
+        reserve(-19,4,3.4);
+      }
+
+      // Kömür mili: toprakla örtülü konik yığın, tepesinden duman.
+      if(isFree(14,-18,3.6)){
+        disc(4.2,0x4a3d2c,14,.01,-18);
+        cone(2.6,2.9,0x3b3128,14,1.45,-18);
+        cone(.9,.7,0x2a241d,14,3.1,-18);
+        // Duman: yükseldikçe büyüyen ve saydamlaşan üç küre.
+        for(let i=0;i<3;i++){
+          const puff=ball(.55+i*.42,0xb9b3a6,14+i*.5,3.8+i*1.5,-18-i*.35);
+          (puff.material as THREE.Material).dispose();puff.material=glass(0xcfc9bd,.32-i*.08);
+        }
+        // Kömürcü kulübesi ve istiflenmiş çuvallar.
+        box(2.4,1.8,2,0x5a4632,18.5,.9,-16.5);
+        for(let i=0;i<4;i++)box(.7,.7,.7,0x2f2a24,17+(i%2)*.9,.35,-19-Math.floor(i/2)*.9);
+        reserve(14,-18,3.6);reserve(18.5,-16.5,2);
+      }
+      terrainLabels.push(["ORMAN BÖLGESİ",-20,7,16],["KÜTÜK İSTİFİ",-13,3.4,-15],["BIÇKI ÇUKURU",-19,3.2,4],["KÖMÜR OCAĞI",14,5,-18],["AV YOLU",12,4,-14],["AÇIKLIK",13,3,-11]);
     }else{
       // Açık otlak: geniş tarla dokusu, kervan yolu, seyrek ağaç kümeleri.
       const fields:Array<[number,number,number,number]>=[[-20,13,7,0xb89552],[17,-16,6,0xa88b4a],[-17,-17,5.5,0x9d8b4d],[21,10,6.5,0xc0a05c]];

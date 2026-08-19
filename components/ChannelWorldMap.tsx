@@ -7,6 +7,17 @@ type IntelReport = { ruler: string; keepLevel: number; population: number; build
 type WorldKingdom = { id: string; name: string | null; terrain: string; position: { x: number; z: number }; ring?: number; discovered: boolean; mission: { status: "pending" | "succeeded" | "failed" | "detected"; completesAt: number; successChance: number } | null; report: IntelReport | null };
 type SharedMine = { mine: { name: string; oreRemaining: number; extractedOre: number; totalWorkers: number; position: { x: number; z: number } }; participants: Array<{ id: string; name: string; workers: number; self: boolean }> };
 type Selection = { kind: "home" } | { kind: "kingdom"; id: string } | { kind: "mine" };
+
+/**
+ * Arazinin öne çıkan üretimi. Kaynağı engine/catalog.ts içindeki gerçek arazi
+ * çarpanlarıdır (orman +%25 odun, dağ +%30 taş/demir, nehir kıyısı +%25
+ * yiyecek); uydurma bir üretim kolu işaretlenmiyor. Ova dengelidir, rozeti yok.
+ */
+const produceOf: Record<string, { icon: string; label: string } | undefined> = {
+  forest: { icon: "◤", label: "ODUN" },
+  mountain: { icon: "⛊", label: "DEMİR" },
+  riverbank: { icon: "≋", label: "YİYECEK" },
+};
 type Point = { x: number; y: number };
 
 const terrainNames: Record<string, string> = { plain: "Ova", forest: "Orman", mountain: "Dağ", riverbank: "Nehir Kıyısı" };
@@ -225,8 +236,8 @@ export default function ChannelWorldMap({ channelName, homeName, homeTerrain, ho
             return <em key={biome.id} className={biome.id} style={{ left: `${spot.x}%`, top: `${spot.y}%` }}>{biome.label}</em>;
           })}
         </div>
-        <button className={`map-region home ${selection.kind === "home" ? "selected" : ""} ${homeTerrain}`} style={{ left: `${project(home.x, span)}%`, top: `${project(home.z, span)}%` }} onClick={() => setSelection({ kind: "home" })}><i className={`castle keep-${Math.min(6, homeKeepLevel ?? 1)}`}>♜</i><b>{homeName}</b><small>BAŞKENTİN</small></button>
-        {kingdoms.map((kingdom, index) => <button key={kingdom.id} className={`map-region kingdom ${kingdom.terrain} ${kingdom.discovered ? "discovered" : "unknown"} ${selection.kind === "kingdom" && selection.id === kingdom.id ? "selected" : ""}`} style={{ left: `${project(kingdom.position.x, span)}%`, top: `${project(kingdom.position.z, span)}%`, zIndex: 20 + index }} onClick={() => setSelection({ kind: "kingdom", id: kingdom.id })}><i className={`castle ${kingdom.discovered ? `keep-${Math.min(6, kingdom.report?.keepLevel ?? 1)}` : "unscouted"}`}>♜</i><b>{kingdom.name ?? "Bilinmeyen Sancak"}</b><small>{kingdom.discovered ? `Kale Sv.${kingdom.report?.keepLevel ?? 1}` : terrainNames[kingdom.terrain] ?? "Bölge"}</small></button>)}
+        <button className={`map-region home ${selection.kind === "home" ? "selected" : ""} ${homeTerrain}`} style={{ left: `${project(home.x, span)}%`, top: `${project(home.z, span)}%` }} onClick={() => setSelection({ kind: "home" })}><i className={`castle keep-${Math.min(6, homeKeepLevel ?? 1)}`}>♜</i><b>{homeName}</b><small>BAŞKENTİN</small>{produceOf[homeTerrain] && <em className="produce" title={`${terrainNames[homeTerrain] ?? homeTerrain} · ${produceOf[homeTerrain]!.label}`}>{produceOf[homeTerrain]!.icon}<span>{produceOf[homeTerrain]!.label}</span></em>}</button>
+        {kingdoms.map((kingdom, index) => <button key={kingdom.id} className={`map-region kingdom ${kingdom.terrain} ${kingdom.discovered ? "discovered" : "unknown"} ${selection.kind === "kingdom" && selection.id === kingdom.id ? "selected" : ""}`} style={{ left: `${project(kingdom.position.x, span)}%`, top: `${project(kingdom.position.z, span)}%`, zIndex: 20 + index }} onClick={() => setSelection({ kind: "kingdom", id: kingdom.id })}><i className={`castle ${kingdom.discovered ? `keep-${Math.min(6, kingdom.report?.keepLevel ?? 1)}` : "unscouted"}`}>♜</i><b>{kingdom.name ?? "Bilinmeyen Sancak"}</b><small>{kingdom.discovered ? `Kale Sv.${kingdom.report?.keepLevel ?? 1}` : terrainNames[kingdom.terrain] ?? "Bölge"}</small>{produceOf[kingdom.terrain] && <em className="produce" title={`${terrainNames[kingdom.terrain] ?? kingdom.terrain} · ${produceOf[kingdom.terrain]!.label}`}>{produceOf[kingdom.terrain]!.icon}<span>{produceOf[kingdom.terrain]!.label}</span></em>}</button>)}
         {sharedMine && <button className={`map-region mine ${selection.kind === "mine" ? "selected" : ""}`} style={{ left: `${project(sharedMine.mine.position.x, span)}%`, top: `${project(sharedMine.mine.position.z, span)}%` }} onClick={() => setSelection({ kind: "mine" })}><i>⛏</i><b>{sharedMine.mine.name}</b><small>{sharedMine.mine.totalWorkers} İŞÇİ</small></button>}
         <div className="map-compass"><b>K</b><span>✦</span><small>G</small></div><div className="channel-map-legend"><span><i className="legend-home"/> Senin krallığın</span><span><i className="legend-unknown"/> Keşfedilmemiş</span><span><i className="legend-mine"/> Ortak saha</span></div>
       </section>
