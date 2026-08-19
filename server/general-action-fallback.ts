@@ -1,10 +1,8 @@
+import { buildingAliases } from "../engine/catalog";
 export type FallbackAction = { name: string; arguments: Record<string, unknown> };
 
-const buildings: Array<[string, string[]]> = [
-  ["keep", ["kale"]], ["wheat_farm", ["buğday tarlası", "bugday tarlasi"]], ["lumberjack", ["oduncu kulübesi", "oduncu kulubesi"]],
-  ["quarry", ["taş ocağı", "tas ocagi"]], ["town_square", ["meydan"]], ["barracks", ["kışla", "kisla"]], ["apple_orchard", ["elma bahçesi", "elma bahcesi"]],
-  ["mill", ["değirmen", "degirmen"]], ["market", ["pazar"]], ["wall", ["sur"]], ["mine", ["maden"]],
-];
+// Takma adlar kataloğdan türer; elle yazılan liste sapıyordu.
+const buildings = buildingAliases;
 
 /** Ortak maden ve istihbarat emirleri; bina kataloğundan önce denenir çünkü "maden" ikisinde de geçer. */
 function inferWorldAction(direct: string): FallbackAction | null {

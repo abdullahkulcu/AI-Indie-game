@@ -29,6 +29,43 @@ export const catalog = [
   { type: "theater", name: "Tiyatro", category: "Halk", unlock: 3, seconds: 16200, cost: { wood: 260, stone: 320, gold: 260 }, detail: "Büyük rıza; bira tüketir" },
 ] as const;
 
+/**
+ * General'in kurabileceği bina türleri. KATALOGDAN TÜRETİLİR — elle yazılan
+ * liste kataloğdan sapıyordu: Ambar, Depo, Park, Bira Evi, Evlilik Dairesi ve
+ * Tiyatro araç şemasında hiç yoktu, yani Kral isteyince kurulamıyordu.
+ */
+export const BUILDABLE_TYPES: string[] = ["keep", ...catalog.map(item => item.type)];
+
+/**
+ * Türkçe adlardan bina türüne eşleşme. Yine kataloğdan türetilir; ek takma
+ * adlar aksansız ve halk arasındaki kullanımlar içindir.
+ */
+const EXTRA_ALIASES: Record<string, string[]> = {
+  keep: ["kale"],
+  wheat_farm: ["bugday tarlasi", "tarla"],
+  lumberjack: ["oduncu kulubesi", "oduncu"],
+  quarry: ["tas ocagi", "ocak"],
+  apple_orchard: ["elma bahcesi", "bahce"],
+  granary: ["ambar", "tahil ambari", "zahire"],
+  warehouse: ["depo", "ambarlik"],
+  mill: ["degirmen"],
+  barracks: ["kisla"],
+  brewery: ["bira evi", "birahane"],
+  marriage_hall: ["evlilik dairesi", "nikah"],
+  theater: ["tiyatro"],
+  town_square: ["meydan"],
+  mine: ["maden"],
+  wall: ["sur"],
+  market: ["pazar"],
+  park: ["park"],
+};
+
+export const buildingAliases: Array<[string, string[]]> = BUILDABLE_TYPES.map(type => {
+  const name = type === "keep" ? "Kale" : catalog.find(item => item.type === type)?.name ?? type;
+  const set = new Set<string>([name.toLocaleLowerCase("tr-TR"), ...(EXTRA_ALIASES[type] ?? [])]);
+  return [type, [...set]];
+});
+
 /** Kale seviyesi başına yükseltme süresi (saniye); index = mevcut seviye. */
 export const keepSeconds = [0, 10800, 28800, 64800, 172800, 388800];
 
