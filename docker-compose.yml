@@ -29,9 +29,10 @@ services:
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
     command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
-    # Dışarıya 80, konteyner içinde 3000. Healthcheck ve cron konteyner içinden
-    # konuştuğu için onlar 3000'de kalır.
-    ports: ["80:3000"]
+    # Dışarıya nginx bakar. Uygulama 3000'i yalnızca compose ağına açar; 3000'i
+    # hostta da görmek isterseniz aşağıdaki satırı açın (yerel hata ayıklama).
+    # ports: ["3000:3000"]
+    expose: ["3000"]
     volumes:
       - .:/app
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
@@ -80,6 +81,23 @@ services:
           echo
           sleep "$$CRON_INTERVAL_SECONDS"
         done
+
+  # VM'de 80 portunu uygulamaya doğrudan bağlamak yerine önüne nginx koyuyoruz:
+  # tek giriş noktası, ileride TLS için yer ve HMR websocket'inin düzgün geçmesi.
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80"]
+    volumes:
+      - ./deploy/upgrade-map.conf:/etc/nginx/conf.d/00-upgrade-map.conf:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app: {condition: service_started}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_data: {}
