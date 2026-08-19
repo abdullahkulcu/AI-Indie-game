@@ -1,4 +1,5 @@
 import { catalog, resourceLabels, terrainCatalog } from "./catalog";
+import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import { applySpoilage, storageCaps } from "./storage";
@@ -163,10 +164,18 @@ export function tick(g: Game, now: number): Game {
     pay: rations.soldierPay * satisfaction(demand.gold * hours, g.resources.gold + gross.gold * hours),
   };
 
+  // --- Halkın defteri -----------------------------------------------------
+  // Krallığın İKİNCİ defteri: halkın kendi stoğu. Fiyat buradan doğar ve
+  // pahalı ekmeğin rızaya bedeli buradan hesaplanır. Sürücüler (nüfus, fiilen
+  // dağıtılan istihkak) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur.
+  const commonsNow = commonsOf(g);
+  const commonsRef = commonsReference(g.population);
+
   const target = moodTarget({
     servedFood: served.food, servedAle: served.ale, taxRate: g.taxRate,
     population: g.population, capacity, buildings,
     hoursSinceRaid: g.lastRaidAt ? (now - g.lastRaidAt) / 3_600_000 : null,
+    livingMood: livingCostMood(livingCost(commonsNow, commonsRef)),
   });
   // Yağmalanan krallıkta halkın rızası da düşer.
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
@@ -235,8 +244,14 @@ export function tick(g: Game, now: number): Game {
     notices = [{ kind: "GÖÇ", text: `${came} kişi krallığa yerleşti; nüfus ${Math.round(settled)} oldu.`, at: now }, ...notices].slice(0, 20);
   }
 
+  // Halkın kileri: istihkak fazlası kilere girer, eksiği kilerden yenir, geri
+  // kalanı ortalamaya döner. Kapalı çözüm olduğu için altı adım tek adımla
+  // birebir aynı sonucu verir (bkz. tests/market.test.ts).
+  const commons = advanceCommons(commonsNow, commonsRef, commonsFlow(g.population, served), hours);
+
   return {
     ...g,
+    commons,
     marketOrders,
     lastSpoilNoticeAt: spoilNoticeAt,
     peopleJoined: joined,

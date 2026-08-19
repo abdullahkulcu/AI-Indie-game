@@ -251,8 +251,15 @@ test("satış anında olmaz: mal tezgâha çıkar, para sonra gelir", () => {
   assert.equal(settled.marketOrders?.length, 0, "süresi dolan teklif kapanmalı");
   // Aynı anda, teklifi olmayan bir kopyayla karşılaştır: aradaki fark satışın parasıdır.
   const without = tick({ ...game, marketOrders: [] }, when);
-  assert.equal(Math.round(settled.resources.gold - without.resources.gold), 60);
-  assert.match(settled.notices.find(notice => notice.kind === "PAZAR")!.text, /hazineye girdi/);
+  const paid = Math.round(settled.resources.gold - without.resources.gold);
+  // Hazineye giren, teklifin üstünde yazan rakamın TA KENDİSİ olmalı: fiyat emir
+  // anında bağlanır, kapanışta yeniden pazarlık edilmez.
+  assert.equal(paid, order.gold, "kapanışta ödenen, teklifte yazan altın olmalı");
+  // Fiyat artık sabit tablo değil: 200 odun 100 kişilik halkın odunluğunu
+  // (referans 400) yarı yarıya taşırdığı için birim fiyat taban fiyatın altına
+  // iner. Eski sabit tablo 60 altın verirdi; bolluk indirimi bunu düşürmeli.
+  assert.ok(paid > 0 && paid < 200 * .3, `bolluk fiyatı kırmalı, ölçülen ${paid}`);
+  assert.match(settled.notices.find(notice => notice.kind === "PAZAR")!.text, /hazineye girer|hazineye girdi/);
 });
 
 test("satıp geri almak zarardır: pazar bedava altın basmaz", () => {
