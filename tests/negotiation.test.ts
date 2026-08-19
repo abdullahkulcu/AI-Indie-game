@@ -62,11 +62,6 @@ test("saldırmazlıkta haraç sessizce sıfırlanır", () => {
   if (result.ok) assert.equal(result.terms.tributeRate, 0);
 });
 
-test("oransız haraç şartı reddedilir", () => {
-  const result = validateTerms({ topic: "tribute", tributeRate: 0, hours: 24 });
-  assert.equal(result.ok, false);
-});
-
 test("süre ve ödeme aralığı sınırlara oturur", () => {
   const terms = clampTerms({ topic: "tribute", tributeRate: .2, hours: 500, everyHours: 0 });
   assert.equal(terms.hours, 72, "anlaşma en fazla 72 saat sürer");
@@ -91,10 +86,31 @@ test("spam ve kredi yakma engellenir", () => {
   assert.equal(canOpen({ ...base, lastBetweenPairAt: T0 - LIMITS.cooldownMs }).ok, true);
 });
 
-test("haraç ödemesi ambarın oranıdır", () => {
-  assert.equal(tributePayment(1000, .2), 200);
-  assert.equal(tributePayment(1000, .9), 500, "tavan yarıdır");
-  assert.equal(tributePayment(0, .5), 0);
+test("haraç sabit rakamla da konuşulabilir", () => {
+  // Pazarlıkta "saatte 60 altın" denir; oran değil sabit miktar.
+  assert.equal(tributePayment(1000, { tributeAmount: 60 }), 60);
+  // Ambarda o kadar yoksa olan gider, borç birikmez.
+  assert.equal(tributePayment(80, { tributeAmount: 60 }), 40, "tek ödemede ambarın yarısı tavandır");
+  assert.equal(tributePayment(0, { tributeAmount: 60 }), 0);
+});
+
+test("haraç oranla da konuşulabilir", () => {
+  assert.equal(tributePayment(1000, { tributeRate: .2 }), 200);
+  assert.equal(tributePayment(1000, { tributeRate: .9 }), 500, "tavan yarıdır");
+});
+
+test("sabit rakam oranı ezer", () => {
+  assert.equal(tributePayment(1000, { tributeAmount: 60, tributeRate: .4 }), 60);
+});
+
+test("sabit haraçlı şart geçerlidir", () => {
+  const result = validateTerms({ topic: "tribute", tributeAmount: 60, hours: 24, everyHours: 1 });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.terms.tributeAmount, 60);
+});
+
+test("ne oran ne miktar verilmeyen haraç reddedilir", () => {
+  assert.equal(validateTerms({ topic: "tribute", hours: 24 }).ok, false);
 });
 
 test("gecikmiş cron turu ödeme atlamaz", () => {

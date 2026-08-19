@@ -27,8 +27,15 @@ export type Side = "initiator" | "target";
 /** Anlaşma şartı. Konuya göre alanların hangisinin anlamlı olduğu değişir. */
 export type Terms = {
   topic: NegotiationTopic;
-  /** Haraç: her ödemede ambarın bu oranı gider. 0–0.5 arası. */
+  /**
+   * Haraç iki biçimde konuşulabilir ve ikisi de desteklenir:
+   *  - oran: her ödemede ambarın bu payı gider (0–0.5)
+   *  - sabit: her ödemede bu kadar birim gider ("saatte 60 altın")
+   * Pazarlıkta insanlar genelde sabit rakam söyler; oran ise fakirleşen
+   * krallığı ezmez. İkisi birden verilirse sabit rakam esas alınır.
+   */
   tributeRate?: number;
+  tributeAmount?: number;
   /** Haraç hangi kaynaktan alınır. */
   resource?: "gold" | "food" | "stone" | "wood" | "iron" | "ale";
   /** Anlaşmanın kaç saat süreceği. */
@@ -75,6 +82,9 @@ export const LIMITS = {
 /** Haraç oranı tavanı: bir krallık ambarının yarısından fazlasını veremez. */
 export const MAX_TRIBUTE_RATE = .5;
 
+/** Sabit haraçta tek ödeme tavanı; model uçuk bir rakam öneremesin. */
+export const MAX_TRIBUTE_AMOUNT = 5000;
+
 const MAX_HOURS = 72;
 
 export function otherSide(side: Side): Side {
@@ -95,6 +105,7 @@ export function clampTerms(terms: Terms): Terms {
     topic: terms.topic,
     resource: terms.resource ?? "gold",
     tributeRate: Math.max(0, Math.min(MAX_TRIBUTE_RATE, Number(terms.tributeRate) || 0)),
+    tributeAmount: Math.max(0, Math.min(MAX_TRIBUTE_AMOUNT, Math.floor(Number(terms.tributeAmount) || 0))),
     hours,
     everyHours,
   };
@@ -104,11 +115,14 @@ export function clampTerms(terms: Terms): Terms {
 export function validateTerms(terms: Terms): { ok: true; terms: Terms } | { ok: false; reason: string } {
   const next = clampTerms(terms);
   if (next.topic === "tribute" || next.topic === "ultimatum") {
-    if (!next.tributeRate) return { ok: false, reason: "Haraç şartında oran belirtilmeli." };
+    if (!next.tributeRate && !next.tributeAmount) {
+      return { ok: false, reason: "Haraç şartında ya sabit miktar ya da oran belirtilmeli." };
+    }
   }
   if (next.topic === "non_aggression" || next.topic === "alliance" || next.topic === "passage") {
     // Bu konularda haraç anlamsız; sessizce sıfırlanır ki Kral yanlış şart onaylamasın.
     next.tributeRate = 0;
+    next.tributeAmount = 0;
   }
   return { ok: true, terms: next };
 }
@@ -165,9 +179,20 @@ export function canOpen(input: {
   return { ok: true };
 }
 
-/** Haraç ödemesi: ambarın oranı kadar, tam sayı. */
-export function tributePayment(stock: number, rate: number) {
-  return Math.max(0, Math.floor(stock * Math.max(0, Math.min(MAX_TRIBUTE_RATE, rate))));
+/**
+ * Bir ödemede fiilen giden miktar.
+ *
+ * Sabit rakam konuşulduysa o esastır ("saatte 60 altın"), ama ambarda o kadar
+ * yoksa olan gider — borç birikmez. Sabit yoksa oran uygulanır. Her hâlükârda
+ * tek ödemede ambarın yarısından fazlası gitmez; aksi halde tek bir anlaşma
+ * krallığı bir gecede boşaltır.
+ */
+export function tributePayment(stock: number, terms: Pick<Terms, "tributeRate" | "tributeAmount">) {
+  const ceiling = Math.floor(Math.max(0, stock) * MAX_TRIBUTE_RATE);
+  const wanted = terms.tributeAmount && terms.tributeAmount > 0
+    ? Math.floor(terms.tributeAmount)
+    : Math.floor(Math.max(0, stock) * Math.max(0, Math.min(MAX_TRIBUTE_RATE, terms.tributeRate ?? 0)));
+  return Math.max(0, Math.min(wanted, ceiling));
 }
 
 /**
