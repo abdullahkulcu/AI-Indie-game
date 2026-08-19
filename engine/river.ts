@@ -15,14 +15,20 @@ export type Ribbon = { positions: Float32Array; indices: number[] };
  * Sarım saat yönünün tersinedir, yani normal +Y'ye bakar ve yüzey yukarıdan
  * görünür.
  */
-export function riverRibbon(centerX: (z: number) => number, width: number, span: number, segments: number): Ribbon {
+export function riverRibbon(
+  centerX: (z: number) => number,
+  /** Sabit genişlik ya da z'ye göre değişen genişlik. Haliç ağzında nehir açılır. */
+  width: number | ((z: number) => number),
+  span: number,
+  segments: number,
+): Ribbon {
   const positions = new Float32Array((segments + 1) * 2 * 3);
   const indices: number[] = [];
-  const half = width / 2;
+  const widthAt = typeof width === "number" ? () => width : width;
 
   for (let i = 0; i <= segments; i++) {
     const z = -span / 2 + (span * i) / segments;
-    const cx = centerX(z);
+    const cx = centerX(z), half = widthAt(z) / 2;
     const slope = centerX(z + .5) - centerX(z - .5);
     const normal = 1 / Math.hypot(1, slope);
     const offsetX = half * normal, offsetZ = -half * slope * normal;

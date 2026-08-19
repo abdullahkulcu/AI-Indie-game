@@ -245,7 +245,7 @@ export default function KingdomScene({
       // aralarda basamak ve dikiş görünüyordu; artık eğriyi takip eden tek bir
       // üçgen şeridi üretilir, yani kıvrım pürüzsüzdür.
       const RIVER_SPAN=220,RIVER_SEGMENTS=110;
-      const ribbon=(width:number,color:number,y:number,glassy?:number)=>{
+      const ribbon=(width:number|((z:number)=>number),color:number,y:number,glassy?:number)=>{
         const {positions,indices}=riverRibbon(riverX,width,RIVER_SPAN,RIVER_SEGMENTS);
         const geometry=new THREE.BufferGeometry();
         geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));
@@ -255,9 +255,32 @@ export default function KingdomScene({
         detail.add(mesh); // Temizlikte scene.traverse geometriyi kendisi bırakır.
         if(glassy!==undefined)water.push({mesh,base:glassy});
       };
-      ribbon(19,0x3f7d8a,.012);
-      ribbon(15,0x2c5f74,.02);
-      ribbon(13,0x8fc7cf,.03,.16);
+      // Nehir mansaba doğru açılır ve denize varır: memba dar, haliç ağzı geniş.
+      const MOUTH_Z=58,SHORE_Z=104;
+      const widen=(base:number)=>(z:number)=>z<MOUTH_Z?base:base*(1+((z-MOUTH_Z)/(SHORE_Z-MOUTH_Z))*2.4);
+      ribbon(widen(19),0x3f7d8a,.012);
+      ribbon(widen(15),0x2c5f74,.02);
+      ribbon(widen(13),0x8fc7cf,.03,.16);
+
+      // Açık deniz: kıyı hattının ötesi. Zemin diski 150'de bittiği için deniz
+      // onun ötesine taşar ve sahne "tabak" gibi bitmez.
+      slab(360,150,0x24506b,riverX(SHORE_Z),.016,SHORE_Z+72);
+      const seaShimmer=slab(340,140,0x8fc7cf,riverX(SHORE_Z),.034,SHORE_Z+72);
+      (seaShimmer.material as THREE.Material).dispose();seaShimmer.material=glass(0x9fd6dd,.13);water.push({mesh:seaShimmer,base:.13});
+      // Kum bandı: karayla denizin buluştuğu yer.
+      const sandRandom=makeRandom("sand");
+      for(let i=-9;i<=9;i++){const x=riverX(SHORE_Z)+i*17;disc(11+sandRandom()*4,0xc8b183,x,.008,SHORE_Z-4+sandRandom()*6);}
+      // Haliç ağzındaki kum adacıkları.
+      for(let i=0;i<5;i++)disc(3+sandRandom()*2.4,0xd3bd90,riverX(90)+(sandRandom()-.5)*26,.026,86+sandRandom()*14);
+      // Balıkçı tekneleri: haliçte demirli.
+      for(let i=0;i<4;i++){const bx=riverX(78+i*7)+(sandRandom()-.5)*18,bz=78+i*7;
+        const hull=box(2,.6,4.6,i%2?0x6d4c30:0x7a5738,bx,.4,bz);hull.rotation.y=(sandRandom()-.5)*.9;
+        box(.18,2.6,.18,0x53381f,bx,1.6,bz);box(1.5,1.9,.1,0xe6dcc2,bx+.35,1.9,bz);}
+      // Balıkçı iskelesi ve ağ sereni — dekor; üretim yapısı DEĞİL.
+      const wharfX=riverX(72)+13;
+      box(4,.35,14,0x7d5a3a,wharfX,.55,72);
+      for(const z of[66,70,74,78])cylinder(.22,1.8,0x5b3f2a,wharfX,.85,z);
+      for(let i=0;i<3;i++){box(.16,2.2,.16,0x6b4a2c,wharfX+1.4,1.5,68+i*5);box(.1,.1,3.4,0x8f8464,wharfX+1.4,2.4,68+i*5);}
       // Nemli kıyı: koyu, çamurlu bir bant.
       // Kıyı, sazlık, köprü ve iskele nehrin ekseninden türer. Eskiden hepsi
       // x=-12 sabitine çakılıydı; nehir kıvrılınca iskele karada kalırdı.
@@ -271,7 +294,7 @@ export default function KingdomScene({
       const pierX=riverX(13)+7.4;
       box(3,.3,7,0x7d5a3a,pierX,.5,13);for(const z of[10.5,13,15.5])cylinder(.2,1.6,0x5b3f2a,pierX,.8,z);
       const boat=box(1.5,.55,3.4,0x6d4c30,pierX-2.4,.35,13.4);boat.rotation.y=.2;box(.16,1.9,.16,0x53381f,pierX-2.4,1.3,13.4);
-      terrainLabels.push(["NEHİR BÖLGESİ",riverX(-14)-6,4,-14],["TAHTA KÖPRÜ",riverX(1),3,1],["İSKELE",pierX,3,13]);
+      terrainLabels.push(["AÇIK DENİZ",riverX(SHORE_Z),6,SHORE_Z+46],["HALİÇ AĞZI",riverX(92),5,92],["BALIKÇI İSKELESİ",wharfX+4,4,72],["NEHİR BÖLGESİ",riverX(-14)-6,4,-14],["TAHTA KÖPRÜ",riverX(1),3,1],["İSKELE",pierX,3,13]);
       // Kıyı ormanlık değil nemli otlaktır: ağaç seyrek, su ve sazlık baskın kalsın.
       treeBelt("willow",34,20,34,0x5a4029,0x2f6038,1.1,true);outskirts("riverOutskirts",210,0x5a4029,0x2f6038,1.25);
       treeBelt("bankTrees",14,10,18,0x5a4029,0x357045,.85,true);
