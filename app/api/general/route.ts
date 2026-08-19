@@ -217,6 +217,9 @@ async function anthropic(body: GeneralRequest) {
  * 1) General emri kaydeder → status "pending_approval", gece hiçbir şey yapılmaz.
  * 2) Kral "sen uygula" derse → "active" + autonomous; "önce bana sor" derse → "active" + ask.
  */
+/** Bir Kralın aynı anda tutabileceği kalıcı emir sayısı. */
+const MAX_STANDING_ORDERS = 5;
+
 async function handleNightOrder(
   actions: GeneralAction[],
   body: GeneralRequest,
@@ -244,36 +247,44 @@ async function handleNightOrder(
       .limit(1);
     const channelId = membership?.channelId ?? body.kingdom?.channelId?.trim();
     if (!channelId) return ["🌙 Gece emri için önce bir channel'a katılmalısınız."];
-    const values = {
+    // Her emir kendi satırında durur. Eskiden user_id birincil anahtardı ve
+    // ikinci emir birincisini sessizce siliyordu.
+    const open = await db.select({ id: standingOrders.id }).from(standingOrders).where(eq(standingOrders.userId, userId));
+    if (open.length >= MAX_STANDING_ORDERS) {
+      return [`🌙 Zaten ${MAX_STANDING_ORDERS} kalıcı emriniz var. Yenisini almadan önce birini kaldırmalıyız; hangisinden vazgeçiyorsunuz?`];
+    }
+    await db.insert(standingOrders).values({
+      id: `so_${userId}_${Date.now()}`,
       userId, channelId, instruction,
       autonomy: "ask" as const, status: "pending_approval" as const,
       maxActionsPerWake: 1, dailyActionCap: 8, actionsToday: 0, dayStartedAt: Date.now(),
-    };
-    await db.insert(standingOrders).values(values).onConflictDoUpdate({ target: standingOrders.userId, set: values });
+    });
     notes.push(`🌙 Gece emrinizi not ettim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
     return notes;
   }
 
   // Bekleyen bir gece emri varsa, Kralın bu mesajı yetki cevabıdır.
-  const [existing] = await db.select().from(standingOrders).where(eq(standingOrders.userId, userId)).limit(1);
-  if (!existing || existing.status !== "pending_approval") return notes;
+  const [existing] = await db.select().from(standingOrders)
+    .where(and(eq(standingOrders.userId, userId), eq(standingOrders.status, "pending_approval")))
+    .orderBy(desc(standingOrders.createdAt)).limit(1);
+  if (!existing) return notes;
 
   const message = (body.message ?? "").toLocaleLowerCase("tr-TR");
   const wantsSupervision = /(bana sor|onayımı|onayimi|önce sor|once sor|sorarak|danış|danis|bekle)/.test(message);
   const grantsAutonomy = confirmation.insisted || /(sen uygula|kendin uygula|sen hallet|sen idare et|yetki|serbest|uygulayabilirsin)/.test(message);
 
   if (confirmation.cancelled) {
-    await db.delete(standingOrders).where(eq(standingOrders.userId, userId));
+    await db.delete(standingOrders).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Gece emrinden vazgeçildi.");
     return notes;
   }
   if (wantsSupervision) {
-    await db.update(standingOrders).set({ status: "active", autonomy: "ask" }).where(eq(standingOrders.userId, userId));
+    await db.update(standingOrders).set({ status: "active", autonomy: "ask" }).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Anlaşıldı. Gece uygun bir hamle görürsem uygulamayacağım, önerimi hazırlayıp onayınızı bekleyeceğim.");
     return notes;
   }
   if (grantsAutonomy) {
-    await db.update(standingOrders).set({ status: "active", autonomy: "autonomous" }).where(eq(standingOrders.userId, userId));
+    await db.update(standingOrders).set({ status: "active", autonomy: "autonomous" }).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Yetkiyi aldım. Siz yokken saatte en fazla bir hamle yapacağım, günde en çok sekiz. Sabah defterde ne yaptığımı göreceksiniz.");
   }
   return notes;
@@ -530,7 +541,7 @@ export async function POST(request: Request) {
   }
 }
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
@@ -542,4 +553,4 @@ import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";
 import { readProposal } from "../../../server/general-proposal";
-import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";
+import { CLAIM_PATTERN, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";

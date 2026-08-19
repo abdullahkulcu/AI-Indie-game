@@ -114,8 +114,11 @@ export const sharedMineWorkers = pgTable("shared_mine_workers", {
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
 
 // Kralın gece emri. Kayıt yoksa General arka planda hiç uyanmaz.
+// Bir Kralın birden fazla kalıcı emri olabilir. Eskiden user_id birincil
+// anahtardı ve yeni emir eskisini SESSİZCE eziyordu; Kral listesini göremiyordu.
 export const standingOrders = pgTable("standing_orders", {
-  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   channelId: text("channel_id").notNull(),
   instruction: text("instruction").notNull(),
   autonomy: text("autonomy", { enum: ["autonomous", "ask"] }).notNull().default("ask"),
@@ -127,7 +130,7 @@ export const standingOrders = pgTable("standing_orders", {
   lastRunAt: bigint("last_run_at", { mode: "number" }),
   lastOutcome: text("last_outcome"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("idx_standing_orders_status").on(table.status)]);
+}, (table) => [index("idx_standing_orders_status").on(table.status), index("idx_standing_orders_user").on(table.userId)]);
 
 // General riskli bulup teyit istediği emri burada bekletir.
 export const pendingDecisions = pgTable("pending_decisions", {

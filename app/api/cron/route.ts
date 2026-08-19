@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
 import { tick } from "../../../engine/tick";
 import type { Game, GameAction } from "../../../engine/types";
@@ -59,7 +59,7 @@ async function callProvider(provider: string, model: string, apiKey: string, con
 async function runOne(row: typeof standingOrders.$inferSelect, now: number): Promise<WakeReport> {
   const db = getDb();
   const finish = async (detail: string, acted: boolean, tokensUsed: boolean) => {
-    await db.update(standingOrders).set({ lastRunAt: now, lastOutcome: detail }).where(eq(standingOrders.userId, row.userId));
+    await db.update(standingOrders).set({ lastRunAt: now, lastOutcome: detail }).where(eq(standingOrders.id, row.id));
     return { userId: row.userId, acted, detail, tokensUsed };
   };
 
@@ -81,13 +81,17 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
   // UPDATE'i yalnızca bir istek kazanır; kaybeden sıfır token ile döner.
   // Gün penceresinin sıfırlanması da burada kalıcılaşır, böylece aşağıdaki artış
   // saf SQL toplaması olabilir ve iki istek birbirinin sayacını ezemez.
+  // Kilit KRALLIK başınadır, emir başına değil: bir Kralın birden fazla kalıcı
+  // emri olsa bile saatte tek hamle yapılır. Koşul "bu Kralın HİÇBİR emri son
+  // bir saatte çalışmamış olmalı" biçiminde; emir başına yazılsaydı iki emri
+  // olan Kral saatte iki hamle yapardı.
   const claimed = await db.update(standingOrders)
     .set({ lastRunAt: now, actionsToday: window.actionsToday, dayStartedAt: window.dayStartedAt })
     .where(and(
-      eq(standingOrders.userId, row.userId),
-      or(isNull(standingOrders.lastRunAt), lte(standingOrders.lastRunAt, now - WAKE_INTERVAL_MS)),
+      eq(standingOrders.id, row.id),
+      sql`not exists (select 1 from ${standingOrders} recent where recent.user_id = ${row.userId} and recent.last_run_at > ${now - WAKE_INTERVAL_MS})`,
     ))
-    .returning({ userId: standingOrders.userId });
+    .returning({ id: standingOrders.id });
   if (!claimed.length) return { userId: row.userId, acted: false, detail: "Bu saatlik dilimde zaten uyanıldı.", tokensUsed: false };
 
   const [credential] = await db.select().from(llmCredentials).where(eq(llmCredentials.userId, row.userId)).limit(1);
@@ -128,7 +132,7 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     set: { gameState: JSON.stringify(next), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` },
   });
   if (succeeded) {
-    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.userId, row.userId));
+    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
   }
   return finish(summary, succeeded, true);
 }
