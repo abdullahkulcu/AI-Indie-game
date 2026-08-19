@@ -1,12 +1,12 @@
 import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { agreements, channelMembers, channels, gameSaves, negotiationMessages, negotiations } from "../../../db/schema";
+import { agreements, channelMembers, channels, negotiationMessages, negotiations } from "../../../db/schema";
 import {
-  LIMITS, canBind, canOpen, canSpeak, clampTerms, sideOf, validateTerms,
-  type Negotiation, type NegotiationTopic, type Side, type Terms,
+  LIMITS, canBind, canOpen, canProposeTerms, canSpeak, clampTerms, sideOf, validateTerms,
+  type NegotiationTopic, type Side, type Terms,
 } from "../../../engine/negotiation";
 import { currentUser } from "../../../server/account-auth";
-import { projectPublicKingdom } from "../../../server/world-projection";
+import { displayNameOf, loadTablesFor, toEngine } from "../../../server/negotiation-desk";
 
 export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
@@ -15,33 +15,11 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 const TOPICS: NegotiationTopic[] = ["tribute", "non_aggression", "alliance", "passage", "ultimatum"];
 const MAX_MESSAGE = 600;
 
-/** Satırı motorun anladığı biçime çevirir. */
-function toEngine(row: typeof negotiations.$inferSelect): Negotiation {
-  let proposed: Terms | null = null;
-  try { proposed = row.proposed ? JSON.parse(row.proposed) as Terms : null; } catch { proposed = null; }
-  return {
-    id: row.id, channelId: row.channelId, initiatorId: row.initiatorId, targetId: row.targetId,
-    topic: row.topic, status: row.status, turns: row.turns,
-    proposed, proposedBy: row.proposedBy,
-    openedAt: row.openedAt, expiresAt: row.expiresAt, lastTurnAt: row.lastTurnAt,
-  };
-}
-
 /** Kralın aktif channel üyeliği. Müzakere yalnızca aynı channel içinde olur. */
 async function membershipOf(userId: string) {
   const [row] = await getDb().select({ channelId: channelMembers.channelId, acceptsNegotiation: channelMembers.acceptsNegotiation })
     .from(channelMembers).where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
   return row ?? null;
-}
-
-/**
- * Karşı krallığın Krala gösterilecek adı. Keşfedilmemişse isim verilmez —
- * müzakere, ajanla yapılan keşfin yerini tutmaz.
- */
-async function displayNameOf(userId: string, channelName: string) {
-  const [save] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
-  const kingdom = save ? projectPublicKingdom(userId, save.gameState, channelName) : null;
-  return kingdom?.name ?? "Bilinmeyen Sancak";
 }
 
 export async function GET(request: Request) {
@@ -51,35 +29,24 @@ export async function GET(request: Request) {
   if (!membership) return json({ error: "Aktif bir channel'a katılmadınız." }, 403);
 
   const [channel] = await getDb().select({ name: channels.name }).from(channels).where(eq(channels.id, membership.channelId)).limit(1);
-  const rows = await getDb().select().from(negotiations)
-    .where(and(
-      eq(negotiations.channelId, membership.channelId),
-      or(eq(negotiations.initiatorId, user.id), eq(negotiations.targetId, user.id)),
-    ))
-    .orderBy(desc(negotiations.lastTurnAt)).limit(20);
-
-  const messages = rows.length
-    ? await getDb().select().from(negotiationMessages)
-        .where(inArray(negotiationMessages.negotiationId, rows.map(row => row.id)))
-        .orderBy(negotiationMessages.at)
-    : [];
+  // Sıralama paylaşılan modülden gelir: arayüzün gördüğü sıra ile Generalin
+  // araç çağrısındaki `table_ordinal` aynı masayı göstermek zorunda.
+  const desk = await loadTablesFor(user.id, membership.channelId);
 
   const deals = await getDb().select().from(agreements)
     .where(and(eq(agreements.status, "active"), or(eq(agreements.payerId, user.id), eq(agreements.payeeId, user.id))));
 
-  const tables = await Promise.all(rows.map(async row => {
-    const side = sideOf(row, user.id)!;
+  const tables = await Promise.all(desk.map(async ({ negotiation: row, side, messages }) => {
     const otherId = side === "initiator" ? row.targetId : row.initiatorId;
     return {
       id: row.id, topic: row.topic, status: row.status, turns: row.turns, side,
       counterpart: await displayNameOf(otherId, channel?.name ?? ""),
-      proposed: row.proposed ? JSON.parse(row.proposed) as Terms : null,
+      proposed: row.proposed,
       proposedBy: row.proposedBy,
       // Kendi teklifini kendin onaylayamazsın.
       canAccept: row.status === "awaiting_king" && row.proposedBy !== null && row.proposedBy !== side,
       expiresAt: row.expiresAt,
-      messages: messages.filter(message => message.negotiationId === row.id)
-        .map(message => ({ mine: message.side === side, speaker: message.speaker, body: message.body, at: message.at })),
+      messages: messages.map(message => ({ mine: message.side === side, speaker: message.speaker, body: message.body, at: message.at })),
     };
   }));
 
@@ -153,7 +120,7 @@ export async function POST(request: Request) {
       status: "open", turns: 1, openedAt: now, expiresAt: now + LIMITS.lifetimeMs, lastTurnAt: now,
     });
     await db.insert(negotiationMessages).values({
-      id: `nm_${now}_0`, negotiationId: id, side: "initiator", speaker: "king",
+      id: `nm_${id}_${now}_0`, negotiationId: id, side: "initiator", speaker: "king",
       body: String(body.message ?? "").slice(0, MAX_MESSAGE) || "Konuşmak istiyoruz.", at: now,
     });
     return json({ opened: true, negotiationId: id });
@@ -166,14 +133,20 @@ export async function POST(request: Request) {
   if (!side) return json({ error: "Bu masada tarafınız yok." }, 403);
   const table = toEngine(row);
 
-  if (body.action === "reply" || body.action === "propose") {
+  if (body.action === "reply") {
     const speak = canSpeak(table, side, now);
     if (!speak.ok) return json({ error: speak.reason }, 409);
+  }
+  if (body.action === "propose") {
+    // Bu uç Kralın kendi oturumudur: bekleyen bir teklifin üstüne yazmak onun
+    // kararıdır, teklifi görmüştür. Kral yokken aynı kural General'i durdurur.
+    const allowed = canProposeTerms(table, side, true, now);
+    if (!allowed.ok) return json({ error: allowed.reason }, 409);
   }
 
   if (body.action === "reply") {
     await db.insert(negotiationMessages).values({
-      id: `nm_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
+      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
       body: String(body.message ?? "").slice(0, MAX_MESSAGE) || "…", at: now,
     });
     await db.update(negotiations).set({ turns: row.turns + 1, lastTurnAt: now }).where(eq(negotiations.id, row.id));
@@ -187,7 +160,7 @@ export async function POST(request: Request) {
       .set({ proposed: JSON.stringify(checked.terms), proposedBy: side, status: "awaiting_king", turns: row.turns + 1, lastTurnAt: now })
       .where(eq(negotiations.id, row.id));
     await db.insert(negotiationMessages).values({
-      id: `nm_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
+      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
       body: String(body.message ?? "Şartımız ektedir.").slice(0, MAX_MESSAGE), at: now,
     });
     return json({ proposed: true, terms: checked.terms });
