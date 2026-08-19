@@ -1,3 +1,4 @@
+import { tick } from "../engine/tick";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SPOIL_RATE, applySpoilage, fillRatio, storageCaps } from "../engine/storage";
@@ -81,4 +82,24 @@ test("bozulma adımlara bölününce aynı sonucu verir", () => {
   let stepped = start;
   for (let i = 0; i < 6; i++) stepped = applySpoilage(stepped, caps, 1).resources;
   assert.ok(Math.abs(stepped.food - single) < 1e-9, `tek adım ${single}, altı adım ${stepped.food}`);
+});
+
+test("depo taşması defteri doldurmaz", () => {
+  // Kralın 20 satırlık defterinin 16'sı taşma uyarısı olmuştu: engel "en
+  // üstteki bildirim AMBAR mı" diye bakıyordu ve araya başka bildirim girince
+  // sıfırlanıyordu. Artık zamana bağlı.
+  const T0 = 1_800_000_000_000;
+  const over = {
+    version: 2 as const, kingdomName: "D", rulerName: "A", channel: "Standart Sezon I", channelId: "standard",
+    speed: 1, terrain: "plain" as const, foundedAt: T0, lastTickAt: T0, protectionEndsAt: T0,
+    resources: { gold: 0, food: 50_000, stone: 0, wood: 0, iron: 0, ale: 0 },
+    population: 100, capacity: 150, popularity: 60, reputation: 50, loyalty: 75, taxRate: 15, quota: 0, quotaAt: T0,
+    buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 1 }],
+    units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
+  };
+  // Saniyede bir ilerleyen istemci gibi 40 kez küçük adım at.
+  let game = over;
+  for (let i = 1; i <= 40; i++) game = tick(game, T0 + i * 2000);
+  const spam = game.notices.filter(notice => notice.kind === "AMBAR").length;
+  assert.ok(spam <= 1, `40 adımda en fazla bir uyarı olmalı, ölçülen: ${spam}`);
 });

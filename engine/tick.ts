@@ -192,10 +192,14 @@ export function tick(g: Game, now: number): Game {
   const spoiled = applySpoilage(resources, caps, hours);
   resources = spoiled.resources;
   const spoiledEntries = (Object.entries(spoiled.lost) as Array<[Key, number]>).filter(([, amount]) => amount >= 1);
-  // Depo taşması sürerken her tick'te bildirim yazmak defteri doldurur ve
-  // akın gibi asıl kayıtları 20 satırlık pencereden dışarı iter. Halk
-  // sistemindeki gibi: en üstteki bildirim zaten AMBAR ise tekrar yazılmaz.
-  if (spoiledEntries.length && notices[0]?.kind !== "AMBAR") {
+  // Depo taşması sürerken her tick'te bildirim yazmak defteri doldurur ve akın
+  // gibi asıl kayıtları 20 satırlık pencereden dışarı iter. "En üstteki AMBAR
+  // ise yazma" yetmedi: araya GENERAL/İNŞAAT bildirimi girince engel sıfırlandı
+  // ve Kralın defterinin 20 satırından 16'sı taşma uyarısı oldu. Artık ZAMANA
+  // bağlı: oyun saatinde en fazla saatte bir uyarı.
+  let spoilNoticeAt = g.lastSpoilNoticeAt ?? 0;
+  if (spoiledEntries.length && now - spoilNoticeAt >= 3_600_000) {
+    spoilNoticeAt = now;
     const text = spoiledEntries.map(([key, amount]) => `${Math.round(amount)} ${labelOf(key)}`).join(", ");
     notices = [{ kind: "AMBAR", text: `Depo taştı; ${text} bozuldu. Ambar yükseltilmeli ya da fazlası satılmalı.`, at: now }, ...notices].slice(0, 20);
   }
@@ -234,6 +238,7 @@ export function tick(g: Game, now: number): Game {
   return {
     ...g,
     marketOrders,
+    lastSpoilNoticeAt: spoilNoticeAt,
     peopleJoined: joined,
     peopleLeft: left,
     migrationDrift: drift,

@@ -100,6 +100,8 @@ export type Game = {
   marketDayAt?: number;
   /** Pazarda bekleyen açık teklifler; yuva sayısı Pazar seviyesidir. */
   marketOrders?: MarketOrder[];
+  /** Son depo taşması bildirimi; defteri saniyede bir uyarıyla doldurmamak için. */
+  lastSpoilNoticeAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

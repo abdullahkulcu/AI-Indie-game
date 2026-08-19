@@ -157,6 +157,7 @@ export const gameSaveSchema = z.object({
     completesAt: timestamp,
   }).strict()).max(6).optional(),
   marketDayAt: z.number().finite().optional(),
+  lastSpoilNoticeAt: z.number().finite().optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
