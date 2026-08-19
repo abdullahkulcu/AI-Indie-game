@@ -20,8 +20,35 @@ export const debit = (resources: Res, cost: Partial<Res>): Res => {
 };
 
 /** Bir binanın mevcut seviyesine göre bir sonraki seviyenin maliyeti. */
-export const costFor = (base: Partial<Res>, level: number): Partial<Res> =>
-  Object.fromEntries(Object.entries(base).map(([key, value]) => [key, Math.ceil((value ?? 0) * Math.pow(1.65, level))])) as Partial<Res>;
+/**
+ * Seviye maliyeti.
+ *
+ * Odun ve taş daha dik büyür (1.85), altın ve yiyecek eskisi gibi (1.65):
+ * glut olan kaynak yüksek seviyelerde gerçek bir gider olsun, zaten dar olan
+ * altın daha da darlaşmasın.
+ *
+ * `materialScale` channel'dan gelir: hızlı channel'da saatte daha çok odun
+ * çıkar, dolayısıyla aynı seviye orada da bir anlam taşısın diye malzeme
+ * maliyeti aynı oranda büyür. Yalnızca malzemeye uygulanır.
+ */
+const MATERIALS = new Set<string>(["wood", "stone", "iron"]);
+
+export const costFor = (base: Partial<Res>, level: number, materialScale = 1): Partial<Res> =>
+  Object.fromEntries(Object.entries(base).map(([key, value]) => {
+    const material = MATERIALS.has(key);
+    const growth = key === "wood" || key === "stone" ? 1.85 : 1.65;
+    return [key, Math.ceil((value ?? 0) * Math.pow(growth, level) * (material ? materialScale : 1))];
+  })) as Partial<Res>;
+
+/** Channel hızı malzeme maliyetini ölçekler; hız 1 iken çarpan 1'dir. */
+export const materialScaleOf = (speed: number) => Math.max(1, Number(speed) || 1);
+
+/**
+ * Yapıların bakımı: üretimin bu payı kereste ve taş ocağının kendi onarımına,
+ * yol ve sur bakımına gider. Ölçüldü — bu olmadan odunun tek gideri inşaattı,
+ * yani inşaat durunca ambar sonsuza kadar büyüyordu.
+ */
+export const UPKEEP = { wood: .35, stone: .35 } as const;
 
 /** Ham üretim: halkın tüketimi ve iş bırakma etkisi hesaba katılmadan önce. */
 /**
@@ -60,6 +87,11 @@ export function rates(g: Game): Res {
   const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0));
   const net = { ...gross };
   for (const [key] of resourceLabels) net[key] = gross[key] * state.production;
+  // Bakım: odun ve taşın tek sürekli gideri. Bunlar olmadan net = brüt idi ve
+  // ambar sonsuza kadar şişiyordu. Sabit sayı değil ORAN, çünkü seviye başına
+  // sabit gider büyük krallıkta üretimi aşıyor, küçükte hissedilmiyor.
+  net.wood -= gross.wood * UPKEEP.wood;
+  net.stone -= gross.stone * UPKEEP.stone;
   net.food -= demand.food;
   net.ale -= demand.ale;
   net.gold -= demand.gold;

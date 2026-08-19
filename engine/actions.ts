@@ -1,7 +1,7 @@
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { armySize, clampRation } from "./populace";
 import { clampWatch, watchRatioOf } from "./raids";
-import { affordable, costFor, debit, keep, rates, tick } from "./tick";
+import { affordable, costFor, debit, keep, materialScaleOf, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
@@ -51,7 +51,7 @@ const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, shar
 const MARKET = {
   price: { food: .25, wood: .3, stone: .4, iron: 1.2, ale: .8 } as Record<string, number>,
   spread: 1.6,
-  dailyPerLevel: 500,
+  dailyPerLevel: 1500,
   /** Teklifin kapanma süresi: sabit hazırlık + yük başına bekleme. */
   baseMinutes: 18,
   minutesPerUnit: .12,
@@ -111,7 +111,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const current = next.buildings.find(b => b.type === type)?.level ?? 0;
       if (target !== current + 1) { blocked(`${item.name} yalnızca Sv.${current + 1} seviyesine çıkarılabilir.`); continue; }
       if (item.unlock > level) { blocked(`${item.name} için Kale Sv.${item.unlock} gerekli.`); continue; }
-      const cost = costFor(item.cost, current);
+      const cost = costFor(item.cost, current, materialScaleOf(next.speed));
       if (!affordable(next.resources, cost)) { blocked(`${item.name} için kaynak yetersiz; General emri beklemeye aldı.`); continue; }
       if (type !== "wheat_farm" && type !== "apple_orchard" && (rates(next).food < 0 || next.resources.food < 100) && !confirmed) {
         blocked(`${item.name} emri yiyecek krizi çözülene kadar ertelendi.`); continue;
