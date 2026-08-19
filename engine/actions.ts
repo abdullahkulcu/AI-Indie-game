@@ -5,7 +5,7 @@ import { affordable, costFor, debit, keep, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
-export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence"];
+export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms"];
 
 export type ApplyResult = {
   game: Game;

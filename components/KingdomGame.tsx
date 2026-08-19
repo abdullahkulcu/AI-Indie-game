@@ -20,6 +20,8 @@ type GeneralRequest={id:string;kind:string;text:string;severity:"normal"|"urgent
 type Channel={id:string;name:string;detail:string;speed:number;remaining:string;players?:number;maxPlayers?:number;durationDays?:number};
 type IntelReport={id:string;name:string;ruler:string;terrain:string;keepLevel:number;population:number;buildingCount:number;army:number;resources:Record<string,number>};
 type WorldKingdom={id:string;name:string|null;terrain:string;position:{x:number;z:number};ring:number;discovered:boolean;mission:{status:"pending"|"succeeded"|"failed"|"detected";completesAt:number;successChance:number}|null;report:IntelReport|null};
+type NegotiationTable={id:string;topic:string;status:string;turns:number;side:"initiator"|"target";counterpart:string;proposed:{topic:string;resource?:string;tributeAmount?:number;tributeRate?:number;hours?:number;everyHours?:number}|null;proposedBy:string|null;canAccept:boolean;expiresAt:number;messages:Array<{mine:boolean;speaker:string;body:string;at:number}>};
+type Agreement={id:string;topic:string;terms:{resource?:string;tributeAmount?:number;tributeRate?:number};iPay:boolean;counterpart:string;endsAt:number;paidCount:number;everyHours:number};
 type SharedMine={personalCap?:number;channelSlots?:number;mine:{id:string;name:string;oreRemaining:number;extractedOre:number;totalWorkers:number;position:{x:number;z:number}};participants:Array<{id:string;name:string;workers:number;self:boolean}>};
 type TerrainId=EngineTerrainId;
 // Yerel yedek hesap kimliğine göre ayrılır. Ortak bir anahtar kullanıldığında aynı
@@ -37,8 +39,8 @@ const left=(at:number,now:number)=>{const s=Math.max(0,Math.ceil((at-now)/1000))
 
 export default function KingdomGame(){
  const[ready,setReady]=useState(false),[account,setAccount]=useState<Account|null|undefined>(undefined),[setup,setSetup]=useState<Setup>("welcome"),[availableChannels,setAvailableChannels]=useState<Channel[]>(fallbackChannels),[selected,setSelected]=useState<Channel>(fallbackChannels[2]);const[name,setName]=useState(""),[ruler,setRuler]=useState(""),[terrain,setTerrain]=useState<TerrainId>("plain"),[provider,setProvider]=useState<keyof typeof modelOptions>("openai"),[model,setModel]=useState("gpt-5.6-terra"),[apiKey,setApiKey]=useState("");
- const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
- const lastCloudSave=useRef(0),saving=useRef(false),revision=useRef<number|null>(null),worldRefresh=useRef<(()=>void)|null>(null),chatEnd=useRef<HTMLDivElement|null>(null);
+ const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
+ const lastCloudSave=useRef(0),saving=useRef(false),revision=useRef<number|null>(null),worldRefresh=useRef<(()=>void)|null>(null),negotiationRefresh=useRef<(()=>void)|null>(null),chatEnd=useRef<HTMLDivElement|null>(null);
  // Yeni mesaj gelince sohbet dibe kaysın; uzun konuşmada son söz görünmez kalıyordu.
  useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth",block:"end"})},[chat,connecting]);
  useEffect(()=>{let local:Game|null=null;localStorage.removeItem(LEGACY_STORE);void(async()=>{try{const authResponse=await fetch("/api/auth",{cache:"no-store"});const authData=await authResponse.json() as {user?:Account|null};if(!authResponse.ok||!authData.user){setAccount(null);setReady(true);return}setAccount(authData.user);setCloudUser(authData.user.displayName);const savedLocal=localStorage.getItem(storeKey(authData.user.id));if(savedLocal)try{local=JSON.parse(savedLocal) as Game}catch{localStorage.removeItem(storeKey(authData.user.id))}const [saveResponse,channelResponse,byokResponse]=await Promise.all([fetch("/api/save",{cache:"no-store"}),fetch("/api/channels",{cache:"no-store"}),fetch("/api/byok",{cache:"no-store"})]);const data=await saveResponse.json() as {game?:Game|null;revision?:number};if(!saveResponse.ok)throw new Error("Bulut kaydı açılamadı");revision.current=data.revision??null;const byokData=await byokResponse.json() as {connected?:boolean;provider?:keyof typeof modelOptions;model?:string};if(byokResponse.ok&&byokData.connected&&byokData.provider&&byokData.model){setStoredByok(true);setProvider(byokData.provider);setModel(byokData.model)}const channelData=await channelResponse.json() as {activeChannelId?:string|null;channels?:Array<{id:string;name:string;speed:number;durationDays:number;maxPlayers:number;players:number;endsAt?:string|null}>};
@@ -73,6 +75,17 @@ export default function KingdomGame(){
  const nearbyMine=useMemo(()=>{if(!sharedMine)return undefined;
    const position={x:sharedMine.mine.position.x-worldHome.x,z:sharedMine.mine.position.z-worldHome.z};
    return Math.hypot(position.x,position.z)<=SCENE_REACH?{name:sharedMine.mine.name,totalWorkers:sharedMine.mine.totalWorkers,position}:undefined},[sharedMine,worldHome]);
+
+ // Müzakere masaları ve yürürlükteki anlaşmalar.
+ useEffect(()=>{if(!game?.channelId){setNegotiationTables([]);setAgreementList([]);return}
+  let active=true;
+  const load=async()=>{try{const response=await fetch("/api/negotiate",{cache:"no-store"});
+    if(!response.ok)return;const data=await response.json() as {tables?:NegotiationTable[];agreements?:Agreement[]};
+    if(active){setNegotiationTables(data.tables??[]);setAgreementList(data.agreements??[])}}catch{/* sessiz: masa yoksa panel de yok */}};
+  negotiationRefresh.current=()=>void load();void load();
+  const timer=setInterval(()=>void load(),20_000);
+  return()=>{active=false;negotiationRefresh.current=null;clearInterval(timer)}},[game?.channelId]);
+
  const lv=game?keep(game):1,rt=useMemo(()=>game?rates(game):null,[game]);
  // Halkin durumu: uretim carpani ve is birakma esigi buradan okunur.
  const mood=useMemo(()=>game?moodState(game.popularity,suppression(armySize(game.units),game.population,game.soldierUnrest??0)):{id:"uneasy" as const,label:"—",production:1,populationRate:0,populationPerHour:0},[game]);
@@ -102,6 +115,18 @@ export default function KingdomGame(){
  function closeTutorial(){localStorage.setItem("demirkale.tutorial.done","1");setTutorialStep(null)}
  function advanceTutorial(){if(tutorialStep===null)return;const next=tutorialStep+1;if(next>=5)return closeTutorial();setTutorialStep(next);if(next===1)setTab("meclis");if(next===2)setTab("binalar");if(next===3)setTab("defter");if(next===4)setTab("diyar")}
  async function worldAction(action:"scout"|"defend",targetId?:string){if(!game?.channelId||worldBusy)return;setWorldBusy(true);try{const response=await fetch("/api/world",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,channelId:game.channelId,targetId})});const data=await response.json() as {error?:string;completesAt?:number;successChance?:number;activeUntil?:number};if(!response.ok)throw new Error(data.error||"Dünya emri uygulanamadı.");if(action==="defend")setWorldDefense({active:true,activeUntil:data.activeUntil??null});else setOtherKingdoms(items=>items.map(item=>item.id===targetId?{...item,mission:{status:"pending",completesAt:data.completesAt??Date.now(),successChance:data.successChance??10}}:item));setToast(action==="defend"?"Karşı-istihbarat nöbeti bir saatliğine kuruldu.":`Ajan yola çıktı · başarı ihtimali %${data.successChance??10}.`)}catch(error){setToast(error instanceof Error?error.message:"Dünya emri uygulanamadı.")}finally{setWorldBusy(false)}}
+async function negotiationAction(negotiationId:string,action:"accept"|"decline"){
+  if(worldBusy)return;setWorldBusy(true);
+  try{
+   const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,negotiationId})});
+   const data=await response.json() as {error?:string};
+   if(!response.ok)throw new Error(data.error||"Müzakere emri uygulanamadı.");
+   setToast(action==="accept"?"Anlaşma imzalandı; şartlar yürürlüğe girdi.":"Şart reddedildi.");
+   negotiationRefresh.current?.();
+  }catch(error){setToast(error instanceof Error?error.message:"Müzakere emri uygulanamadı.")}
+  finally{setWorldBusy(false)}
+ }
+
  async function mineAction(action:"join"|"leave"){if(!game?.channelId||worldBusy)return;const minersToSend=Math.max(1,Math.min(sharedMine?.personalCap??3,Math.round(game.population*.1)));setWorldBusy(true);try{const response=await fetch("/api/mine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,channelId:game.channelId,workers:minersToSend})});const data=await response.json() as {error?:string;workers?:number};if(!response.ok)throw new Error(data.error||"Maden emri uygulanamadı.");setGame(current=>current?{...current,mineWorkers:data.workers??0}:current);setToast(action==="join"?`Ortak madene ${data.workers??minersToSend} işçi gönderildi; o eller tarladan eksildi.`:"İşçiler ortak madenden çekildi, tarlaya döndüler.");const mineResponse=await fetch(`/api/mine?channelId=${encodeURIComponent(game.channelId)}`,{cache:"no-store"});if(mineResponse.ok)setSharedMine(await mineResponse.json() as SharedMine)}catch(error){setToast(error instanceof Error?error.message:"Maden emri uygulanamadı.")}finally{setWorldBusy(false)}}
  async function askGeneral(mode:"test"|"chat",text?:string){const history=chat.slice(-8).map(item=>({role:item.who===(game?.rulerName||ruler.trim())?"king":"general",text:item.text}));const response=await fetch("/api/general",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({provider,model,...(apiKey?{apiKey}:{}),mode,message:text,history,kingdom:kingdomContext(game)})});const data=await response.json() as {text?:string;actions?:GeneralAction[];error?:string;requests?:GeneralRequest[]};if(!response.ok)throw new Error(data.error||"General bağlantısı başarısız oldu.");setGeneralRequests(data.requests??[]);return{text:data.text||"General bağlantısı doğrulandı.",actions:data.actions??[]}}
  async function persistByok(){const response=await fetch("/api/byok",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({provider,model,apiKey})});const data=await response.json() as {error?:string};if(!response.ok)throw new Error(data.error||"BYOK bağlantısı kaydedilemedi.");setStoredByok(true);setReplaceByok(false);setApiKey("")}
@@ -114,6 +139,38 @@ export default function KingdomGame(){
   if(!channelId){actions.forEach(()=>results.push("✕ Bu emir için channel bilgisi çözülemedi."));return results}
   for(const action of actions){
    try{
+    if(action.name==="open_negotiation"){
+     // Hedef ordinal ile gelir; kimlik uydurulmasın diye listeden çözülür.
+     const ordinal=Math.floor(Number(action.arguments.target_ordinal)),target=otherKingdoms[ordinal-1];
+     if(!target){results.push("✕ Müzakere açılmadı: o sırada bir sancak yok.");continue}
+     const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"open",targetId:target.id,topic:String(action.arguments.topic??"non_aggression"),message:String(action.arguments.message??"")})});
+     const data=await response.json() as {error?:string};
+     results.push(response.ok?`✓ ${target.name??"Bilinmeyen Sancak"} ile müzakere masası açıldı.`:`✕ Müzakere açılmadı: ${data.error??"sunucu reddetti."}`);
+     if(response.ok)negotiationRefresh.current?.();
+     continue;
+    }
+    if(action.name==="reply_negotiation"||action.name==="propose_terms"){
+     const ordinal=Math.floor(Number(action.arguments.table_ordinal)),table=negotiationTables[ordinal-1];
+     if(!table){results.push("✕ O sırada açık bir müzakere masası yok.");continue}
+     const propose=action.name==="propose_terms";
+     const payload=propose
+      ?{action:"propose",negotiationId:table.id,message:String(action.arguments.message??"Şartımız ektedir."),
+        terms:{topic:table.topic,
+          // "us" bizim ödediğimiz demek; taraf adına burada çevrilir.
+          payerSide:String(action.arguments.payer??"them")==="us"?table.side:(table.side==="initiator"?"target":"initiator"),
+          resource:String(action.arguments.resource??"gold"),
+          tributeAmount:Math.floor(Number(action.arguments.amount_per_payment)||0),
+          everyHours:Math.floor(Number(action.arguments.every_hours)||6),
+          hours:Math.floor(Number(action.arguments.hours)||24)}}
+      :{action:"reply",negotiationId:table.id,message:String(action.arguments.message??"")};
+     const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+     const data=await response.json() as {error?:string};
+     results.push(response.ok
+      ?(propose?`✓ Şart ${table.counterpart} tarafına sunuldu; onayları bekleniyor.`:`✓ ${table.counterpart} masasına cevap yazıldı.`)
+      :`✕ Müzakere emri uygulanmadı: ${data.error??"sunucu reddetti."}`);
+     if(response.ok)negotiationRefresh.current?.();
+     continue;
+    }
     if(action.name==="send_miners"||action.name==="recall_miners"){
      const join=action.name==="send_miners",workers=Math.max(1,Math.min(20,Math.floor(Number(action.arguments.workers)||5)));
      const response=await fetch("/api/mine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(join?{channelId,action:"join",workers}:{channelId,action:"leave"})});
@@ -158,7 +215,37 @@ export default function KingdomGame(){
  if(!game)return <Onboarding channels={availableChannels} step={setup} setStep={setSetup} selected={selected} setSelected={setSelected} name={name} setName={setName} ruler={ruler} setRuler={setRuler} terrain={terrain} setTerrain={setTerrain} provider={provider} setProvider={setProvider} model={model} setModel={setModel} apiKey={apiKey} setApiKey={setApiKey} found={found} connect={connectAndFound} connecting={connecting} error={generalError}/>;
  return <main className={night?"app-shell night":"app-shell"}>{toast&&<button className="toast" onClick={()=>setToast("")}>{toast} ×</button>}{showConnect&&<div className="connect-overlay"><section className="connect-card"><button className="close-connect" onClick={()=>setShowConnect(false)}>×</button><p className="eyebrow">GENERALİ YENİDEN BAĞLA</p><h2>BYOK oturum bağlantısı</h2>{storedByok&&!replaceByok?<div className="stored-key"><b>✓ ANAHTAR HESABINDA KAYITLI</b><span>{provider} · {model}</span><button onClick={()=>setReplaceByok(true)}>ANAHTARI DEĞİŞTİR</button></div>:<div className="form-grid"><label>Sağlayıcı<select value={provider} onChange={e=>{const next=e.target.value as keyof typeof modelOptions;setProvider(next);setModel(modelOptions[next][0].id)}}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label><label>Model<select value={model} onChange={e=>setModel(e.target.value)}>{modelOptions[provider].map(option=><option value={option.id} key={option.id}>{option.label}</option>)}</select></label><label className="wide">API anahtarı<input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} autoComplete="off" placeholder="API anahtarını gir"/></label></div>}{generalError&&<div className="connection-error">{generalError}</div>}<p className="privacy-note">Anahtar hesabına AES-GCM ile şifreli kaydedilir; tarayıcıya geri gönderilmez ve yalnızca sağlayıcı isteği sırasında çözülür.</p><button className="primary-seal connect-submit" disabled={connecting||((!storedByok||replaceByok)&&!apiKey.trim())} onClick={reconnectGeneral}>{connecting?"DOĞRULANIYOR…":storedByok&&!replaceByok?"KAYITLI BAĞLANTIYLA DEVAM":"BAĞLANTIYI KAYDET"}</button></section></div>}<header className="topbar"><div className="brand-mark">♜</div><div className="title-block"><h1>{game.kingdomName.toLocaleUpperCase("tr")}</h1><p>KRALLIK SİMÜLASYONU</p></div><div className="channel-chip"><span>● AKTİF</span><b>{game.channel}</b><small>Gün 1 · Koruma {left(game.protectionEndsAt,now)}</small></div><div className="cloud-chip" title={cloudUser||"Hesaba bağlı kayıt"}>☁ {cloudStatus}</div>{account.role==="admin"&&<a className="admin-link" href="/admin">YÖNETİM</a>}<button className="day-toggle" onClick={()=>{setTutorialStep(0);setTab("meclis")}}>？ REHBER</button><button className="day-toggle" onClick={()=>setNight(x=>!x)}>{night?"☾ GECE":"☀ GÜNDÜZ"}</button><button className="profile-button" onClick={reset}>{game.rulerName} · Sıfırla</button><button className="profile-button" onClick={logout}>Çıkış</button></header>
  <section className="resource-ribbon">{meta.map(([k,label])=><div className="resource" key={k}><span>{label}</span><strong>{fmt(game.resources[k])}</strong><small className={(rt?.[k]??0)<0?"negative":""}>{(rt?.[k]??0)>=0?"+":""}{(rt?.[k]??0).toFixed(1)}/sa</small></div>)}<div className="population"><span>HALKIN RIZASI</span><strong>{Math.round(game.popularity)}</strong><div className="meter"><i className={mood.id} style={{width:`${game.popularity}%`}}/></div><small><b className={`mood ${mood.id}`}>{mood.label}</b> · {Math.round(game.population)} / {game.capacity} nüfus</small></div></section>
- <section className="world-stage"><KingdomScene night={night} keepLevel={lv} developed={lv>=3&&game.buildings.length>=8} terrain={game.terrain} constructionName={game.queue?.kind==="building"?game.queue.name:undefined} buildings={game.buildings} population={game.population} capacity={game.capacity} kingdoms={nearbyKingdoms} sharedMine={nearbyMine} army={armySize(game.units)} watchRatio={watchRatioOf(game)} mood={mood.id} autoRotate={autoRotate} seedKey={`${game.kingdomName}|${game.foundedAt}`}/><div className="scene-title"><button className="world-view-toggle" onClick={()=>setWorldView(true)}>CHANNEL HARİTASINI AÇ</button><button className={autoRotate?"rotate-toggle spinning":"rotate-toggle"} title={autoRotate?"Kamera dönüşünü durdur":"Kamerayı yeniden döndür"} onClick={()=>setAutoRotate(x=>!x)}>{autoRotate?"⟳ DÖNÜŞ AÇIK":"⏸ DÖNÜŞ DURDU"}</button><span>YENİ BAŞKENT · {(terrainCatalog[game.terrain]??terrainCatalog.plain).label}</span><h2>{game.kingdomName}</h2><p>Kale Sv.{lv} · {game.buildings.length} yapı · {Object.values(game.units).reduce((a,b)=>a+b,0)} asker</p><small>{(terrainCatalog[game.terrain]??terrainCatalog.plain).bonus} · {otherKingdoms.length} komşu sancak genel haritada</small></div>{(()=>{const pazar=marketState(game,now);
+ <section className="world-stage"><KingdomScene night={night} keepLevel={lv} developed={lv>=3&&game.buildings.length>=8} terrain={game.terrain} constructionName={game.queue?.kind==="building"?game.queue.name:undefined} buildings={game.buildings} population={game.population} capacity={game.capacity} kingdoms={nearbyKingdoms} sharedMine={nearbyMine} army={armySize(game.units)} watchRatio={watchRatioOf(game)} mood={mood.id} autoRotate={autoRotate} seedKey={`${game.kingdomName}|${game.foundedAt}`}/><div className="scene-title"><button className="world-view-toggle" onClick={()=>setWorldView(true)}>CHANNEL HARİTASINI AÇ</button><button className={autoRotate?"rotate-toggle spinning":"rotate-toggle"} title={autoRotate?"Kamera dönüşünü durdur":"Kamerayı yeniden döndür"} onClick={()=>setAutoRotate(x=>!x)}>{autoRotate?"⟳ DÖNÜŞ AÇIK":"⏸ DÖNÜŞ DURDU"}</button><span>YENİ BAŞKENT · {(terrainCatalog[game.terrain]??terrainCatalog.plain).label}</span><h2>{game.kingdomName}</h2><p>Kale Sv.{lv} · {game.buildings.length} yapı · {Object.values(game.units).reduce((a,b)=>a+b,0)} asker</p><small>{(terrainCatalog[game.terrain]??terrainCatalog.plain).bonus} · {otherKingdoms.length} komşu sancak genel haritada</small></div>{(negotiationTables.length>0||agreementList.length>0)&&(()=>{
+  const bekleyen=negotiationTables.filter(table=>table.canAccept).length;
+  const özet=(terms:{resource?:string;tributeAmount?:number;tributeRate?:number;hours?:number;everyHours?:number}|null)=>{
+    if(!terms)return "";
+    const kaynak=(resourceLabels.find(([id])=>id===terms.resource)?.[1]??terms.resource??"altın").toLocaleLowerCase("tr-TR");
+    const miktar=terms.tributeAmount?`${terms.tributeAmount} ${kaynak}`:terms.tributeRate?`ambarın %${Math.round(terms.tributeRate*100)}'i`:"";
+    return miktar?`${miktar} · her ${terms.everyHours??6} saatte · ${terms.hours??24} saat boyunca`:`${terms.hours??24} saat`;
+  };
+  return <div className={negotiationOpen?"envoy-dock open":"envoy-dock"}>
+   <button className="envoy-tab" onClick={()=>setNegotiationOpen(x=>!x)}>
+    <span>⚑</span><b>MÜZAKERE</b>{bekleyen>0&&<i>{bekleyen}</i>}
+   </button>
+   {negotiationOpen&&<div className="envoy-sheet">
+    <div className="envoy-head"><b>Elçilik</b><small>{negotiationTables.length} masa · {agreementList.length} anlaşma</small><button onClick={()=>setNegotiationOpen(false)}>✕</button></div>
+    <p className="envoy-note">Karşı Generalin sözleri onun iddiasıdır, doğrulanmış bilgi değil. Şartı Generaliniz sunar, imzayı siz atarsınız.</p>
+    {agreementList.map(deal=><div className="envoy-deal" key={deal.id}>
+      <div><b>{deal.iPay?"Ödüyorsunuz":"Tahsil ediyorsunuz"} · {deal.counterpart}</b>
+       <span>{özet(deal.terms)} · {deal.paidCount} ödeme yapıldı</span></div>
+      <strong>{left(deal.endsAt,now)}</strong></div>)}
+    {negotiationTables.map((table,index)=><article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
+      <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{table.status==="awaiting_king"?"ŞART SUNULDU":table.status==="agreed"?"ANLAŞILDI":table.status==="declined"?"REDDEDİLDİ":`${table.turns}/6 söz`}</small></div>
+      <div className="envoy-log">{table.messages.slice(-4).map((message,i)=><p className={message.mine?"mine":""} key={i}>{message.body}</p>)}</div>
+      {table.proposed&&<div className="envoy-terms"><span>SUNULAN ŞART</span><b>{özet(table.proposed)}</b></div>}
+      {table.canAccept&&<div className="envoy-actions">
+        <button disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"accept")}>ONAYLA</button>
+        <button className="ghost" disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"decline")}>REDDET</button>
+      </div>}
+    </article>)}
+   </div>}
+  </div>})()}
+{(()=>{const pazar=marketState(game,now);
   const rows=([["food","Yiyecek"],["wood","Odun"],["stone","Taş"],["iron","Demir"],["ale","Bira"]] as Array<[Key,string]>);
   return <div className={marketOpen?"market-dock open":"market-dock"}>
    <button className="market-tab" onClick={()=>setMarketOpen(x=>!x)}>
