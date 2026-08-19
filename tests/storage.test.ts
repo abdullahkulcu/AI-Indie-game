@@ -1,3 +1,4 @@
+import type { Game } from "../engine/types";
 import { tick } from "../engine/tick";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -98,7 +99,7 @@ test("depo taşması defteri doldurmaz", () => {
     units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
   };
   // Saniyede bir ilerleyen istemci gibi 40 kez küçük adım at.
-  let game = over;
+  let game: Game = over;
   for (let i = 1; i <= 40; i++) game = tick(game, T0 + i * 2000);
   const spam = game.notices.filter(notice => notice.kind === "AMBAR").length;
   assert.ok(spam <= 1, `40 adımda en fazla bir uyarı olmalı, ölçülen: ${spam}`);

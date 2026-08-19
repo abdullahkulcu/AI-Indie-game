@@ -42,6 +42,22 @@ const NIGHT_PROMPT = [
  * biri araç şemasını, öbürü zaman aşımını farklı kurar ve fark ancak yayında
  * görülürdü.
  */
+/**
+ * Kaydı YALNIZCA okuduğumuz sürüm hâlâ geçerliyse yazar.
+ *
+ * Cron kaydı okur, sağlayıcıya gider (saniyeler sürer), sonra okuduğu hâlin
+ * üstüne yazardı. Kralın tarayıcısı 5 saniyede bir kaydettiği için o aralıkta
+ * biten inşaat, tamamlanan kuyruk ya da kurulan bina SESSİZCE siliniyordu.
+ * Artık yazma koşulludur; sürüm değiştiyse çağıran taze durumla tekrar dener.
+ */
+async function writeSaveIfUnchanged(userId: string, expectedRevision: number, game: unknown) {
+  const rows = await getDb().update(gameSaves)
+    .set({ gameState: JSON.stringify(game), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+    .where(and(eq(gameSaves.userId, userId), eq(gameSaves.revision, expectedRevision)))
+    .returning({ revision: gameSaves.revision });
+  return rows.length > 0;
+}
+
 async function callProvider(input: {
   provider: string; model: string; apiKey: string;
   system: string; tools: DeskTool[]; user: string; maxTokens?: number;
@@ -81,6 +97,7 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
   };
 
   const [save] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
+  const baseRevision = save?.revision ?? -1;
   const stored = save ? parseStoredSave(save.gameState) : null;
   if (!stored) return finish("Okunabilir bulut kaydı yok.", false, false);
 
@@ -148,10 +165,21 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     ...applied.game,
     notices: [{ kind: "GECE VARDİYASI", text: summary.replace(/^[✓✕] /, ""), at: now }, ...applied.game.notices].slice(0, 20),
   };
-  await db.insert(gameSaves).values({ userId: row.userId, gameState: JSON.stringify(next) }).onConflictDoUpdate({
-    target: gameSaves.userId,
-    set: { gameState: JSON.stringify(next), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` },
-  });
+  const written = await writeSaveIfUnchanged(row.userId, baseRevision, next);
+  if (!written) {
+    // Kral bu arada oynadı. Onun ilerlemesini EZMEYİZ: taze durumu okuyup
+    // eylemi onun üstüne uygularız.
+    const [fresh] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
+    const freshGame = fresh ? parseStoredSave(fresh.gameState) : null;
+    if (!freshGame) return finish("Kayıt bu arada değişti; hamle uygulanmadı.", false, true);
+    const redone = applyActions(tick(freshGame as Game, now), [proposed], now);
+    const ok = redone.results.some(line => line.startsWith("✓"));
+    const again = { ...redone.game, notices: [{ kind: "GECE VARDİYASI", text: (redone.results[0] ?? summary).replace(/^[✓✕] /, ""), at: now }, ...redone.game.notices].slice(0, 20) };
+    const retried = await writeSaveIfUnchanged(row.userId, fresh!.revision, again);
+    if (!retried) return finish("Kayıt eşzamanlı değişti; hamle atlandı.", false, true);
+    if (ok) await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
+    return finish(redone.results[0] ?? summary, ok, true);
+  }
   if (succeeded) {
     await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
   }
@@ -366,12 +394,27 @@ async function settleTributes(now: number) {
             notices: [{ kind: "HARAÇ", text: `Anlaşma gereği ${moved} ${key} ödendi.`, at: now }, ...payer.notices].slice(0, 20) };
           const nextPayee = { ...payee, resources: { ...payee.resources, [key]: payee.resources[key] + moved },
             notices: [{ kind: "HARAÇ", text: `Anlaşma gereği ${moved} ${key} tahsil edildi.`, at: now }, ...payee.notices].slice(0, 20) };
-          await db.update(gameSaves).set({ gameState: JSON.stringify(nextPayer), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(gameSaves.userId, deal.payerId));
-          await db.update(gameSaves).set({ gameState: JSON.stringify(nextPayee), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(gameSaves.userId, deal.payeeId));
-          paid += moved;
+          // İki yazım TEK İŞLEMDE olmalı: biri geçip diğeri düşerse ödeyenin
+          // ambarından çıkan kaynak hiçbir yere ulaşmadan yok olur.
+          // Sürüm korumalı: oyunculardan biri bu arada oynadıysa ilerlemesini
+          // ezmeyiz; ödeme bir sonraki tura kalır ve vade sayacı artmaz.
+          const settled = await db.transaction(async trx => {
+            const payerWrite = await trx.update(gameSaves)
+              .set({ gameState: JSON.stringify(nextPayer), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+              .where(and(eq(gameSaves.userId, deal.payerId), eq(gameSaves.revision, payerRow!.revision)))
+              .returning({ userId: gameSaves.userId });
+            if (!payerWrite.length) return false;
+            const payeeWrite = await trx.update(gameSaves)
+              .set({ gameState: JSON.stringify(nextPayee), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+              .where(and(eq(gameSaves.userId, deal.payeeId), eq(gameSaves.revision, payeeRow!.revision)))
+              .returning({ userId: gameSaves.userId });
+            if (!payeeWrite.length) { trx.rollback(); return false; }
+            await trx.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
+            return true;
+          }).catch(() => false);
+          if (settled) paid += moved;
         }
       }
-      await db.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
     }
     if (now >= deal.endsAt) {
       await db.update(agreements).set({ status: "completed" }).where(eq(agreements.id, deal.id));
