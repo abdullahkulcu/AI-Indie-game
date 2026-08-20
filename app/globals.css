@@ -132,3 +132,13 @@
 .market-line span.glut{color:#8fbf7a}
 .coverage{display:block;height:3px;margin-top:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
 .coverage em{display:block;height:100%;background:linear-gradient(90deg,#c2933e,#e8c583)}
+/* Elçilikte masa açma: giriş noktası panelin içinde olmalı, yoksa hiç masası
+   olmayan Kral sekmeyi bulamıyordu. */
+.envoy-new{padding:9px 10px;margin-bottom:9px;border:1px dashed rgba(190,150,220,.4);border-radius:4px;background:rgba(150,110,190,.08)}
+.envoy-new>span{display:block;font-size:.62rem;letter-spacing:.1em;opacity:.7;margin-bottom:6px}
+.envoy-new p{margin:0;font-size:.74rem;opacity:.7}
+.envoy-fields{display:flex;gap:6px;margin-bottom:6px}
+.envoy-new select,.envoy-new input{min-width:0;flex:1;padding:5px 7px;border:1px solid rgba(214,168,80,.3);border-radius:3px;background:rgba(20,13,7,.85);color:#efe0c0;font:inherit;font-size:.74rem}
+.envoy-new input{width:100%;margin-bottom:6px}
+.envoy-new>button{width:100%;padding:6px;font-size:.7rem;letter-spacing:.06em;border:1px solid rgba(190,150,220,.5);border-radius:3px;background:rgba(150,110,190,.2);color:#efe0c0;cursor:pointer}
+.envoy-new>button:disabled{opacity:.4;cursor:not-allowed}
