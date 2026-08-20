@@ -119,3 +119,16 @@
 .envoy-actions button:disabled{opacity:.4;cursor:not-allowed}
 @media(max-width:900px){.envoy-dock{left:14px;top:440px;bottom:auto}.envoy-sheet{max-height:280px}}
 @media(max-width:560px){.envoy-dock{top:372px}}
+
+/* Pazar: fiyat halkın elindekinden doğar, o yüzden kapsama çubuğu gösterilir. */
+.living-cost{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;padding:6px 9px;border-left:3px solid rgba(214,168,80,.5);border-radius:3px;background:rgba(214,168,80,.1)}
+.living-cost.strain{border-color:#8d2b21;background:rgba(141,43,33,.16)}
+.living-cost.relief{border-color:#3f6b34;background:rgba(63,107,52,.16)}
+.living-cost span{font-size:.62rem;letter-spacing:.1em;opacity:.7}
+.living-cost b{font-size:.8rem}
+.living-cost small{flex:1;text-align:right;font-size:.7rem;opacity:.72}
+.market-line{min-width:0;flex:1}
+.market-line span.scarce{color:#e8a07a}
+.market-line span.glut{color:#8fbf7a}
+.coverage{display:block;height:3px;margin-top:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}
+.coverage em{display:block;height:100%;background:linear-gradient(90deg,#c2933e,#e8c583)}

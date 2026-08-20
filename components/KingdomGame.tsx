@@ -5,14 +5,15 @@ import ChannelWorldMap from "./ChannelWorldMap";
 import RichMessage from "./RichMessage";
 import AccountGate, { type Account } from "./AccountGate";
 import { applyActions, marketState } from "@/engine/actions";
+import { fillOrder, livingCostMood, type TradeKey } from "@/engine/market";
 import { catalog, keepSeconds, keepUpgradeCosts, resourceLabels, terrainCatalog } from "@/engine/catalog";
 import { affordable, costFor, keep, materialScaleOf, rates, tick } from "@/engine/tick";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
-import type { Building as EngineBuilding, Game, GameAction, Key as EngineKey, Res as EngineRes, TerrainId as EngineTerrainId } from "@/engine/types";
+import type { Building as EngineBuilding, Game, GameAction, Res as EngineRes, TerrainId as EngineTerrainId } from "@/engine/types";
 
-type Key=EngineKey; type Res=EngineRes;
+type Res=EngineRes;
 type Building=EngineBuilding;
 type Tab="meclis"|"binalar"|"halk"|"ordu"|"defter"|"diyar"; type Setup="welcome"|"channel"|"kingdom"|"general";
 type GeneralAction=GameAction;
@@ -246,7 +247,7 @@ async function negotiationAction(negotiationId:string,action:"accept"|"decline")
    </div>}
   </div>})()}
 {(()=>{const pazar=marketState(game,now);
-  const rows=([["food","Yiyecek"],["wood","Odun"],["stone","Taş"],["iron","Demir"],["ale","Bira"]] as Array<[Key,string]>);
+  const rows=([["food","Yiyecek"],["wood","Odun"],["stone","Taş"],["iron","Demir"],["ale","Bira"]] as Array<[TradeKey,string]>);
   return <div className={marketOpen?"market-dock open":"market-dock"}>
    <button className="market-tab" onClick={()=>setMarketOpen(x=>!x)}>
     <span>⚖</span><b>PAZAR</b>{pazar.open.length>0&&<i>{pazar.open.length}</i>}
@@ -256,18 +257,39 @@ async function negotiationAction(negotiationId:string,action:"accept"|"decline")
      ?<><div className="market-head"><b>Pazar kapalı</b><button onClick={()=>setMarketOpen(false)}>✕</button></div>
        <p className="market-note">Pazarımız yok; hiçbir kaynak altına çevrilemez. Kale Sv.2'de Pazar kurulabilir.</p></>
      :<><div className="market-head"><b>Pazar Sv.{pazar.level}</b><small>{pazar.freeSlots}/{pazar.slots} yuva boş · {pazar.left} birim hacim</small><button onClick={()=>setMarketOpen(false)}>✕</button></div>
-       <p className="market-note">Mal tezgâha çıkar, parası teklif kapanınca gelir. Alış fiyatı satıştan {Math.round((pazar.spread-1)*100)}% yüksektir.</p>
+       <p className="market-note">Bu pazar halkınla ticarettir. Fiyat halkın elindekinden doğar: azalınca yükselir, bollaşınca düşer. Alış satıştan {Math.round((pazar.spread-1)*100)}% pahalıdır.</p>
+       {(()=>{const yasam=pazar.livingCost,etki=livingCostMood(yasam);
+         return <div className={etki<0?"living-cost strain":etki>0?"living-cost relief":"living-cost"}>
+          <span>GEÇİM YÜKÜ</span>
+          <b>{yasam>1.25?"Pahalı":yasam<.85?"Ucuz":"Normal"}</b>
+          <small>{etki===0?"Rızaya etkisi yok":`Halkın rızasına ${etki>0?"+":""}${Math.round(etki)} puan`}</small>
+         </div>})()}
        {pazar.open.length>0&&<div className="market-open">{pazar.open.map(order=><div className="open-order" key={order.id}>
          <div><b>{order.direction==="sell"?"Satışta":"Yolda"} · {order.amount} {(resourceLabels.find(([id])=>id===order.resource)?.[1]??order.resource).toLocaleLowerCase("tr-TR")}</b>
           <span>{order.direction==="sell"?`${order.gold} altın gelecek`:`${order.gold} altın ödendi`}</span></div>
          <strong>{left(order.completesAt,now)}</strong>
          <div className="order-progress"><i style={{width:`${Math.max(3,Math.min(100,(now-order.placedAt)/(order.completesAt-order.placedAt)*100))}%`}}/></div>
         </div>)}</div>}
-       <div className="market-rows">{rows.map(([key,label])=>{const unit=pazar.price[key]??0;const have=Math.floor(game.resources[key]);const batch=Math.min(pazar.left,have,100);
+       <div className="market-rows">{rows.map(([key,label])=>{
+        const unit=pazar.price[key]??0,have=Math.floor(game.resources[key]);
+        const kapsama=pazar.coverage[key]??1,halkta=Math.round(pazar.commons[key]??0);
+        const batch=Math.min(pazar.left,have,500);
+        // Kayma önizlemesi: emrin gerçekten ne getireceği, anlık fiyat değil.
+        const onizleme=batch>0?fillOrder(key,batch,pazar.commons[key]??0,pazar.reference[key]??1,"sell"):null;
         return <div className="market-row" key={key}>
-         <div><b>{label}</b><span>Sat {unit} · Al {Math.ceil(unit*pazar.spread*100)/100} altın</span></div>
-         <div className="market-actions"><small>{have}</small>
-          <button disabled={connecting||batch<1||pazar.freeSlots<1} onClick={()=>void submitOrder(`Pazarda ${batch} ${label.toLocaleLowerCase("tr-TR")} sat.`)}>{pazar.freeSlots<1?"YUVA DOLU":batch<1?"YOK":`${batch} SAT`}</button></div>
+         <div className="market-line">
+          <b>{label}</b>
+          <span className={kapsama<.6?"scarce":kapsama>1.5?"glut":""}>{unit.toFixed(2)} altın · halkta {halkta} ({Math.round(kapsama*100)}%)</span>
+          <i className="coverage"><em style={{width:`${Math.max(3,Math.min(100,kapsama*50))}%`}}/></i>
+         </div>
+         <div className="market-actions">
+          <small>{have} ambarda</small>
+          <button disabled={connecting||batch<1||pazar.freeSlots<1}
+            title={onizleme?`${batch} birim → ${onizleme.gold} altın · ortalama ${onizleme.average.toFixed(3)} · fiyat ${onizleme.from.toFixed(2)}→${onizleme.to.toFixed(2)}`:undefined}
+            onClick={()=>void submitOrder(`Pazarda ${batch} ${label.toLocaleLowerCase("tr-TR")} sat.`)}>
+           {pazar.freeSlots<1?"YUVA DOLU":batch<1?"YOK":`${batch} SAT → ${onizleme?.gold ?? 0}`}
+          </button>
+         </div>
         </div>})}</div></>}
    </div>}
   </div>})()}
