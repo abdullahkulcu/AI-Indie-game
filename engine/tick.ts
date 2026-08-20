@@ -1,6 +1,6 @@
 export { materialScaleOf } from "./catalog";
 import { MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
-import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
+import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood, orderPayout } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import { applySpoilage, storageCaps } from "./storage";
@@ -271,13 +271,18 @@ export function tick(g: Game, now: number): Game {
     const due = marketOrders.filter(order => order.completesAt <= now);
     marketOrders = marketOrders.filter(order => order.completesAt > now);
     for (const order of due) {
-      if (order.direction === "sell") {
-        resources.gold += order.gold;
-        notices = [{ kind: "PAZAR", text: `${order.amount} ${labelOf(order.resource)} satıldı; ${order.gold} altın hazineye girdi.`, at: order.completesAt }, ...notices].slice(0, 20);
-      } else {
-        resources[order.resource] += order.amount;
-        notices = [{ kind: "PAZAR", text: `Satın alınan ${order.amount} ${labelOf(order.resource)} ambara indirildi.`, at: order.completesAt }, ...notices].slice(0, 20);
-      }
+      // Ödemenin ne olduğu TEK YERDE yazılıdır (bkz. engine/market.ts,
+      // orderPayout): sunucu bekleyen emrin getireceği miktarı doğrularken
+      // aynı kuralı okur, yoksa motorun ödediği ile sunucunun beklediği ayrışır.
+      const payout = orderPayout(order);
+      resources[payout.key] += payout.amount;
+      notices = [{
+        kind: "PAZAR",
+        text: order.direction === "sell"
+          ? `${order.amount} ${labelOf(order.resource)} satıldı; ${order.gold} altın hazineye girdi.`
+          : `Satın alınan ${order.amount} ${labelOf(order.resource)} ambara indirildi.`,
+        at: order.completesAt,
+      }, ...notices].slice(0, 20);
     }
   }
 

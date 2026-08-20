@@ -1,4 +1,4 @@
-import { clampRation, moodState, rationsOf, suppression, armySize } from "./populace";
+import { clampRation, moodState, rationsOf, suppression, armySize, RATION_LIMITS } from "./populace";
 import type { Game } from "./types";
 
 /**
@@ -15,14 +15,21 @@ export type PolicyChange = { key: PolicyKey; value: number };
 
 export type PolicyResult = { game: Game; comment: string };
 
-const LIMITS: Record<PolicyKey, { min: number; max: number }> = {
-  foodRation: { min: 0, max: 200 },
-  aleRation: { min: 0, max: 200 },
+/**
+ * Kralın ayarlarının motor sınırları — TEK KAYNAK.
+ *
+ * Dışa açıktır çünkü sunucu doğrulaması (`server/save-validation.ts`) kayıttaki
+ * ayarların motorun kabul ettiği aralıkta olduğunu aynı sayılarla ölçer; ayrı
+ * yazıldığında şema motorun reddettiği bir vergiyi kabul ediyordu.
+ */
+export const POLICY_LIMITS: Record<PolicyKey, { min: number; max: number }> = {
+  foodRation: { min: RATION_LIMITS.min, max: RATION_LIMITS.max },
+  aleRation: { min: RATION_LIMITS.min, max: RATION_LIMITS.max },
   taxRate: { min: 0, max: 50 },
 };
 
 export function clampPolicy(key: PolicyKey, value: number) {
-  const limit = LIMITS[key];
+  const limit = POLICY_LIMITS[key];
   const rounded = Math.round(Number(value) || 0);
   return Math.max(limit.min, Math.min(limit.max, rounded));
 }

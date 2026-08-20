@@ -20,6 +20,23 @@ export const RATE_LIMITS = {
    * çıkış IP'si arkasındaki Krallar birbirinin kotasını yemesin.
    */
   negotiate: { scope: "negotiate", limit: 60, windowMs: 60 * 60_000 },
+  /**
+   * Krallık kaydı (`PUT /api/save`).
+   *
+   * Kayıt sıklığının tek freni şimdiye kadar İSTEMCİDEYDİ (components/
+   * KingdomGame.tsx, 5 saniyede bir) ve uç tamamen açıktı. Sunucunun büyüme
+   * denetimi ise payını istek başına ödüyordu; saniyede 10 kayıt atan bir
+   * betik saniyede yarım milyon altın basabiliyordu. Pay artık pencereye
+   * bağlı (bkz. server/save-validation.ts) ama isteğin kendisi de ucuz
+   * olmamalı: her kayıt tam bir motor simülasyonu koşturur.
+   *
+   * SINIR MEŞRU İSTEMCİYİ BOĞMAZ: 5 saniyede bir kayıt = dakikada 12, beş
+   * dakikada 60 istek. 120, bunun tam iki katıdır — aynı hesabın iki sekmesi
+   * açık olsa bile sınıra değmez. Sınır HESAP bazındadır (`user:${id}`);
+   * paylaşılan çıkış IP'si arkasındaki Krallar birbirinin kotasını yemesin.
+   * 429 yiyen istemci yerel kaydını korur ve 5 saniye sonra yeniden dener.
+   */
+  save: { scope: "save", limit: 120, windowMs: 5 * 60_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 // Cloudflare kenarı gerçek istemci IP'sini bu başlıkta verir. Yerelde başlık yoktur;

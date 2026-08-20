@@ -1,6 +1,7 @@
 import { catalog, keepSeconds, MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
-import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, SPREAD, TRADED_KEYS } from "./market";
+import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, orderCost, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
+import { POLICY_LIMITS } from "./policy";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, keepCostFor, materialScaleOf, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
@@ -16,7 +17,18 @@ export type ApplyResult = {
   remote: GameAction[];
 };
 
-const MAX_ACTIONS_PER_TURN = 3;
+/**
+ * Bir General turunda uygulanabilecek en çok emir. Dışa açıktır çünkü sunucu
+ * doğrulaması "tek turda en fazla ne kadar sadakat/rıza sıçrayabilir" sorusunu
+ * bu sayıdan hesaplar (bkz. server/save-validation.ts).
+ */
+export const MAX_ACTIONS_PER_TURN = 3;
+
+/**
+ * Sadakatin emir başına adımı. Uygulanan her emir Generali biraz daha bağlar;
+ * itirazının üzerine binilen emir çok daha sert koparır.
+ */
+export const LOYALTY_STEP = { success: .5, overridden: -2 } as const;
 
 /**
  * General'in önerdiği eylemleri oyun durumuna uygular. Saf fonksiyondur:
@@ -39,6 +51,13 @@ const MAX_ACTIONS_PER_TURN = 3;
  * eksilmez — ama yevmiyeleri ağırdır ve aynı işe bir kez çağrılırlar.
  */
 const HASTEN = { goldPerMinute: 6, minCost: 60, minSeconds: 120, crew: "bir usta takımı" };
+
+/**
+ * Şenlik: rızayı ambardan satın almanın tek doğrudan yolu. Dışa açıktır çünkü
+ * rıza `tick()` dışında YALNIZCA buradan sıçrar; sunucu doğrulaması istemcinin
+ * bildirdiği rızayı kendi simülasyonuna karşı ölçerken bu payı tanımak zorunda.
+ */
+export const FESTIVAL = { cost: { gold: 120, food: 150 }, mood: 12 } as const;
 
 const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 };
 
@@ -101,7 +120,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
   let overridden = false;
   const success = (text: string) => {
     results.push(`✓ ${text}`);
-    next = { ...next, loyalty: Math.max(0, Math.min(100, next.loyalty + (overridden ? -2 : .5))) };
+    next = { ...next, loyalty: Math.max(0, Math.min(100, next.loyalty + (overridden ? LOYALTY_STEP.overridden : LOYALTY_STEP.success))) };
   };
   const blocked = (text: string) => results.push(`✕ ${text}`);
   const majorSpend = (cost: Partial<Res>) =>
@@ -228,24 +247,30 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const commons = { ...market.commons, [resource]: fill.commons };
       const priced = `${fill.average.toFixed(2)} altın/birim (${fill.from.toFixed(2)} → ${fill.to.toFixed(2)})`;
 
+      // Emir önce kurulur, peşinatı `orderCost` ile düşülür: "verilirken ne
+      // çıkar" kuralı tek yerde (engine/market.ts) yazılıdır ve sunucu
+      // doğrulaması ödemenin yapıldığını aynı kuralla ölçer.
+      const order = { id, resource: key, amount, direction: (buying ? "buy" : "sell") as "buy" | "sell", gold: fill.gold, placedAt: now, completesAt: now + minutes * 60_000 };
+      const paid = orderCost(order);
+      const shared = {
+        ...next, commons,
+        resources: debit(next.resources, { [paid.key]: paid.amount }),
+        marketVolume: market.used + amount, marketDayAt: market.dayAt,
+        marketOrders: [...market.open, order],
+      };
+
       if (buying) {
-        const cost = fill.gold;
-        if (next.resources.gold < cost) { blocked(`Alım engellendi: ${amount} ${labelOf(key)} için ${cost} altın gerekli, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
+        if (next.resources.gold < paid.amount) { blocked(`Alım engellendi: ${amount} ${labelOf(key)} için ${paid.amount} altın gerekli, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
         // Altın peşin çıkar, mal kervanla gelir.
-        next = { ...next, commons, resources: { ...next.resources, gold: next.resources.gold - cost },
-          marketVolume: market.used + amount, marketDayAt: market.dayAt,
-          marketOrders: [...market.open, { id, resource: key, amount, direction: "buy" as const, gold: cost, placedAt: now, completesAt: now + minutes * 60_000 }],
-          notices: [{ kind: "PAZAR", text: `Halktan ${amount} ${labelOf(key)} alındı; ${cost} altın ödendi, ${priced}. Mal ${minutes} dakika sonra ambarda.`, at: now }, ...next.notices].slice(0, 20) };
-        success(`Pazara alım teklifi verildi: ${amount} ${labelOf(key)}, ${cost} altın peşin — ${priced}. Halkın stoğu azaldığı için fiyat yükseldi. Mal ${minutes} dakika sonra ambara girer.`);
+        next = { ...shared,
+          notices: [{ kind: "PAZAR", text: `Halktan ${amount} ${labelOf(key)} alındı; ${paid.amount} altın ödendi, ${priced}. Mal ${minutes} dakika sonra ambarda.`, at: now }, ...next.notices].slice(0, 20) };
+        success(`Pazara alım teklifi verildi: ${amount} ${labelOf(key)}, ${paid.amount} altın peşin — ${priced}. Halkın stoğu azaldığı için fiyat yükseldi. Mal ${minutes} dakika sonra ambara girer.`);
       } else {
         if (next.resources[key] < amount) { blocked(`Satış engellendi: ambarda ${Math.floor(next.resources[key])} ${labelOf(key)} var, ${amount} satılamaz.`); continue; }
-        const earned = fill.gold;
         // Mal ambardan hemen çıkar; parası ancak teklif kapanınca gelir.
-        next = { ...next, commons, resources: { ...next.resources, [key]: next.resources[key] - amount },
-          marketVolume: market.used + amount, marketDayAt: market.dayAt,
-          marketOrders: [...market.open, { id, resource: key, amount, direction: "sell" as const, gold: earned, placedAt: now, completesAt: now + minutes * 60_000 }],
-          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} halka satıldı; ${priced}, ${earned} altın ${minutes} dakika sonra hazineye girer.`, at: now }, ...next.notices].slice(0, 20) };
-        success(`Pazara satış teklifi verildi: ${amount} ${labelOf(key)} tezgâha çıktı — ${priced}. Halkın eline geçtikçe fiyat düştü. ${earned} altın ${minutes} dakika sonra hazineye girer.`);
+        next = { ...shared,
+          notices: [{ kind: "PAZAR", text: `${amount} ${labelOf(key)} halka satıldı; ${priced}, ${fill.gold} altın ${minutes} dakika sonra hazineye girer.`, at: now }, ...next.notices].slice(0, 20) };
+        success(`Pazara satış teklifi verildi: ${amount} ${labelOf(key)} tezgâha çıktı — ${priced}. Halkın eline geçtikçe fiyat düştü. ${fill.gold} altın ${minutes} dakika sonra hazineye girer.`);
       }
       continue;
     }
@@ -273,21 +298,22 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     }
 
     if (action.name === "host_festival") {
-      const cost = { gold: 120, food: 150 };
-      if (!affordable(next.resources, cost)) { blocked("Şenlik engellendi: 120 altın ve 150 yiyecek gerekli."); continue; }
+      const cost = FESTIVAL.cost;
+      if (!affordable(next.resources, cost)) { blocked(`Şenlik engellendi: ${cost.gold} altın ve ${cost.food} yiyecek gerekli.`); continue; }
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        popularity: Math.min(100, next.popularity + 12),
+        popularity: Math.min(100, next.popularity + FESTIVAL.mood),
         notices: [{ kind: "GENERAL", text: "General halk için şenlik düzenledi.", at: now }, ...next.notices],
       };
-      success("Şenlik düzenlendi; halkın rızası 12 puan yükseldi.");
+      success(`Şenlik düzenlendi; halkın rızası ${FESTIVAL.mood} puan yükseldi.`);
       continue;
     }
 
     if (action.name === "set_tax_rate") {
       const rate = Math.floor(Number(action.arguments.rate_percent));
-      if (!Number.isFinite(rate) || rate < 0 || rate > 50) { blocked("Geçersiz vergi oranı reddedildi."); continue; }
+      const taxLimit = POLICY_LIMITS.taxRate;
+      if (!Number.isFinite(rate) || rate < taxLimit.min || rate > taxLimit.max) { blocked("Geçersiz vergi oranı reddedildi."); continue; }
       if (rate > 30 && !confirmed) { blocked(`%${rate} vergi halk için riskli; açık Kral teyidi olmadan uygulanmadı.`); continue; }
       next = { ...next, taxRate: rate, loyalty: Math.max(0, next.loyalty - (rate > 30 ? 2 : 0)) };
       success(`Vergi oranı %${rate} olarak mühürlendi.`);

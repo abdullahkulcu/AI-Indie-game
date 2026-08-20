@@ -1,4 +1,5 @@
 import { catalog } from "../engine/catalog";
+import { orderGoldBounds } from "../engine/market";
 import { BUILDING_TYPES } from "../server/save-validation";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -213,4 +214,131 @@ test("gerçekten bilinmeyen bina türü hâlâ reddedilir", () => {
     units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
   };
   assert.equal(parseStoredSave(JSON.stringify(bogus)), null, "uydurma bina kabul edilmemeli");
+});
+
+/**
+ * PAZAR TEKLİFİYLE KAYNAK ÜRETME AÇIĞI — kapatıldığının kanıtı.
+ *
+ * Teklifin altını istemcide hesaplanıp kayda yazılıyor ve `tick()` teklif
+ * kapanınca o sayıyı sorgusuz hazineye ekliyor. Sömürü iki adımlıydı:
+ * (1) kaynaklar aynı kalırken içine sahte bir teklif konur — hiçbir denetim
+ * kaynak artışı görmediği için geçer; (2) teklif kapanınca sunucunun kendi
+ * simülasyonu AYNI sahte teklifi kendisi de öder ve tavanı doğrular.
+ */
+function afterFirstSave(overrides: Record<string, unknown> = {}) {
+  const first = validateGameSave(startingSave(overrides), firstSave);
+  if (!first.ok) throw new Error("kurulum başarısız");
+  return first.game;
+}
+
+const laterSave = (previous: ReturnType<typeof afterFirstSave>, elapsedMs: number) => ({
+  previous, previousUpdatedAt: NOW - elapsedMs, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW,
+});
+
+test("fiyat modelinin tavanını aşan pazar teklifi reddedilir", () => {
+  const previous = afterFirstSave();
+  // Tek birim demir için dokuz milyon altın: eski kodda bu kayıt kabul edilir,
+  // teklif kapanınca dokuz milyon altın hazineye yazılırdı.
+  const next = startingSave({
+    marketOrders: [{
+      id: "s-iron-1", resource: "iron", amount: 1, direction: "sell",
+      gold: 9_000_000, placedAt: NOW, completesAt: NOW + 30 * 60_000,
+    }],
+    resources: { ...STARTING_STATE.resources, iron: 99 },
+  });
+  const result = validateGameSave(next, laterSave(previous, 60_000));
+  assert.equal(result.ok, false);
+  assert.equal(result.ok === false && result.status, 409);
+  assert.match(result.ok === false ? result.error : "", /fiyat modelinin tavanını aşıyor/);
+});
+
+test("bedeli ambardan düşülmemiş pazar teklifi kaynak tavanını yükseltmez", () => {
+  const previous = afterFirstSave();
+  // Fiyatı makul, ama satılan 100 demir ambardan HİÇ düşmemiş: oyuncu hem malı
+  // hem parasını almak istiyor. Tavan, verilmeyen peşinat kadar düşürülür.
+  // Miktar, tavanın sabit payını (SIMULATION_FLOOR) aşacak kadar büyük seçilir;
+  // küçük bir kalem o payın içinde kaybolur ve denetim ölçülemez.
+  const bounds = orderGoldBounds("wood", 5_000, "sell");
+  const next = startingSave({
+    marketOrders: [{
+      id: "s-wood-5000", resource: "wood", amount: 5_000, direction: "sell",
+      // Kapanma anı motorun bu miktar için verdiği süreden (618 dk) sonra olmalı;
+      // aksi hâlde teklif "erken kapanıyor" diye başka bir dalda reddedilir.
+      gold: Math.floor((bounds.min + bounds.max) / 2), placedAt: NOW, completesAt: NOW + 700 * 60_000,
+    }],
+  });
+  const result = validateGameSave(next, laterSave(previous, 60_000));
+  assert.equal(result.ok, false);
+  assert.match(result.ok === false ? result.error : "", /sunucunun ürettiği değerin üzerinde/);
+});
+
+test("bedeli gerçekten ödenmiş makul pazar teklifi kabul edilir", () => {
+  const previous = afterFirstSave();
+  const bounds = orderGoldBounds("iron", 100, "sell");
+  const next = startingSave({
+    marketOrders: [{
+      id: "s-iron-100", resource: "iron", amount: 100, direction: "sell",
+      gold: Math.floor((bounds.min + bounds.max) / 2), placedAt: NOW, completesAt: NOW + 30 * 60_000,
+    }],
+    // Mal ambardan hemen çıkar; parası teklif kapanınca gelir.
+    resources: { ...STARTING_STATE.resources, iron: 0 },
+  });
+  const result = validateGameSave(next, laterSave(previous, 60_000));
+  assert.equal(result.ok, true);
+});
+
+test("bekleyen pazar teklifi sonradan değiştirilemez", () => {
+  const bounds = orderGoldBounds("iron", 100, "sell");
+  const order = {
+    id: "s-iron-100", resource: "iron", amount: 100, direction: "sell",
+    gold: Math.floor((bounds.min + bounds.max) / 2), placedAt: NOW, completesAt: NOW + 30 * 60_000,
+  };
+  const previous = afterFirstSave();
+  const opened = validateGameSave(
+    startingSave({ marketOrders: [order], resources: { ...STARTING_STATE.resources, iron: 0 } }),
+    laterSave(previous, 60_000),
+  );
+  if (!opened.ok) throw new Error("teklif açılamadı");
+  // Bir kez ölçülen teklifin altını ikinci kayıtta yukarı çekilemez.
+  const tampered = startingSave({
+    marketOrders: [{ ...order, placedAt: order.placedAt + 1_000 }],
+    resources: { ...STARTING_STATE.resources, iron: 0 },
+  });
+  const result = validateGameSave(tampered, laterSave(opened.game, 60_000));
+  assert.equal(result.ok, false);
+  assert.match(result.ok === false ? result.error : "", /sonradan değiştirilemez/);
+});
+
+/**
+ * SIÇRAMA PAYI PENCEREYE BAĞLI — istek başına ödenmediğinin kanıtı.
+ *
+ * Eski kural geçen süreyi bir dakikaya yuvarlıyordu, yani 5 saniyede bir
+ * kaydeden istemci payın TAMAMINI her istekte yeniden topluyordu. Saniyede 10
+ * kayıt atan bir betik saniyede yarım milyon altın basabiliyordu.
+ */
+test("sıçrama payı kısa aralıkta oransal, tam ödenmiyor", () => {
+  const previous = afterFirstSave();
+  const jump = startingSave({ resources: { ...STARTING_STATE.resources, gold: 1_000 + 50_000 } });
+
+  // 5 saniyelik pencerede pay 1/12'sidir: büyüme denetimi bu artışı reddeder.
+  const quick = validateGameSave(jump, laterSave(previous, 5_000));
+  assert.equal(quick.ok, false);
+  assert.match(quick.ok === false ? quick.error : "", /geçen sürede mümkün değil/);
+
+  // Aynı artış bir dakikalık pencerede büyüme denetimini geçer — pay orada
+  // gerçekten hak edilmiştir. (Simülasyon tavanı onu ayrıca yakalar; burada
+  // ölçtüğümüz, payın SÜREYE bağlı olduğu.)
+  const slow = validateGameSave(jump, laterSave(previous, 60_000));
+  assert.equal(slow.ok, false);
+  assert.doesNotMatch(slow.ok === false ? slow.error : "", /geçen sürede mümkün değil/);
+});
+
+test("sunucunun türettiği itibar istemcinin bildirdiğini ezer", () => {
+  // Haraç ihlalinin cezası (itibar 50 -> 30) bir sonraki kayıtta 100 yazılarak
+  // siliniyordu. Artık itibarı yalnızca sunucu yazar.
+  const previous = afterFirstSave();
+  assert.equal(previous.reputation, 50);
+  const result = validateGameSave(startingSave({ reputation: 100 }), laterSave(previous, 60_000));
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.game.reputation, 50);
 });

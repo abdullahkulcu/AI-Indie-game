@@ -1,5 +1,5 @@
 import { NEED } from "./populace";
-import type { Commons, Game, TradeKey } from "./types";
+import type { Commons, Game, Key, MarketOrder, TradeKey } from "./types";
 
 /**
  * YEREL PAZAR — Kralın kendi halkıyla ticareti.
@@ -210,6 +210,57 @@ export function fillOrder(
     from,
     to: unitPrice(key, held, reference),
   };
+}
+
+/**
+ * Kapanan bir emrin hangi deftere ne yazacağı — TEK KAYNAK.
+ *
+ * `engine/tick.ts` emri kapatırken, `server/save-validation.ts` ise bekleyen
+ * emrin er ya da geç getireceği miktarı hesaplarken buradan okur. İki yerde
+ * ayrı yazıldığında sunucu, motorun ödediğinden başka bir sayıyı bekler ve
+ * meşru kaydı reddeder.
+ */
+export function orderPayout(order: Pick<MarketOrder, "direction" | "resource" | "amount" | "gold">): { key: Key; amount: number } {
+  return order.direction === "sell"
+    ? { key: "gold", amount: order.gold }
+    : { key: order.resource, amount: order.amount };
+}
+
+/**
+ * Emir VERİLİRKEN peşin çıkan — TEK KAYNAK, `orderPayout`'un simetriği.
+ *
+ * Satışta mal ambardan hemen çıkar, parası sonra gelir; alışta altın hazineden
+ * hemen çıkar, mal sonra gelir. `engine/actions.ts` emri kurarken bunu düşer,
+ * `server/save-validation.ts` ise yeni bir emrin ambardan gerçekten düştüğünü
+ * bu kuralla doğrular: ödemesi yapılmamış bir teklif kayda konamasın.
+ */
+export function orderCost(order: Pick<MarketOrder, "direction" | "resource" | "amount" | "gold">): { key: Key; amount: number } {
+  return order.direction === "sell"
+    ? { key: order.resource, amount: order.amount }
+    : { key: "gold", amount: order.gold };
+}
+
+/**
+ * Bir emrin bedelinin, halkın defterine hiç bakmadan çizilebilen sınırları.
+ *
+ * NEDEN VAR: emrin altını istemcide hesaplanıp kayda yazılıyor ve `tick()`
+ * teklif kapanınca o sayıyı sorgusuz hazineye ekliyor. Sunucunun o sayıyı
+ * ölçebileceği bir çerçeve olmadan istemci `gold` alanına istediğini yazıp
+ * kaynak yaratabiliyordu (bkz. server/save-validation.ts, checkMarketOrders).
+ *
+ * Çerçeve fiyat modelinin KENDİ tavanından doğar: birim fiyat her zaman
+ * `BASE_PRICE × [PRICE_FLOOR, PRICE_CEILING]` arasındadır, alışta ayrıca
+ * SPREAD ile çarpılır. `fillOrder` emri parçalara bölerken her parçayı bu
+ * aralıkta fiyatlar, dolayısıyla toplam da bu aralığın dışına ÇIKAMAZ:
+ * meşru hiçbir emir bu sınıra takılmaz, uydurma bir sayı ise takılır.
+ *
+ * Yuvarlama sınırın içinde kalır: satışta `Math.floor` (tavanı aşamaz),
+ * alışta `Math.ceil` (tabanın altına inemez).
+ */
+export function orderGoldBounds(key: TradeKey, amount: number, direction: "sell" | "buy") {
+  const units = Math.max(0, Math.floor(Number(amount) || 0));
+  const base = BASE_PRICE[key] * units * (direction === "buy" ? SPREAD : 1);
+  return { min: base * PRICE_FLOOR, max: base * PRICE_CEILING };
 }
 
 /**

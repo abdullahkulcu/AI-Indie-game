@@ -1,9 +1,13 @@
 import { z } from "zod";
+import { FESTIVAL, LOYALTY_STEP, MAX_ACTIONS_PER_TURN, marketDuration } from "../engine/actions";
 import { BUILDABLE_TYPES, MAX_BUILDING_LEVEL } from "../engine/catalog";
-import { PROTECTION_DAYS, STARTING_BUILDINGS, STARTING_POPULATION, startingResources } from "../engine/founding";
-import { resolveRaids } from "../engine/raids";
-import { tick } from "../engine/tick";
-import type { Game } from "../engine/types";
+import { PROTECTION_DAYS, STARTING_BUILDINGS, STARTING_POPULATION, STARTING_REPUTATION, startingResources } from "../engine/founding";
+import { orderCost, orderGoldBounds, orderPayout } from "../engine/market";
+import { POLICY_LIMITS, clampPolicy } from "../engine/policy";
+import { RATION_LIMITS, clampRation } from "../engine/populace";
+import { WATCH_LIMITS, clampWatch, resolveRaids } from "../engine/raids";
+import { capacityFor, tick } from "../engine/tick";
+import type { Game, Key } from "../engine/types";
 
 /**
  * Oyun durumu hâlâ istemcide hesaplanıyor (bkz. components/KingdomGame.tsx).
@@ -45,7 +49,11 @@ export const CAPS = {
   unitKinds: 24,
   notices: 80,
   quota: 24,
-  taxRate: 50,
+  // Motorun kendi sınırından TÜRETİLİR (engine/policy.ts): şema, motorun
+  // reddettiği bir vergiyi kabul etmesin ve iki sayı ayrı ayrı sapmasın.
+  taxRate: POLICY_LIMITS.taxRate.max,
+  ration: RATION_LIMITS.max,
+  watchRatio: WATCH_LIMITS.max,
 } as const;
 
 /**
@@ -65,7 +73,7 @@ export function startingState(speed: number) {
   };
 }
 
-/** Saatlik makul kazanç tavanları; channel hızıyla çarpılır. Sıçramalar için ayrıca sabit pay verilir. */
+/** Saatlik makul kazanç tavanları; channel hızıyla çarpılır. Sıçramalar için ayrıca pay verilir. */
 const GROWTH = {
   resourcePerHour: 20_000,
   resourceBurst: 50_000,
@@ -75,7 +83,36 @@ const GROWTH = {
   buildingLevelsBurst: 4,
   unitsPerHour: 200,
   unitsBurst: 100,
+  /**
+   * Sadakatin saatlik tavanı. Sadakat yalnızca uygulanan emirlerle yükselir
+   * (bkz. engine/actions.ts, LOYALTY_STEP) ve emirler General turlarından
+   * gelir; tur sayısı `RATE_LIMITS.general` ile saatte 40'la sınırlıdır:
+   * 40 tur × MAX_ACTIONS_PER_TURN emir × .5 puan = saatte 60 puan.
+   */
+  loyaltyPerHour: 60,
 } as const;
+
+/**
+ * SIÇRAMA PAYI ARTIK İSTEK BAŞINA DEĞİL, PENCEREYE BAĞLI.
+ *
+ * Eski kural geçen süreyi bir dakikaya YUVARLIYORDU: iki kayıt arasında 5
+ * saniye geçse bile pay tam ödeniyordu (hız 1'de 50.333, hız 24'te 58.000
+ * altın — KAYIT BAŞINA). İstemci 5 saniyede bir kaydediyor ama bu kısıt
+ * tamamen istemcideydi; saniyede 10 kayıt atan bir betik saniyede yarım
+ * milyon altın basıyor ve iki denetim de "geçti" diyordu.
+ *
+ * Yeni kural: pay, geçen süreyle ORANTILI olarak birikir ve BURST_WINDOW_MS
+ * dolduğunda tamamlanır. İzin böylece tamamen süreye bağlı bir doğru olur;
+ * aynı süreyi kaç isteğe böldüğünüz toplam izni DEĞİŞTİRMEZ. 12 kayıt × 5
+ * saniye, 1 kayıt × 60 saniye ile aynı payı verir.
+ *
+ * Taban yine de sıfır değil: `previousUpdatedAt` veritabanı saatinden,
+ * `now` uygulama saatinden gelir. İkisi arasındaki küçük kayma pencereyi
+ * negatife düşürüp meşru kaydı reddetmesin diye istemcinin kendi kayıt
+ * aralığı (5 sn) taban kabul edilir.
+ */
+const GROWTH_MIN_WINDOW_MS = 5_000;
+const BURST_WINDOW_MS = 60_000;
 
 /** İstemci saatinin sunucudan ileri olmasına verilen tolerans. */
 const CLOCK_SKEW_MS = 5 * 60_000;
@@ -160,9 +197,10 @@ export const gameSaveSchema = z.object({
   strategyNote: z.string().max(300).optional(),
   startingReserveGranted: z.boolean().optional(),
   // Halk sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
-  foodRation: finite(200).optional(),
-  aleRation: finite(200).optional(),
-  soldierPay: finite(200).optional(),
+  // Üst sınırlar motorun kendi sınırlarından TÜRETİLİR (engine/populace.ts).
+  foodRation: finite(CAPS.ration).optional(),
+  aleRation: finite(CAPS.ration).optional(),
+  soldierPay: finite(CAPS.ration).optional(),
   soldierUnrest: finite(100).optional(),
   mineWorkers: finite(CAPS.population).optional(),
   peopleJoined: finite(1e9).optional(),
@@ -170,6 +208,11 @@ export const gameSaveSchema = z.object({
   migrationDrift: z.number().finite().optional(),
   lastSettlerCallAt: z.number().finite().optional(),
   marketVolume: finite(1e7).optional(),
+  /**
+   * Açık pazar teklifleri. `gold` alanı BURADA yalnızca tip taşmasına karşı
+   * kısıtlıdır; asıl denetim `checkMarketOrders` içindedir — şemada dar bir
+   * sınır, eski kayıtlardaki meşru teklifleri de reddederdi.
+   */
   marketOrders: z.array(z.object({
     id: z.string().min(1).max(80),
     resource: z.enum(["gold", "food", "stone", "wood", "iron", "ale"]),
@@ -197,7 +240,7 @@ export const gameSaveSchema = z.object({
   ).strict().optional(),
   lastSpoilNoticeAt: z.number().finite().optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
-  watchRatio: finite(100).optional(),
+  watchRatio: finite(CAPS.watchRatio).optional(),
   lastRaidAt: timestamp.optional(),
   raidsRepelled: finite(1_000_000).optional(),
   raidsSuffered: finite(1_000_000).optional(),
@@ -261,6 +304,84 @@ function checkFirstSave(game: GameSave, channelSpeed: number): ValidationFailure
   if (game.buildings.length > starting.buildings + 3) return fail(409, "İlk kayıt başlangıç yapılarını aşamaz.");
   if (game.buildings.some(building => building.level > 2)) return fail(409, "İlk kayıtta yapı seviyesi 2'yi aşamaz.");
   if (totalUnits(game.units) > 50) return fail(409, "İlk kayıtta ordu mevcudu geçersiz.");
+  // Yeni krallıkta Pazar yoktur (Kale Sv.2 ister); ilk kayıtta duran bir teklif
+  // ancak uydurmadır ve karşılaştıracak önceki kayıt olmadığı için ölçülemez.
+  if (ordersOf(game).length > 0) return fail(409, "İlk kayıtta açık pazar teklifi olamaz.");
+  return null;
+}
+
+type StoredOrder = NonNullable<GameSave["marketOrders"]>[number];
+
+const ordersOf = (save: GameSave): readonly StoredOrder[] => save.marketOrders ?? [];
+
+/** İki kayıt arasında YENİ açılmış teklifler; eskiden duranlar bir kez ölçüldü. */
+function freshOrders(game: GameSave, previous: GameSave): StoredOrder[] {
+  const known = new Set(ordersOf(previous).map(order => order.id));
+  return ordersOf(game).filter(order => !known.has(order.id));
+}
+
+/** Bir defter hareketi toplamı: {kaynak → miktar}. */
+function tally(entries: Array<{ key: Key; amount: number }>): Partial<Record<Key, number>> {
+  const total: Partial<Record<Key, number>> = {};
+  for (const entry of entries) total[entry.key] = (total[entry.key] ?? 0) + entry.amount;
+  return total;
+}
+
+/**
+ * PAZAR TEKLİFLERİ — "kaynak yaratan tek yol tick üretimidir" varsayımının
+ * yeniden doğru olduğu yer.
+ *
+ * Teklifin altını istemcide hesaplanıp kayda yazılıyor ve `tick()` teklif
+ * kapanınca o sayıyı sorgusuz hazineye ekliyor (bkz. engine/tick.ts). Sunucu
+ * bunu şöyle kapatır:
+ *
+ *  1. Her teklifin bedeli fiyat modelinin KENDİ tavan/tabanına vurulur
+ *     (`orderGoldBounds`). Sınır emrin ne zaman verildiğinden bağımsız
+ *     olduğu için hâlihazırda açık duran meşru teklifler de geçer.
+ *  2. Bekleyen bir teklif SONRADAN DEĞİŞTİRİLEMEZ: bir kez ölçülen teklifin
+ *     altını, miktarı ya da kapanma anı ikinci kayıtta oynatılamaz.
+ *  3. Yeni teklifin veriliş anı bu kayıt aralığının içinde olmalı ve motorun
+ *     verdiği süreden (`marketDuration`) önce kapanamaz — "anında kapanan"
+ *     teklifle ödeme öne çekilemesin.
+ *
+ * Teklifin peşinatının gerçekten ödendiği ise `checkAgainstSimulation` içinde
+ * doğrulanır: ödemesiz teklif, kaynak tavanını kendi bedeli kadar düşürür.
+ */
+function checkMarketOrders(game: GameSave, previous: GameSave, now: number): ValidationFailure | null {
+  const kept = new Map(ordersOf(previous).map(order => [order.id, order]));
+  const seen = new Set<string>();
+  for (const order of ordersOf(game)) {
+    if (seen.has(order.id)) return fail(409, "Aynı pazar teklifi kayıtta iki kez duramaz.");
+    seen.add(order.id);
+    if (order.resource === "gold") return fail(409, "Altın pazarda mal değildir; böyle bir teklif verilemez.");
+
+    const bounds = orderGoldBounds(order.resource, order.amount, order.direction);
+    // Yalnızca istemcinin İŞİNE YARAYAN yön kapatılır: satışta fazla alacak,
+    // alışta eksik ödeme. Ters yön oyuncunun kendi zararıdır ve yuvarlama
+    // (satışta floor, alışta ceil) da hep bu güvenli yöne çalışır.
+    if (order.direction === "sell" && order.gold > bounds.max) {
+      return fail(409, "Pazar satışının getirisi fiyat modelinin tavanını aşıyor.");
+    }
+    if (order.direction === "buy" && order.gold < bounds.min) {
+      return fail(409, "Pazar alımının bedeli fiyat modelinin tabanının altında.");
+    }
+
+    const before = kept.get(order.id);
+    if (before) {
+      if (before.resource !== order.resource || before.direction !== order.direction
+        || before.amount !== order.amount || before.gold !== order.gold
+        || before.placedAt !== order.placedAt || before.completesAt !== order.completesAt) {
+        return fail(409, "Bekleyen pazar teklifi sonradan değiştirilemez.");
+      }
+      continue;
+    }
+    if (order.placedAt < previous.lastTickAt - CLOCK_SKEW_MS || order.placedAt > now + CLOCK_SKEW_MS) {
+      return fail(409, "Pazar teklifinin veriliş zamanı bu kayıt aralığının dışında.");
+    }
+    if (order.completesAt < order.placedAt + marketDuration(order.amount, game.speed) * 60_000) {
+      return fail(409, "Pazar teklifi motorun verdiği süreden erken kapanamaz.");
+    }
+  }
   return null;
 }
 
@@ -278,13 +399,17 @@ function checkFirstSave(game: GameSave, channelSpeed: number): ValidationFailure
  * kalır. Bu meşru bir sonuçtur, hile değildir; tavanı yağmasız üretim eğrisine
  * göre kurarız, böylece sınır yine üretimle çizilir.
  */
-function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number): ValidationFailure | null {
-  const horizon = Math.max(now, previous.lastTickAt);
-  const simulated = tick(previous as Game, horizon);
+function checkAgainstSimulation(game: GameSave, previous: GameSave, simulated: Game, horizon: number): ValidationFailure | null {
   const looted = resolveRaids(previous as Game, previous.lastTickAt, horizon, previous.resources);
   const loot: Partial<Record<(typeof RESOURCE_KEYS)[number], number>> = { food: looted.foodStolen, gold: looted.goldStolen };
+  // Bu pencerede açılan teklifin peşinatı tavandan DÜŞÜLÜR. Sunucunun
+  // simülasyonu o tekliften habersizdir (teklif `previous`'ta yoktu), yani
+  // ödemesi yapılmamış uydurma bir teklif tavanı olduğu gibi bırakırdı ve
+  // hiç sahip olunmayan 1.000.000 demir "satılıp" hazineye altın yazılırdı.
+  const spent = tally(freshOrders(game, previous).map(orderCost));
   for (const key of RESOURCE_KEYS) {
-    const ceiling = (simulated.resources[key] + (loot[key] ?? 0)) * (1 + SIMULATION_TOLERANCE) + SIMULATION_FLOOR;
+    const produced = Math.max(0, simulated.resources[key] + (loot[key] ?? 0) - (spent[key] ?? 0));
+    const ceiling = produced * (1 + SIMULATION_TOLERANCE) + SIMULATION_FLOOR;
     if (game.resources[key] > ceiling) {
       return fail(409, `Bildirilen ${key} miktarı sunucunun ürettiği değerin üzerinde.`);
     }
@@ -300,13 +425,21 @@ function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number)
 
 /** İki kayıt arasındaki artışın, geçen süre ve channel hızıyla açıklanabilir olduğunu doğrular. */
 function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, channelSpeed: number): ValidationFailure | null {
-  // Sunucu saatine göre geçen süre; en az bir dakikalık pay tanınır.
-  const hours = Math.max(elapsedMs, 60_000) / 3_600_000, speed = Math.max(1, channelSpeed);
-  const allow = (perHour: number, burst: number) => perHour * hours * speed + burst;
+  // Sunucu saatine göre geçen süre. Sıçrama payı da SÜREYE bağlıdır: aynı
+  // süreyi kaç isteğe bölerseniz bölün toplam izin değişmez (bkz. yukarıda).
+  const span = Math.max(elapsedMs, GROWTH_MIN_WINDOW_MS);
+  const hours = span / 3_600_000, speed = Math.max(1, channelSpeed);
+  const burstShare = Math.min(1, span / BURST_WINDOW_MS);
+  const allow = (perHour: number, burst: number) => perHour * hours * speed + burst * burstShare;
+  // Bekleyen teklifin getireceği yük bu doğrunun dışındadır: bedeli verildiği
+  // anda ölçüldü (checkMarketOrders) ve kapanışı tek kalemde düşer. Payı
+  // pencereye bağlarken bunu tanımasaydık, Sv.5 Pazarın kapanan teklifi
+  // meşru oyuncunun kaydını 409'lardı.
+  const owed = tally(ordersOf(previous).map(orderPayout));
 
   for (const key of RESOURCE_KEYS) {
     const gain = game.resources[key] - previous.resources[key];
-    if (gain > allow(GROWTH.resourcePerHour, GROWTH.resourceBurst)) {
+    if (gain > allow(GROWTH.resourcePerHour, GROWTH.resourceBurst) + (owed[key] ?? 0)) {
       return fail(409, `Kaynak artışı (${key}) geçen sürede mümkün değil.`);
     }
   }
@@ -321,6 +454,53 @@ function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, chan
   }
   if (game.foundedAt !== previous.foundedAt) return fail(409, "Kuruluş zamanı değiştirilemez.");
   return null;
+}
+
+/**
+ * SUNUCUNUN TÜRETTİĞİ ALANLAR — istemcinin bildirdiği değer YOK SAYILIR.
+ *
+ * `checkAgainstSimulation` yalnızca kaynak ve nüfus karşılaştırıyordu; itibar,
+ * rıza ve sadakat şemada sadece üst sınırla duruyordu. Sonucu somuttu: haraç
+ * ihlalinin cezası (itibar 50 → 30) bir sonraki kayıtta `reputation: 100`
+ * yazılarak siliniyor, `watchRatio: 100` bedava nöbet veriyordu.
+ *
+ * Kayıt REDDEDİLMEZ, alan ÜZERİNE YAZILIR: oyuncu ilerlemesini kaybetmesin
+ * diye. Alanlar üç sınıfa ayrılır:
+ *
+ *  1. Tamamen sunucunun: `reputation` (yalnızca app/api/cron yazar) ve
+ *     `soldierUnrest` (yalnızca `tick()` türetir) — doğrudan simülasyondan.
+ *  2. Simülasyon + tanınmış pay: `popularity`. `tick()` dışında YALNIZCA
+ *     şenlik sıçratır (engine/actions.ts, FESTIVAL.mood) ve bir General
+ *     turunda en çok MAX_ACTIONS_PER_TURN şenlik yapılabilir; pay budur.
+ *     `loyalty` da öyle: uygulanan emirle yükselir, tavanı saatlik hızdır ve
+ *     tek turun payı (MAX_ACTIONS_PER_TURN × LOYALTY_STEP.success) korunur.
+ *  3. Kralın meşru ayarları: `taxRate`, istihkaklar, `watchRatio`. Bunlar
+ *     emirlerle değişir; körlemesine ezilmez, yalnızca MOTORUN KENDİ
+ *     kıskaçlarından geçirilir (clampPolicy/clampRation/clampWatch).
+ *
+ * `capacity` de türetilmiştir: kaydın kendi binalarından yeniden hesaplanır.
+ * Şişirilmiş kapasite bir sonraki kaydın nüfus tavanını yükseltiyordu.
+ */
+function serverDerived(game: GameSave, previous: GameSave | null, simulated: Game | null, elapsedMs: number): GameSave {
+  const hours = Math.max(0, elapsedMs) / 3_600_000;
+  const optional = (value: number | undefined, clamp: (input: number) => number) =>
+    value === undefined ? undefined : clamp(value);
+  const loyaltyAllowance = Math.max(LOYALTY_STEP.success * MAX_ACTIONS_PER_TURN, GROWTH.loyaltyPerHour * hours);
+  return {
+    ...game,
+    reputation: simulated ? simulated.reputation : STARTING_REPUTATION,
+    popularity: simulated
+      ? Math.min(game.popularity, simulated.popularity + FESTIVAL.mood * MAX_ACTIONS_PER_TURN)
+      : game.popularity,
+    loyalty: previous ? Math.min(game.loyalty, previous.loyalty + loyaltyAllowance) : game.loyalty,
+    soldierUnrest: simulated ? simulated.soldierUnrest : game.soldierUnrest,
+    capacity: capacityFor(game.buildings),
+    taxRate: clampPolicy("taxRate", game.taxRate),
+    foodRation: optional(game.foodRation, clampRation),
+    aleRation: optional(game.aleRation, clampRation),
+    soldierPay: optional(game.soldierPay, clampRation),
+    watchRatio: optional(game.watchRatio, clampWatch),
+  };
 }
 
 export type ValidateOptions = {
@@ -351,19 +531,27 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
   if (!options.previous) {
     const firstFailure = checkFirstSave(game, options.channelSpeed);
     if (firstFailure) return firstFailure;
-    return { ok: true, game };
+    return { ok: true, game: serverDerived(game, null, null, 0) };
   }
 
+  // Pazar teklifleri önce: kapanışta hazineye ne gireceğini bu denetim ölçer,
+  // aşağıdaki iki denetim de o ölçüye dayanır.
+  const marketFailure = checkMarketOrders(game, options.previous, now);
+  if (marketFailure) return marketFailure;
+
+  const elapsed = options.previousUpdatedAt !== null ? now - options.previousUpdatedAt : 0;
   // Önceki kaydın sunucu zaman damgası okunamıyorsa büyüme denetimini atlarız;
   // yapı ve tavan denetimleri yine de uygulanmış olur.
   if (options.previousUpdatedAt !== null) {
-    const growthFailure = checkGrowth(game, options.previous, now - options.previousUpdatedAt, options.channelSpeed);
+    const growthFailure = checkGrowth(game, options.previous, elapsed, options.channelSpeed);
     if (growthFailure) return growthFailure;
   }
   // Kaba tavanlardan sonra dar kontrol: sunucunun kendi simülasyonu.
-  const simulationFailure = checkAgainstSimulation(game, options.previous, now);
+  const horizon = Math.max(now, options.previous.lastTickAt);
+  const simulated = tick(options.previous as Game, horizon);
+  const simulationFailure = checkAgainstSimulation(game, options.previous, simulated, horizon);
   if (simulationFailure) return simulationFailure;
-  return { ok: true, game };
+  return { ok: true, game: serverDerived(game, options.previous, simulated, elapsed) };
 }
 
 /**
