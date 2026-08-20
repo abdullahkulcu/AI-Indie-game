@@ -34,6 +34,16 @@ export const catalog = [
  * liste kataloğdan sapıyordu: Ambar, Depo, Park, Bira Evi, Evlilik Dairesi ve
  * Tiyatro araç şemasında hiç yoktu, yani Kral isteyince kurulamıyordu.
  */
+/**
+ * Channel hızının malzeme maliyetine ve DEPO TAVANINA çarpanı: hız neyse o.
+ *
+ * Hız 24 olan channel'da saatte 24 kat kaynak birikir, dolayısıyla seviye de
+ * 24 kat pahalıdır. Ama tavan ölçeklenmezse oyun KİLİTLENİR: Depo Sv.2 için
+ * 4.884 odun gerekiyor, tavan 3.700 tutuyor — gereken miktar hiçbir zaman
+ * biriktirilemez. Maliyet ve tavan aynı çarpanı paylaşmak zorundadır.
+ */
+export const materialScaleOf = (speed: number) => Math.max(1, Number(speed) || 1);
+
 export const BUILDABLE_TYPES: string[] = ["keep", ...catalog.map(item => item.type)];
 
 /**

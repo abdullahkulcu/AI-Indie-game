@@ -1,3 +1,4 @@
+import { materialScaleOf } from "./catalog";
 import type { Game, Key, Res } from "./types";
 
 /**
@@ -39,14 +40,17 @@ export function levelOf(game: Pick<Game, "buildings">, type: string) {
 }
 
 /** Her kaynağın tavanı. 0 dönen kaynakta tavan yoktur. */
-export function storageCaps(game: Pick<Game, "buildings">): Res {
+export function storageCaps(game: Pick<Game, "buildings" | "speed">): Res {
   const granary = levelOf(game, "granary");
   const warehouse = levelOf(game, "warehouse");
+  // Tavan, maliyetle AYNI channel çarpanını kullanır. Kullanmazsa oyun kilitlenir:
+  // yükseltmenin bedeli tavanın üstünde kalır ve hiçbir zaman biriktirilemez.
+  const scale = materialScaleOf(game.speed);
   return {
-    food: BASE.food + granary * PER_LEVEL.food,
-    ale: BASE.ale + granary * PER_LEVEL.ale,
-    wood: BASE.wood + warehouse * PER_LEVEL.wood,
-    stone: BASE.stone + warehouse * PER_LEVEL.stone,
+    food: (BASE.food + granary * PER_LEVEL.food) * scale,
+    ale: (BASE.ale + granary * PER_LEVEL.ale) * scale,
+    wood: (BASE.wood + warehouse * PER_LEVEL.wood) * scale,
+    stone: (BASE.stone + warehouse * PER_LEVEL.stone) * scale,
     // 0 = tavan yok.
     gold: 0,
     iron: 0,

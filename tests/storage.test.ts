@@ -1,12 +1,22 @@
-import type { Game } from "../engine/types";
-import { tick } from "../engine/tick";
+import { buildOptions, tick } from "../engine/tick";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SPOIL_RATE, applySpoilage, fillRatio, storageCaps } from "../engine/storage";
-import type { Res } from "../engine/types";
+import type { Game, Key, Res } from "../engine/types";
 
-const keepOnly = { buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 1 }] };
+const T0 = 1_800_000_000_000;
+/** Kilitlenme testi için taban krallık; adı base değil çünkü o ad test içinde yerel olarak kullanılıyor. */
+const fixture = {
+  version: 2, kingdomName: "D", rulerName: "A", channel: "Standart Sezon I", channelId: "standard",
+  speed: 1, terrain: "plain", foundedAt: T0, lastTickAt: T0, protectionEndsAt: T0,
+  resources: { gold: 0, food: 0, stone: 0, wood: 0, iron: 0, ale: 0 },
+  population: 100, capacity: 150, popularity: 50, reputation: 50, loyalty: 75, taxRate: 15,
+  units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
+};
+
+const keepOnly = { speed: 1, buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 1 }] };
 const stocked = {
+  speed: 1,
   buildings: [
     { type: "keep", name: "Kale", category: "Yönetim", level: 3 },
     { type: "granary", name: "Ambar", category: "Ekonomi", level: 4 },
@@ -28,7 +38,7 @@ test("ambar yiyecek ve birayı, depo odun ve taşı büyütür", () => {
 });
 
 test("ambar odunu, depo yiyeceği büyütmez", () => {
-  const onlyGranary = storageCaps({ buildings: [{ type: "keep", name: "K", category: "Y", level: 1 }, { type: "granary", name: "A", category: "E", level: 5 }] });
+  const onlyGranary = storageCaps({ speed: 1, buildings: [{ type: "keep", name: "K", category: "Y", level: 1 }, { type: "granary", name: "A", category: "E", level: 5 }] });
   assert.equal(onlyGranary.wood, storageCaps(keepOnly).wood, "ambar odun deposu değildir");
 });
 
@@ -103,4 +113,36 @@ test("depo taşması defteri doldurmaz", () => {
   for (let i = 1; i <= 40; i++) game = tick(game, T0 + i * 2000);
   const spam = game.notices.filter(notice => notice.kind === "AMBAR").length;
   assert.ok(spam <= 1, `40 adımda en fazla bir uyarı olmalı, ölçülen: ${spam}`);
+});
+
+test("hiçbir channel hızında yükseltme tavanın üstünde kalmaz", () => {
+  // KİLİTLENME TESTİ. Malzeme maliyeti channel hızıyla çarpılıyor; tavan
+  // çarpılmazsa gereken miktar hiçbir zaman biriktirilemez. Kralın hız 24
+  // channel'ında Depo Sv.2 için 4.884 odun gerekiyordu, tavan 3.700 tutuyordu.
+  for (const speed of [1, 4, 24]) {
+    const game = {
+      ...fixture, speed,
+      buildings: [
+        { type: "keep", name: "Kale", category: "Yönetim", level: 6 },
+        { type: "granary", name: "Ambar", category: "Ekonomi", level: 6 },
+        { type: "warehouse", name: "Depo", category: "Ekonomi", level: 6 },
+      ],
+    } as unknown as Game;
+    const caps = storageCaps(game);
+    for (const option of buildOptions(game)) {
+      for (const [key, amount] of Object.entries(option.cost) as Array<[Key, number]>) {
+        const cap = caps[key];
+        if (!(cap > 0)) continue; // altın ve demirin tavanı yok
+        assert.ok(amount <= cap,
+          `hız ${speed}: ${option.type} Sv.${option.nextLevel} için ${key} ${amount} gerekiyor ama tavan ${Math.round(cap)}`);
+      }
+    }
+  }
+});
+
+test("tavan channel hızıyla ölçeklenir", () => {
+  const slow = storageCaps({ speed: 1, buildings: [{ type: "warehouse", name: "D", category: "E", level: 1 }] });
+  const fast = storageCaps({ speed: 24, buildings: [{ type: "warehouse", name: "D", category: "E", level: 1 }] });
+  assert.equal(fast.wood, slow.wood * 24);
+  assert.equal(fast.gold, 0, "altının tavanı yine yok");
 });

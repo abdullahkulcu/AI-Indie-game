@@ -1,4 +1,5 @@
-import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, resourceLabels, terrainCatalog } from "./catalog";
+export { materialScaleOf } from "./catalog";
+import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
@@ -42,16 +43,7 @@ export const costFor = (base: Partial<Res>, level: number, materialScale = 1): P
     return [key, Math.ceil((value ?? 0) * Math.pow(growth, level) * (material ? materialScale : 1))];
   })) as Partial<Res>;
 
-/**
- * Channel hızının malzeme maliyetine çarpanı: hız neyse o.
- *
- * Hız 24 olan channel'da saatte 24 kat kaynak birikir, dolayısıyla seviye de
- * 24 kat pahalıdır — yoksa yüksek seviyeler o channel'da bedava olur. Bu
- * çarpan ARAYÜZDE GÖSTERİLMEK zorundadır; gösterilmediğinde Kral panelde
- * ölçeklenmemiş rakamı görüp emir veriyor, General ölçeklenmişe göre itiraz
- * ediyordu.
- */
-export const materialScaleOf = (speed: number) => Math.max(1, Number(speed) || 1);
+
 
 /**
  * Kurulabilecek/yükseltilebilecek yapıların listesi: ad, sıradaki seviye, süre
@@ -233,7 +225,7 @@ export function tick(g: Game, now: number): Game {
 
   // Depo tavanı: aşan stok saatte bir oranla bozulur. Anında kırpılmaz ki Kral
   // depo kurmaya ya da Pazarda satmaya vakit bulsun.
-  const caps = storageCaps({ buildings });
+  const caps = storageCaps({ buildings, speed: g.speed });
   const spoiled = applySpoilage(resources, caps, hours);
   resources = spoiled.resources;
   const spoiledEntries = (Object.entries(spoiled.lost) as Array<[Key, number]>).filter(([, amount]) => amount >= 1);
