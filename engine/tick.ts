@@ -1,4 +1,4 @@
-import { catalog, resourceLabels, terrainCatalog } from "./catalog";
+import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, resourceLabels, terrainCatalog } from "./catalog";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
@@ -42,8 +42,44 @@ export const costFor = (base: Partial<Res>, level: number, materialScale = 1): P
     return [key, Math.ceil((value ?? 0) * Math.pow(growth, level) * (material ? materialScale : 1))];
   })) as Partial<Res>;
 
-/** Channel hızı malzeme maliyetini ölçekler; hız 1 iken çarpan 1'dir. */
+/**
+ * Channel hızının malzeme maliyetine çarpanı: hız neyse o.
+ *
+ * Hız 24 olan channel'da saatte 24 kat kaynak birikir, dolayısıyla seviye de
+ * 24 kat pahalıdır — yoksa yüksek seviyeler o channel'da bedava olur. Bu
+ * çarpan ARAYÜZDE GÖSTERİLMEK zorundadır; gösterilmediğinde Kral panelde
+ * ölçeklenmemiş rakamı görüp emir veriyor, General ölçeklenmişe göre itiraz
+ * ediyordu.
+ */
 export const materialScaleOf = (speed: number) => Math.max(1, Number(speed) || 1);
+
+/**
+ * Kurulabilecek/yükseltilebilecek yapıların listesi: ad, sıradaki seviye, süre
+ * ve MALİYET. Tek kaynak olması şart — panel maliyeti bir yerde, General'in
+ * bağlamı başka yerde hesapladığında ikisi saptı: Kral panelde 204 taş görüp
+ * emri verdi, General 4.884 taşa göre itiraz etti.
+ */
+export type BuildOption = { type: string; name: string; nextLevel: number; seconds: number; cost: Partial<Res> };
+
+export function buildOptions(g: Game): BuildOption[] {
+  const level = keep(g), scale = materialScaleOf(g.speed);
+  const options: BuildOption[] = catalog.filter(item => item.unlock <= level).map(item => {
+    const current = g.buildings.find(building => building.type === item.type)?.level ?? 0;
+    return {
+      type: item.type, name: item.name, nextLevel: current + 1,
+      seconds: Math.round(item.seconds / g.speed),
+      cost: costFor(item.cost, current, scale),
+    };
+  });
+  if (level < MAX_KEEP_LEVEL) {
+    options.unshift({
+      type: "keep", name: "Kale", nextLevel: level + 1,
+      seconds: Math.round(keepSeconds[level] / g.speed),
+      cost: keepUpgradeCosts[level],
+    });
+  }
+  return options;
+}
 
 /**
  * Yapıların bakımı: üretimin bu payı kereste ve taş ocağının kendi onarımına,

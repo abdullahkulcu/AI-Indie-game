@@ -1,7 +1,8 @@
+import { keepUpgradeCosts } from "../engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { UPKEEP, costFor, grossRates, keep, materialScaleOf, rates, tick } from "../engine/tick";
+import { UPKEEP, buildOptions, costFor, grossRates, keep, materialScaleOf, rates, tick } from "../engine/tick";
 import { marketDuration } from "../engine/actions";
 import type { Game } from "../engine/types";
 
@@ -339,4 +340,26 @@ test("hızlandırılan iş kuyruk süresi dolunca normal biter", () => {
   const after = tick(hastened, T0 + 1_800_000);
   assert.equal(after.queue, null);
   assert.equal(after.buildings.find(b => b.type === "quarry")?.level, 1);
+});
+
+test("malzeme çarpanı channel hızının kendisidir", () => {
+  // Kral kararı: çarpan yumuşatılmasın, hız neyse o olsun — ama arayüzde
+  // görünsün. Panel ölçeklenmemiş rakam gösterip General ölçeklenmişe göre
+  // itiraz ettiğinde Kral 204 taş görüp %157 uyarısı alıyordu.
+  assert.equal(materialScaleOf(1), 1);
+  assert.equal(materialScaleOf(4), 4);
+  assert.equal(materialScaleOf(24), 24);
+  assert.equal(materialScaleOf(0.5), 1, "hız 1'in altına düşse de maliyet azalmaz");
+});
+
+test("inşa maliyeti tek kaynaktan gelir", () => {
+  // Panel ile General'in bağlamı ayrı ayrı hesapladığında saptı; ikisi de
+  // buildOptions okumak zorunda.
+  const fast = newGame({ speed: 24, buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 4 }] });
+  const options = buildOptions(fast);
+  const warehouse = options.find(option => option.type === "warehouse")!;
+  assert.equal(warehouse.nextLevel, 1);
+  assert.deepEqual(warehouse.cost, costFor({ wood: 110, stone: 110 }, 0, materialScaleOf(24)));
+  // Kale ayrı tarifeden gelir ve çarpanla büyümez.
+  assert.deepEqual(options.find(option => option.type === "keep")?.cost, keepUpgradeCosts[4]);
 });
