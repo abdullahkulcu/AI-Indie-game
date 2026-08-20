@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BUILDABLE_TYPES } from "../engine/catalog";
 import { resolveRaids } from "../engine/raids";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
@@ -11,11 +12,15 @@ import type { Game } from "../engine/types";
  * engellemez ama "bir milyar altın" sınıfı hileleri keser.
  */
 
-export const BUILDING_TYPES = [
-  "keep", "wheat_farm", "lumberjack", "quarry", "town_square",
-  "barracks", "apple_orchard", "mill", "market", "wall", "mine",
-  "park", "brewery", "marriage_hall", "theater",
-] as const;
+/**
+ * Kabul edilen bina türleri. KATALOGDAN TÜRETİLİR.
+ *
+ * Elle yazıldığında kataloğdan saptı ve sonucu ağırdı: listede olmayan bir bina
+ * kuran oyuncunun kaydı sunucuda TAMAMEN reddediliyordu. Kral Ambar kurdu,
+ * kaydı reddedildi, istemci sunucudaki eski kopyayı aldı ve bina "kaybolmuş"
+ * göründü. Depo'nun seviye atlaması da aynı sebeple hiç kalıcı olmadı.
+ */
+export const BUILDING_TYPES: readonly string[] = BUILDABLE_TYPES;
 
 export const RESOURCE_KEYS = ["gold", "food", "stone", "wood", "iron", "ale"] as const;
 
@@ -81,7 +86,10 @@ const resourcesSchema = z.object(
 ).strict();
 
 const buildingSchema = z.object({
-  type: z.enum(BUILDING_TYPES),
+  // z.enum sabit bir demet ister; katalogdan türetilen liste için refine kullanılır.
+  type: z.string().min(1).max(40).refine(value => BUILDING_TYPES.includes(value), {
+    message: "Bilinmeyen bina türü.",
+  }),
   name: z.string().min(1).max(60),
   category: z.string().min(1).max(40),
   level: z.number().int().min(1).max(CAPS.buildingLevel),
