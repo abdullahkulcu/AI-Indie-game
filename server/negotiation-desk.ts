@@ -66,7 +66,10 @@ export async function displayNameOf(userId: string, channelName: string) {
 /** Masaları modele gösterilecek özete çevirir; sıra numaraları listeyle aynıdır. */
 export async function briefsFor(userId: string, channelId: string, channelName: string): Promise<TableBrief[]> {
   const desk = await loadTablesFor(userId, channelId);
+  // Kendi krallığımızın adı; General bunu bilmezse imzalayacak isim bulamıyor.
+  const own = await displayNameOf(userId, channelName);
   return Promise.all(desk.map(async (row, index) => briefTable({
+    own,
     negotiation: row.negotiation,
     messages: row.messages,
     side: row.side,

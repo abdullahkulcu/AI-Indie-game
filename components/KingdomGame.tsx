@@ -184,7 +184,7 @@ async function openNegotiation(){
      if(!table){results.push("✕ O sırada açık bir müzakere masası yok.");continue}
      const propose=action.name==="propose_terms";
      const payload=propose
-      ?{action:"propose",negotiationId:table.id,message:String(action.arguments.message??"Şartımız ektedir."),
+      ?{action:"propose",speaker:"general",negotiationId:table.id,message:String(action.arguments.message??"Şartımız ektedir."),
         terms:{topic:table.topic,
           // "us" bizim ödediğimiz demek; taraf adına burada çevrilir.
           payerSide:String(action.arguments.payer??"them")==="us"?table.side:(table.side==="initiator"?"target":"initiator"),
@@ -192,7 +192,7 @@ async function openNegotiation(){
           tributeAmount:Math.floor(Number(action.arguments.amount_per_payment)||0),
           everyHours:Math.floor(Number(action.arguments.every_hours)||6),
           hours:Math.floor(Number(action.arguments.hours)||24)}}
-      :{action:"reply",negotiationId:table.id,message:String(action.arguments.message??"")};
+      :{action:"reply",speaker:"general",negotiationId:table.id,message:String(action.arguments.message??"")};
      const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
      const data=await response.json() as {error?:string};
      results.push(response.ok

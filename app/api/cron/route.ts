@@ -277,7 +277,8 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
     // imzasını bekliyordur ve General onun üstüne yazıp Kralın hiç görmediği
     // teklifi silemez. Model o aracı hiç görmez.
     const canPropose = canProposeTerms(table, side, false, now).ok;
-    const brief = briefTable({ negotiation: table, messages, side, counterpart, ordinal: 1 });
+    const own = await displayNameOf(userId, row.channelName);
+    const brief = briefTable({ negotiation: table, messages, side, counterpart, own, ordinal: 1 });
     const context = {
       bizim_krallik: {
         ad: game.kingdomName,

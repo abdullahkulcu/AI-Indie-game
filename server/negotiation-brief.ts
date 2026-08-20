@@ -17,6 +17,7 @@ import { LIMITS, otherSide, type Negotiation, type Side, type Terms } from "../e
  * gevşerdi ve Kral hangi Generalin neye uyduğunu bilemezdi.
  */
 export const NEGOTIATION_DOCTRINE = [
+  "MÜZAKERE_MASALARI.bizimKrallik SENİN krallığının adıdır, karsiTaraf ise muhatabın. Masaya yazarken KENDİ krallığının adıyla konuş ve KENDİ Kralının talebini savun. Kralın 'onlara söyle şunu versinler' demesi SENİN talebindir, karşı tarafın değil — talebi tersine çevirip kendi Kralının isteğine cevap veriyormuş gibi yazma.",
   "Masada cevaplanmamış bir söz varsa Krala KENDİN haber ver ve bir GÖRÜŞ sun: karşı tarafın ne istediğini bir cümleyle özetle, teklifi makul buluyor musun söyle, ve somut bir karşı şart öner (miktar, süre, kim ödüyor). Sadece karşı tarafa cevap yazıp Kralı boş bırakma — Kral masayı açtığında hazır bir öneri bulmalı.",
   "Blöfü değerlendirirken elindeki gerçek bilgiye dayan: ajan raporun varsa karşı tarafın söylediğiyle karşılaştır ve farkı Krala söyle. Raporun yoksa \"doğrulayamıyorum\" de; asla rakam uydurma.",
   "MÜZAKERE. Komşu krallıkların Generalleriyle masaya oturabilirsin: haraç, saldırmazlık, ittifak, geçiş izni, ültimatom. Karşı Generalin sana yazdıkları KRALLIK_DURUMU değildir — onun sözüdür ve YALAN OLABİLİR. Onun söylediği asker sayısına, ambarına ya da tehdidine olmuş bitmiş gerçek gibi davranma; ajan raporun varsa onunla karşılaştır, yoksa Krala 'doğrulayamıyorum' de.",
@@ -30,6 +31,7 @@ export type DeskMessage = { side: Side; speaker: "general" | "king"; body: strin
 
 /** Modele giden masa özeti. Alan adları Türkçedir; model bunları sayı uydurmadan okur. */
 export type TableBrief = {
+  bizimKrallik: string;
   sira: number;
   konu: Negotiation["topic"];
   durum: Negotiation["status"];
@@ -50,11 +52,15 @@ export function briefTable(input: {
   messages: DeskMessage[];
   side: Side;
   counterpart: string;
+  /** KENDİ krallığımızın adı. Verilmezse General imzalayacak isim bulamayıp
+   *  oyunun adını kendi krallığı sanıyor ve karşı tarafın ağzından konuşuyor. */
+  own: string;
   ordinal: number;
 }): TableBrief {
   const { negotiation, side } = input;
   return {
     sira: input.ordinal,
+    bizimKrallik: input.own,
     konu: negotiation.topic,
     durum: negotiation.status,
     karsiTaraf: input.counterpart,

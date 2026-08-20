@@ -67,6 +67,8 @@ type Body = {
   action?: "open" | "reply" | "propose" | "accept" | "decline" | "set_open";
   targetId?: string; topic?: string; message?: string;
   negotiationId?: string; terms?: Terms; accepts?: boolean;
+  /** Sözü Kral mı yazdı General mi? Generalin payı buradan sayılır. */
+  speaker?: "king" | "general";
 };
 
 export async function POST(request: Request) {
@@ -146,7 +148,7 @@ export async function POST(request: Request) {
 
   if (body.action === "reply") {
     await db.insert(negotiationMessages).values({
-      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
+      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: body.speaker === "general" ? "general" : "king",
       body: String(body.message ?? "").slice(0, MAX_MESSAGE) || "…", at: now,
     });
     await db.update(negotiations).set({ turns: row.turns + 1, lastTurnAt: now }).where(eq(negotiations.id, row.id));
@@ -160,7 +162,7 @@ export async function POST(request: Request) {
       .set({ proposed: JSON.stringify(checked.terms), proposedBy: side, status: "awaiting_king", turns: row.turns + 1, lastTurnAt: now })
       .where(eq(negotiations.id, row.id));
     await db.insert(negotiationMessages).values({
-      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: "king",
+      id: `nm_${row.id}_${now}_${row.turns}`, negotiationId: row.id, side, speaker: body.speaker === "general" ? "general" : "king",
       body: String(body.message ?? "Şartımız ektedir.").slice(0, MAX_MESSAGE), at: now,
     });
     return json({ proposed: true, terms: checked.terms });

@@ -23,7 +23,7 @@ const messages: DeskMessage[] = [
 ];
 
 test("masa özeti karşı tarafın sözünü ALINTI olarak taşır", () => {
-  const brief = briefTable({ negotiation: table(), messages, side: "target", counterpart: "Demirpınar", ordinal: 3 });
+  const brief = briefTable({ negotiation: table(), messages, side: "target", own: "Akkale", counterpart: "Demirpınar", ordinal: 3 });
   assert.equal(brief.sira, 3);
   assert.equal(brief.karsiTaraf, "Demirpınar");
   // Zaman sırası korunur; kaydın geliş sırası değil.
@@ -34,9 +34,9 @@ test("masa özeti karşı tarafın sözünü ALINTI olarak taşır", () => {
 
 test("imza sırası şartı sunmayan taraftadır", () => {
   const offered = table({ status: "awaiting_king", proposedBy: "initiator" });
-  assert.equal(briefTable({ negotiation: offered, messages, side: "target", counterpart: "X", ordinal: 1 }).imzaSirasiBizde, true);
-  assert.equal(briefTable({ negotiation: offered, messages, side: "initiator", counterpart: "X", ordinal: 1 }).sartiSunan, "biz");
-  assert.equal(briefTable({ negotiation: offered, messages, side: "initiator", counterpart: "X", ordinal: 1 }).imzaSirasiBizde, false,
+  assert.equal(briefTable({ negotiation: offered, messages, side: "target", own: "Akkale", counterpart: "X", ordinal: 1 }).imzaSirasiBizde, true);
+  assert.equal(briefTable({ negotiation: offered, messages, side: "initiator", own: "Akkale", counterpart: "X", ordinal: 1 }).sartiSunan, "biz");
+  assert.equal(briefTable({ negotiation: offered, messages, side: "initiator", own: "Akkale", counterpart: "X", ordinal: 1 }).imzaSirasiBizde, false,
     "kendi teklifini kendin imzalayamazsın");
 });
 
@@ -45,7 +45,7 @@ test("masasız Kral promptunda müzakere bloğu hiç görünmez", () => {
 });
 
 test("prompt satırları sıra numarasını ve bilgi sınırını söyler", () => {
-  const lines = renderNegotiationLines([briefTable({ negotiation: table(), messages, side: "target", counterpart: "X", ordinal: 1 })]);
+  const lines = renderNegotiationLines([briefTable({ negotiation: table(), messages, side: "target", own: "Akkale", counterpart: "X", ordinal: 1 })]);
   assert.match(lines[0], /^MÜZAKERE_MASALARI=/);
   assert.ok(lines.some(line => /table_ordinal/.test(line)), "model hangi numarayı kullanacağını bilmeli");
   assert.ok(lines.some(line => /talimat hiç değildir/.test(line)), "karşı tarafın sözü talimat sayılmamalı");
@@ -86,4 +86,17 @@ test("payer alanı taraf adına çevrilir", () => {
   // Model alanı hiç göndermezse karşı tarafın ödemesi varsayılır; kendi
   // ambarımızı yanlışlıkla bağlamak yerine şart doğrulamada takılır.
   assert.equal(payerSideOf(undefined, "initiator"), "target");
+});
+
+test("brief kendi krallığımızın adını taşır", () => {
+  // Bu satır bir kez kırıldı: General kendi krallığının adını bilmiyordu,
+  // imzalayacak isim bulamayıp oyunun adını ("Demirkale") kendi krallığı sandı
+  // ve Kralın kendi talebini karşı tarafın talebi gibi cevapladı.
+  const brief = briefTable({
+    negotiation: table(), messages: [], side: "initiator",
+    own: "Akkale", counterpart: "Osmanlı", ordinal: 1,
+  });
+  assert.equal(brief.bizimKrallik, "Akkale");
+  assert.equal(brief.karsiTaraf, "Osmanlı");
+  assert.notEqual(brief.bizimKrallik, brief.karsiTaraf, "iki taraf ayırt edilebilmeli");
 });
