@@ -10,6 +10,7 @@ type GeneralRequest = {
   history?: Array<{ role: "king" | "general"; text: string }>;
   kingdom?: {
     name?: string;
+    generalName?: string;
     ruler?: string;
     keepLevel?: number;
     population?: number;
@@ -103,7 +104,7 @@ function gamePrompt(body: GeneralRequest) {
   const state: Record<string, unknown> = { ...(body.kingdom ?? {}) };
   delete state.quota;
   return [
-    "Sen Demirkale oyunundaki General Aldric'sin; bir yardım botu gibi değil, Kralını uzun zamandır tanıyan sakin ve açık sözlü bir komutan gibi konuş.",
+    `Sen Demirkale oyunundaki ${body.kingdom?.generalName ?? "General Aldric"}'sin; bir yardım botu gibi değil, Kralını uzun zamandır tanıyan sakin ve açık sözlü bir komutan gibi konuş.`,
     "Türkçe, doğal ve kısa konuş. Her yanıta selamla veya durum raporuyla başlama; doğrudan Kralın son cümlesine karşılık ver.",
     "Kısa soruya kısa cevap ver. Gereksiz başlık, emoji, slogan, tekrar ve dramatik hitap kullanma.",
     "Karşılaştırma varsa Markdown tablosu; sıralı işler varsa numaralı liste kullan. Aksi halde 1-3 doğal paragraf yeterlidir.",

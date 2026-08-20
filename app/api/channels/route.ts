@@ -42,10 +42,31 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "Oturum gerekli." }, { status: 401, headers: noStore });
-  const body = await request.json() as { channelId?: string };
+  const body = await request.json() as { channelId?: string; kingdomName?: string };
   if (!body.channelId) return Response.json({ error: "Channel gerekli." }, { status: 400, headers: noStore });
   const [channel] = await getDb().select().from(channels).where(and(eq(channels.id, body.channelId), eq(channels.status, "active"))).limit(1);
   if (!channel) return Response.json({ error: "Channel aktif değil." }, { status: 404, headers: noStore });
+  // Aynı channel'da aynı isimde iki krallık olmasın: haritada, müzakerede ve
+  // Generalin masa özetinde ayırt edilemiyorlar. Kralın iki hesabının da adı
+  // "Osmanlı" olduğu için karşı tarafın Generali kendi krallığını şaşırdı.
+  const wanted = String(body.kingdomName ?? "").trim();
+  if (wanted) {
+    const rivals = await getDb().select({ gameState: gameSaves.gameState })
+      .from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId))
+      .where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"), ne(channelMembers.userId, user.id)));
+    const fold = (text: string) => text.toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+    const taken = rivals.some(row => {
+      const other = parseStoredSave(row.gameState);
+      return other ? fold(other.kingdomName) === fold(wanted) : false;
+    });
+    if (taken) {
+      return Response.json(
+        { error: `Bu channel'da "${wanted}" adında bir krallık zaten var; başka bir ad seçin.`, nameTaken: true },
+        { status: 409, headers: noStore },
+      );
+    }
+  }
+
   const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(channelMembers).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"), ne(channelMembers.userId, user.id)));
   if (Number(count) >= channel.maxPlayers) return Response.json({ error: "Channel dolu." }, { status: 409, headers: noStore });
   await getDb().update(channelMembers).set({ status: "inactive" }).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.status, "active")));
