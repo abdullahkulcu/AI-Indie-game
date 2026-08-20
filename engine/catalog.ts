@@ -17,8 +17,10 @@ export const catalog = [
   { type: "town_square", name: "Meydan", category: "Yönetim", unlock: 1, seconds: 7200, cost: { wood: 120, stone: 80 }, detail: "+80 nüfus kapasitesi" },
   { type: "barracks", name: "Kışla", category: "Askerî", unlock: 1, seconds: 9000, cost: { wood: 170, stone: 140 }, detail: "Temel birlikleri açar" },
   { type: "apple_orchard", name: "Elma Bahçesi", category: "Ekonomi", unlock: 1, seconds: 4200, cost: { wood: 90, gold: 30 }, detail: "+10 yiyecek/sa" },
+  { type: "granary", name: "Ambar", category: "Ekonomi", unlock: 1, seconds: 4800, cost: { wood: 130, stone: 60 }, detail: "Yiyecek ve bira deposu · seviye başına +2.600 yiyecek" },
+  { type: "warehouse", name: "Depo", category: "Ekonomi", unlock: 1, seconds: 5400, cost: { wood: 110, stone: 110 }, detail: "Odun ve taş deposu · seviye başına +2.200" },
   { type: "mill", name: "Değirmen", category: "Ekonomi", unlock: 2, seconds: 10800, cost: { wood: 100, stone: 120 }, detail: "Buğday zincirini büyütür" },
-  { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "Kaynak alıp satar · seviye başına 500 birim/gün" },
+  { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "Kaynak alıp satar · seviye başına 1.500 birim/gün" },
   { type: "wall", name: "Sur", category: "Askerî", unlock: 3, seconds: 28800, cost: { stone: 500, wood: 100 }, detail: "+%20 savunma" },
   { type: "mine", name: "Maden", category: "Ekonomi", unlock: 1, seconds: 10800, cost: { wood: 150, stone: 80 }, detail: "50.000 cevher rezervi" },
   { type: "park", name: "Park", category: "Halk", unlock: 1, seconds: 3000, cost: { wood: 60, gold: 40 }, detail: "Halkın rızasını yükseltir" },
@@ -26,6 +28,53 @@ export const catalog = [
   { type: "marriage_hall", name: "Evlilik Dairesi", category: "Halk", unlock: 2, seconds: 8400, cost: { wood: 130, stone: 150, gold: 120 }, detail: "Nüfus artışını hızlandırır" },
   { type: "theater", name: "Tiyatro", category: "Halk", unlock: 3, seconds: 16200, cost: { wood: 260, stone: 320, gold: 260 }, detail: "Büyük rıza; bira tüketir" },
 ] as const;
+
+/**
+ * General'in kurabileceği bina türleri. KATALOGDAN TÜRETİLİR — elle yazılan
+ * liste kataloğdan sapıyordu: Ambar, Depo, Park, Bira Evi, Evlilik Dairesi ve
+ * Tiyatro araç şemasında hiç yoktu, yani Kral isteyince kurulamıyordu.
+ */
+/**
+ * Channel hızının malzeme maliyetine ve DEPO TAVANINA çarpanı: hız neyse o.
+ *
+ * Hız 24 olan channel'da saatte 24 kat kaynak birikir, dolayısıyla seviye de
+ * 24 kat pahalıdır. Ama tavan ölçeklenmezse oyun KİLİTLENİR: Depo Sv.2 için
+ * 4.884 odun gerekiyor, tavan 3.700 tutuyor — gereken miktar hiçbir zaman
+ * biriktirilemez. Maliyet ve tavan aynı çarpanı paylaşmak zorundadır.
+ */
+export const materialScaleOf = (speed: number) => Math.max(1, Number(speed) || 1);
+
+export const BUILDABLE_TYPES: string[] = ["keep", ...catalog.map(item => item.type)];
+
+/**
+ * Türkçe adlardan bina türüne eşleşme. Yine kataloğdan türetilir; ek takma
+ * adlar aksansız ve halk arasındaki kullanımlar içindir.
+ */
+const EXTRA_ALIASES: Record<string, string[]> = {
+  keep: ["kale"],
+  wheat_farm: ["bugday tarlasi", "tarla"],
+  lumberjack: ["oduncu kulubesi", "oduncu"],
+  quarry: ["tas ocagi", "ocak"],
+  apple_orchard: ["elma bahcesi", "bahce"],
+  granary: ["ambar", "tahil ambari", "zahire"],
+  warehouse: ["depo", "ambarlik"],
+  mill: ["degirmen"],
+  barracks: ["kisla"],
+  brewery: ["bira evi", "birahane"],
+  marriage_hall: ["evlilik dairesi", "nikah"],
+  theater: ["tiyatro"],
+  town_square: ["meydan"],
+  mine: ["maden"],
+  wall: ["sur"],
+  market: ["pazar"],
+  park: ["park"],
+};
+
+export const buildingAliases: Array<[string, string[]]> = BUILDABLE_TYPES.map(type => {
+  const name = type === "keep" ? "Kale" : catalog.find(item => item.type === type)?.name ?? type;
+  const set = new Set<string>([name.toLocaleLowerCase("tr-TR"), ...(EXTRA_ALIASES[type] ?? [])]);
+  return [type, [...set]];
+});
 
 /** Kale seviyesi başına yükseltme süresi (saniye); index = mevcut seviye. */
 export const keepSeconds = [0, 10800, 28800, 64800, 172800, 388800];

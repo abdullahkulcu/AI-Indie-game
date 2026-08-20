@@ -1,7 +1,8 @@
+import { keepUpgradeCosts } from "../engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { costFor, keep, rates, tick } from "../engine/tick";
+import { UPKEEP, buildOptions, costFor, grossRates, keep, materialScaleOf, rates, tick } from "../engine/tick";
 import { marketDuration } from "../engine/actions";
 import type { Game } from "../engine/types";
 
@@ -27,8 +28,19 @@ test("başlangıç üretim hızları oyunun gösterdiği değerlerle aynı", () 
   const r = rates(newGame());
   assert.equal(Math.round(r.gold * 10) / 10, 3.3);
   assert.equal(Math.round(r.food * 10) / 10, 14.5);
-  assert.equal(Math.round(r.wood * 10) / 10, 22);
+  // Odun brüt 22 üretiyor ama %35 bakıma gidiyor: net 14.3.
+  assert.equal(Math.round(r.wood * 10) / 10, 14.3);
   assert.equal(r.stone, 0);
+});
+
+test("odun ve taşın sürekli gideri var; net brüte eşit değil", () => {
+  // Bu satır bir kez kırıldı: odunun tek gideri inşaattı, yani inşaat durunca
+  // ambar sonsuza kadar büyüyordu ve kaynak anlamsızlaşıyordu.
+  const game = newGame({ buildings: [...newGame().buildings, { type: "quarry", name: "Taş Ocağı", category: "Ekonomi", level: 2 }] });
+  const gross = grossRates(game), net = rates(game);
+  assert.ok(net.wood < gross.wood, "odun bakım yemeli");
+  assert.ok(net.stone < gross.stone, "taş bakım yemeli");
+  assert.equal(Math.round(net.wood * 100) / 100, Math.round(gross.wood * (1 - UPKEEP.wood) * 100) / 100);
 });
 
 test("arazi çarpanları üretime yansır", () => {
@@ -69,9 +81,20 @@ test("tick emir kotası biriktirmez; alan olduğu gibi taşınır", () => {
   assert.equal(after.quotaAt, T0, "kota zamanı da ilerletilmez");
 });
 
-test("maliyet seviyeyle 1.65 kat büyür", () => {
+test("malzeme maliyeti altından daha dik büyür", () => {
   assert.deepEqual(costFor({ wood: 80 }, 0), { wood: 80 });
-  assert.deepEqual(costFor({ wood: 80 }, 1), { wood: 132 });
+  // Odun ve taş 1.85, altın ve yiyecek 1.65: glut olan kaynak yüksek seviyede
+  // gerçek gider olsun, zaten dar olan altın daha da darlaşmasın.
+  assert.deepEqual(costFor({ wood: 80 }, 1), { wood: 148 });
+  assert.deepEqual(costFor({ gold: 80 }, 1), { gold: 132 });
+});
+
+test("hızlı channel malzeme maliyetini büyütür, altını değil", () => {
+  // Hızlı channel'da saatte daha çok odun çıkar; aynı seviye orada da bir
+  // anlam taşısın diye malzeme maliyeti aynı oranda büyür.
+  assert.deepEqual(costFor({ wood: 100, gold: 60 }, 0, materialScaleOf(4)), { wood: 400, gold: 60 });
+  assert.deepEqual(costFor({ wood: 100 }, 0, materialScaleOf(1)), { wood: 100 });
+  assert.equal(materialScaleOf(0.5), 1, "hız 1'in altına düşse de maliyet azalmaz");
 });
 
 test("kale seviyesi binalardan okunur", () => {
@@ -229,8 +252,15 @@ test("satış anında olmaz: mal tezgâha çıkar, para sonra gelir", () => {
   assert.equal(settled.marketOrders?.length, 0, "süresi dolan teklif kapanmalı");
   // Aynı anda, teklifi olmayan bir kopyayla karşılaştır: aradaki fark satışın parasıdır.
   const without = tick({ ...game, marketOrders: [] }, when);
-  assert.equal(Math.round(settled.resources.gold - without.resources.gold), 60);
-  assert.match(settled.notices.find(notice => notice.kind === "PAZAR")!.text, /hazineye girdi/);
+  const paid = Math.round(settled.resources.gold - without.resources.gold);
+  // Hazineye giren, teklifin üstünde yazan rakamın TA KENDİSİ olmalı: fiyat emir
+  // anında bağlanır, kapanışta yeniden pazarlık edilmez.
+  assert.equal(paid, order.gold, "kapanışta ödenen, teklifte yazan altın olmalı");
+  // Fiyat artık sabit tablo değil: 200 odun 100 kişilik halkın odunluğunu
+  // (referans 400) yarı yarıya taşırdığı için birim fiyat taban fiyatın altına
+  // iner. Eski sabit tablo 60 altın verirdi; bolluk indirimi bunu düşürmeli.
+  assert.ok(paid > 0 && paid < 200 * .3, `bolluk fiyatı kırmalı, ölçülen ${paid}`);
+  assert.match(settled.notices.find(notice => notice.kind === "PAZAR")!.text, /hazineye girer|hazineye girdi/);
 });
 
 test("satıp geri almak zarardır: pazar bedava altın basmaz", () => {
@@ -259,8 +289,8 @@ test("yüklü teklif küçük teklife göre daha uzun sürer", () => {
 
 test("günlük pazar hacmi seviyeyle sınırlıdır", () => {
   const trader = newGame({ resources: { gold: 1000, food: 9000, stone: 300, wood: 300, iron: 100, ale: 0 }, buildings: [...newGame().buildings, { type: "market", name: "Pazar", category: "Ekonomi", level: 1 }] });
-  const { results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "food", amount: 800, direction: "sell" } }], T0);
-  assert.match(results[0], /günlük hacmi 500 birim/);
+  const { results } = applyActions(trader, [{ name: "trade_resource", arguments: { resource: "food", amount: 2000, direction: "sell" } }], T0);
+  assert.match(results[0], /günlük hacmi 1500 birim/);
 });
 
 test("ambarda olmayan kaynak satılamaz", () => {
@@ -310,4 +340,26 @@ test("hızlandırılan iş kuyruk süresi dolunca normal biter", () => {
   const after = tick(hastened, T0 + 1_800_000);
   assert.equal(after.queue, null);
   assert.equal(after.buildings.find(b => b.type === "quarry")?.level, 1);
+});
+
+test("malzeme çarpanı channel hızının kendisidir", () => {
+  // Kral kararı: çarpan yumuşatılmasın, hız neyse o olsun — ama arayüzde
+  // görünsün. Panel ölçeklenmemiş rakam gösterip General ölçeklenmişe göre
+  // itiraz ettiğinde Kral 204 taş görüp %157 uyarısı alıyordu.
+  assert.equal(materialScaleOf(1), 1);
+  assert.equal(materialScaleOf(4), 4);
+  assert.equal(materialScaleOf(24), 24);
+  assert.equal(materialScaleOf(0.5), 1, "hız 1'in altına düşse de maliyet azalmaz");
+});
+
+test("inşa maliyeti tek kaynaktan gelir", () => {
+  // Panel ile General'in bağlamı ayrı ayrı hesapladığında saptı; ikisi de
+  // buildOptions okumak zorunda.
+  const fast = newGame({ speed: 24, buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 4 }] });
+  const options = buildOptions(fast);
+  const warehouse = options.find(option => option.type === "warehouse")!;
+  assert.equal(warehouse.nextLevel, 1);
+  assert.deepEqual(warehouse.cost, costFor({ wood: 110, stone: 110 }, 0, materialScaleOf(24)));
+  // Kale ayrı tarifeden gelir ve çarpanla büyümez.
+  assert.deepEqual(options.find(option => option.type === "keep")?.cost, keepUpgradeCosts[4]);
 });

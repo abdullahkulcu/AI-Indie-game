@@ -1,5 +1,5 @@
 import { catalog, keepUpgradeCosts, MAX_KEEP_LEVEL } from "../engine/catalog";
-import { affordable, costFor, keep, rates } from "../engine/tick";
+import { affordable, costFor, keep, materialScaleOf, rates } from "../engine/tick";
 import type { Game } from "../engine/types";
 
 /**
@@ -55,7 +55,7 @@ export function affordableOptions(game: Game): string[] {
   for (const item of catalog) {
     if (item.unlock > level) continue;
     const current = game.buildings.find(b => b.type === item.type)?.level ?? 0;
-    if (affordable(game.resources, costFor(item.cost, current))) options.push(`${item.type}→Sv.${current + 1}`);
+    if (affordable(game.resources, costFor(item.cost, current, materialScaleOf(game.speed)))) options.push(`${item.type}→Sv.${current + 1}`);
   }
   if (game.buildings.some(b => b.type === "barracks")) {
     const cost = { gold: 8 * 5, food: 10 * 5, iron: 5 };

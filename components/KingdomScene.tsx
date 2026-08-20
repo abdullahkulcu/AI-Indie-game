@@ -131,7 +131,9 @@ export default function KingdomScene({
     // Dağda kasaba bir sahanlığın üstünde durur: çevre zemin AŞAĞI iner, kasaba
     // y=0'da kalır. Zemini yukarı kaldırmak düz yapıları (tarla gibi) gömüyordu.
     const groundY=terrain==="mountain"?-2.7:-.08;
-    const ground=disc(94,plan.ground,0,groundY,0); ground.receiveShadow=true;
+    // Zemin 150'ye uzatıldı. 94'te bitince uzaklaşan Kral tabak kenarını ve
+    // arkasındaki dokusuz düz yeşili görüyordu; kenarı artık sis yutuyor.
+    const ground=disc(150,plan.ground,0,groundY,0); ground.receiveShadow=true;
     // Sahanlık kasabaya YER açacak kadar geniş olmalı; dar tutulunca 280 nüfuslu
     // krallık 15 haneye sıkışıyordu.
     if(terrain==="mountain"){const plateau=add(geom("plateau",()=>new THREE.CylinderGeometry(24,27,3.1,48)),mat(plan.region),0,-1.55,0);plateau.receiveShadow=true}
@@ -243,7 +245,7 @@ export default function KingdomScene({
       // aralarda basamak ve dikiş görünüyordu; artık eğriyi takip eden tek bir
       // üçgen şeridi üretilir, yani kıvrım pürüzsüzdür.
       const RIVER_SPAN=220,RIVER_SEGMENTS=110;
-      const ribbon=(width:number,color:number,y:number,glassy?:number)=>{
+      const ribbon=(width:number|((z:number)=>number),color:number,y:number,glassy?:number)=>{
         const {positions,indices}=riverRibbon(riverX,width,RIVER_SPAN,RIVER_SEGMENTS);
         const geometry=new THREE.BufferGeometry();
         geometry.setAttribute("position",new THREE.BufferAttribute(positions,3));
@@ -253,9 +255,32 @@ export default function KingdomScene({
         detail.add(mesh); // Temizlikte scene.traverse geometriyi kendisi bırakır.
         if(glassy!==undefined)water.push({mesh,base:glassy});
       };
-      ribbon(19,0x3f7d8a,.012);
-      ribbon(15,0x2c5f74,.02);
-      ribbon(13,0x8fc7cf,.03,.16);
+      // Nehir mansaba doğru açılır ve denize varır: memba dar, haliç ağzı geniş.
+      const MOUTH_Z=58,SHORE_Z=104;
+      const widen=(base:number)=>(z:number)=>z<MOUTH_Z?base:base*(1+((z-MOUTH_Z)/(SHORE_Z-MOUTH_Z))*2.4);
+      ribbon(widen(19),0x3f7d8a,.012);
+      ribbon(widen(15),0x2c5f74,.02);
+      ribbon(widen(13),0x8fc7cf,.03,.16);
+
+      // Açık deniz: kıyı hattının ötesi. Zemin diski 150'de bittiği için deniz
+      // onun ötesine taşar ve sahne "tabak" gibi bitmez.
+      slab(360,150,0x24506b,riverX(SHORE_Z),.016,SHORE_Z+72);
+      const seaShimmer=slab(340,140,0x8fc7cf,riverX(SHORE_Z),.034,SHORE_Z+72);
+      (seaShimmer.material as THREE.Material).dispose();seaShimmer.material=glass(0x9fd6dd,.13);water.push({mesh:seaShimmer,base:.13});
+      // Kum bandı: karayla denizin buluştuğu yer.
+      const sandRandom=makeRandom("sand");
+      for(let i=-9;i<=9;i++){const x=riverX(SHORE_Z)+i*17;disc(11+sandRandom()*4,0xc8b183,x,.008,SHORE_Z-4+sandRandom()*6);}
+      // Haliç ağzındaki kum adacıkları.
+      for(let i=0;i<5;i++)disc(3+sandRandom()*2.4,0xd3bd90,riverX(90)+(sandRandom()-.5)*26,.026,86+sandRandom()*14);
+      // Balıkçı tekneleri: haliçte demirli.
+      for(let i=0;i<4;i++){const bx=riverX(78+i*7)+(sandRandom()-.5)*18,bz=78+i*7;
+        const hull=box(2,.6,4.6,i%2?0x6d4c30:0x7a5738,bx,.4,bz);hull.rotation.y=(sandRandom()-.5)*.9;
+        box(.18,2.6,.18,0x53381f,bx,1.6,bz);box(1.5,1.9,.1,0xe6dcc2,bx+.35,1.9,bz);}
+      // Balıkçı iskelesi ve ağ sereni — dekor; üretim yapısı DEĞİL.
+      const wharfX=riverX(72)+13;
+      box(4,.35,14,0x7d5a3a,wharfX,.55,72);
+      for(const z of[66,70,74,78])cylinder(.22,1.8,0x5b3f2a,wharfX,.85,z);
+      for(let i=0;i<3;i++){box(.16,2.2,.16,0x6b4a2c,wharfX+1.4,1.5,68+i*5);box(.1,.1,3.4,0x8f8464,wharfX+1.4,2.4,68+i*5);}
       // Nemli kıyı: koyu, çamurlu bir bant.
       // Kıyı, sazlık, köprü ve iskele nehrin ekseninden türer. Eskiden hepsi
       // x=-12 sabitine çakılıydı; nehir kıvrılınca iskele karada kalırdı.
@@ -269,7 +294,7 @@ export default function KingdomScene({
       const pierX=riverX(13)+7.4;
       box(3,.3,7,0x7d5a3a,pierX,.5,13);for(const z of[10.5,13,15.5])cylinder(.2,1.6,0x5b3f2a,pierX,.8,z);
       const boat=box(1.5,.55,3.4,0x6d4c30,pierX-2.4,.35,13.4);boat.rotation.y=.2;box(.16,1.9,.16,0x53381f,pierX-2.4,1.3,13.4);
-      terrainLabels.push(["NEHİR BÖLGESİ",riverX(-14)-6,4,-14],["TAHTA KÖPRÜ",riverX(1),3,1],["İSKELE",pierX,3,13]);
+      terrainLabels.push(["AÇIK DENİZ",riverX(SHORE_Z),6,SHORE_Z+46],["HALİÇ AĞZI",riverX(92),5,92],["BALIKÇI İSKELESİ",wharfX+4,4,72],["NEHİR BÖLGESİ",riverX(-14)-6,4,-14],["TAHTA KÖPRÜ",riverX(1),3,1],["İSKELE",pierX,3,13]);
       // Kıyı ormanlık değil nemli otlaktır: ağaç seyrek, su ve sazlık baskın kalsın.
       treeBelt("willow",34,20,34,0x5a4029,0x2f6038,1.1,true);outskirts("riverOutskirts",210,0x5a4029,0x2f6038,1.25);
       treeBelt("bankTrees",14,10,18,0x5a4029,0x357045,.85,true);
@@ -291,6 +316,31 @@ export default function KingdomScene({
       // Cevher damarı: koyu kaya ve içinde parlayan demir.
       veins.forEach(([x,z])=>{const vein=add(geom("bigRock",()=>new THREE.DodecahedronGeometry(1,0)),mat(0x4a4740),x,.85,z);vein.scale.set(2.2,1.5,2.2);
         for(let i=0;i<4;i++)ball(.26,0xb4894a,x+(i-1.5)*.85,1.7,z+(i%2)*.7)});
+      // Maden ağzı, dekovil ve pasa: mockup'taki dağ kimliği. Yeni bina değil;
+      // sahanlığın kenarındaki damarlardan birine açılan görsel bir galeri.
+      if(veins.length){
+        const [vx,vz]=veins[0];
+        const toward=Math.atan2(-vz,-vx); // ağız avluya bakar
+        const mouth=new THREE.Group();mouth.position.set(vx,groundY,vz);mouth.rotation.y=toward;detail.add(mouth);
+        box(5.2,3.4,1.2,0x4b4842,0,1.7,0,mouth);                       // kaya alnı
+        box(2.6,2.4,1.6,0x241f1b,0,1.2,.5,mouth);                      // karanlık galeri
+        box(.45,2.6,.45,0x6b4a2c,-1.5,1.3,.75,mouth);box(.45,2.6,.45,0x6b4a2c,1.5,1.3,.75,mouth); // tahkimat
+        box(3.6,.4,.5,0x6b4a2c,0,2.7,.75,mouth);
+        // Dekovil: ağızdan avluya inen dar hat, üstünde bir vagon.
+        const railRandom=makeRandom("decauville");
+        const steps=13,tx=-vx/steps,tz=-vz/steps;
+        for(let i=1;i<=steps;i++){const x=vx+tx*i,z=vz+tz*i;
+          if(!isFree(x,z,.7))continue;
+          box(1.9,.12,.35,0x5a4633,x,groundY+.1,z);
+          if(i%3===0)box(.16,.5,.16,0x6d6a62,x,groundY+.35,z);}
+        const cart=box(1.1,.7,1.6,0x59422e,vx+tx*4,groundY+.55,vz+tz*4);cart.rotation.y=toward;
+        for(let i=0;i<3;i++)ball(.2,0x8d6f3f,vx+tx*4+(i-1)*.3,groundY+.95,vz+tz*4);
+        // Pasa yığını: ocaktan çıkan artık taş.
+        for(let i=0;i<3;i++){const spoil=cone(1.5+railRandom(),1+railRandom()*.7,0x5c5a52,vx+tx*2+(i-1)*2.6,groundY+.5,vz+tz*2+(i%2)*1.8);spoil.rotation.y=railRandom()*Math.PI;}
+        // Taş basamaklar: sahanlığa çıkan kademe.
+        for(let i=0;i<4;i++)box(6-i*.9,.55,2.2-i*.25,i%2?0x6f6d64:0x7a786e,vx*.45,groundY+.28+i*.5,vz*.45+i*1.5);
+        terrainLabels.push(["MADEN AĞZI",vx,4.2,vz]);
+      }
       terrainLabels.push(["DAĞ BÖLGESİ",0,9,-30]);
       veins.forEach(([x,z],i)=>terrainLabels.push([i?"DEMİR DAMARI":"CEVHER DAMARI",x,3.4,z]));
       treeBelt("hardyPine",34,11,23,0x4f3a28,0x2f4a33,.72,true);outskirts("mountainOutskirts",120,0x4f3a28,0x3b5a3d,1.05);
@@ -307,7 +357,48 @@ export default function KingdomScene({
       const fernRandom=makeRandom("ferns"),ferns:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
       for(let i=0;i<180;i++){const angle=fernRandom()*Math.PI*2,radius=7+fernRandom()*24,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,.6))continue;const size=.55+fernRandom()*.9;ferns.push({x,z,y:.3*size,s:size,rot:fernRandom()*Math.PI})}
       scatter(geom("fern",()=>new THREE.SphereGeometry(.55,7,5)),mat(0x2b5029),ferns);
-      terrainLabels.push(["ORMAN BÖLGESİ",-20,7,16],["AV YOLU",12,4,-14],["AÇIKLIK",13,3,-11]);
+      // Kütük istifi, bıçkı çukuru ve tüten kömür mili: ormanın kimliği.
+      // Hepsi dekor — kömür ocağı üretimi girdi tüketen bina gerektirir, o ayrı karar.
+      const logRandom=makeRandom("logging");
+      const logPile=(cx:number,cz:number,rows:number)=>{
+        if(!isFree(cx,cz,3.2))return;
+        for(let row=0;row<rows;row++){
+          const count=rows-row;
+          for(let i=0;i<count;i++){
+            const log=cylinder(.28,3.4,logRandom()<.5?0x8a6640:0x7a5738,cx+(i-(count-1)/2)*.62,.3+row*.54,cz);
+            log.rotation.z=Math.PI/2;log.rotation.y=(logRandom()-.5)*.12;
+          }
+        }
+        reserve(cx,cz,3.2);
+      };
+      logPile(-13,-15,3);logPile(16,9,2);
+
+      // Bıçkı çukuru: kızak, üstünde kesilmekte olan kütük ve talaş.
+      if(isFree(-19,4,3.4)){
+        disc(3,0x6a5334,-19,.01,4);
+        box(4.6,.35,.55,0x6b4a2c,-19,.9,3);box(4.6,.35,.55,0x6b4a2c,-19,.9,5);
+        for(const oz of[3,5]){cylinder(.14,1,0x5b3f2a,-21,.5,oz);cylinder(.14,1,0x5b3f2a,-17,.5,oz);}
+        const trunk=cylinder(.42,4.4,0x8a6640,-19,1.3,4);trunk.rotation.z=Math.PI/2;
+        for(let i=0;i<10;i++)box(.3,.06,.3,0xc9ab72,-19+(logRandom()-.5)*5.2,.06,4+(logRandom()-.5)*5.2);
+        reserve(-19,4,3.4);
+      }
+
+      // Kömür mili: toprakla örtülü konik yığın, tepesinden duman.
+      if(isFree(14,-18,3.6)){
+        disc(4.2,0x4a3d2c,14,.01,-18);
+        cone(2.6,2.9,0x3b3128,14,1.45,-18);
+        cone(.9,.7,0x2a241d,14,3.1,-18);
+        // Duman: yükseldikçe büyüyen ve saydamlaşan üç küre.
+        for(let i=0;i<3;i++){
+          const puff=ball(.55+i*.42,0xb9b3a6,14+i*.5,3.8+i*1.5,-18-i*.35);
+          (puff.material as THREE.Material).dispose();puff.material=glass(0xcfc9bd,.32-i*.08);
+        }
+        // Kömürcü kulübesi ve istiflenmiş çuvallar.
+        box(2.4,1.8,2,0x5a4632,18.5,.9,-16.5);
+        for(let i=0;i<4;i++)box(.7,.7,.7,0x2f2a24,17+(i%2)*.9,.35,-19-Math.floor(i/2)*.9);
+        reserve(14,-18,3.6);reserve(18.5,-16.5,2);
+      }
+      terrainLabels.push(["ORMAN BÖLGESİ",-20,7,16],["KÜTÜK İSTİFİ",-13,3.4,-15],["BIÇKI ÇUKURU",-19,3.2,4],["KÖMÜR OCAĞI",14,5,-18],["AV YOLU",12,4,-14],["AÇIKLIK",13,3,-11]);
     }else{
       // Açık otlak: geniş tarla dokusu, kervan yolu, seyrek ağaç kümeleri.
       const fields:Array<[number,number,number,number]>=[[-20,13,7,0xb89552],[17,-16,6,0xa88b4a],[-17,-17,5.5,0x9d8b4d],[21,10,6.5,0xc0a05c]];
@@ -328,13 +419,57 @@ export default function KingdomScene({
       // Saman balyaları hasat hissi verir.
       const hayRandom=makeRandom("hay");
       for(let i=0;i<9;i++){const angle=hayRandom()*Math.PI*2,radius=13+hayRandom()*14,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,1.4))continue;const bale=cylinder(.75,1.5,0xc8a95e,x,.75,z,detail);bale.rotation.z=Math.PI/2;reserve(x,z,1.4)}
-      terrainLabels.push(["OVA BÖLGESİ",-20,4,13],["KERVAN YOLU",14,4,10],["HASAT TARLASI",17,4,-16]);
+      // Otlak: çitli mera, içinde sürü ve yalak. Mockup'taki ova kimliği.
+      // Hepsi dekor — ağıl ve hayvancılık üretimi motoru değiştirir, o ayrı karar.
+      const herdRandom=makeRandom("herd");
+      const pasture=(cx:number,cz:number,radius:number,head:number,dark:boolean)=>{
+        if(!isFree(cx,cz,radius))return;
+        disc(radius,dark?0x6d8a45:0x789650,cx,.004,cz);
+        // Çit: halkanın üstünde direkler ve aralarını bağlayan yatay lataları.
+        const posts=Math.max(10,Math.round(radius*2.2));
+        for(let i=0;i<posts;i++){
+          const a=(i/posts)*Math.PI*2,x=cx+Math.cos(a)*radius,z=cz+Math.sin(a)*radius;
+          cylinder(.12,1.15,0x6b4a2c,x,.58,z);
+          const b=((i+1)/posts)*Math.PI*2,mx=cx+Math.cos((a+b)/2)*radius,mz=cz+Math.sin((a+b)/2)*radius;
+          const rail=box(radius*6.3/posts,.12,.1,0x7d5a3a,mx,.85,mz);rail.rotation.y=-(a+b)/2;
+        }
+        // Yalak.
+        box(2.6,.45,1,0x6b4a2c,cx+radius*.45,.25,cz-radius*.45);
+        // Sürü: gövde, baş ve dört bacak.
+        for(let i=0;i<head;i++){
+          const a=herdRandom()*Math.PI*2,r=herdRandom()*(radius-2.2);
+          const x=cx+Math.cos(a)*r,z=cz+Math.sin(a)*r,facing=herdRandom()*Math.PI*2;
+          const hide=herdRandom()<.45?0x8a6a4a:herdRandom()<.5?0x4a3b30:0xd8cdb8;
+          const body=box(.85,.75,1.7,hide,x,.85,z);body.rotation.y=facing;
+          const head3=box(.5,.45,.55,hide,x+Math.sin(facing)*1.05,.95,z+Math.cos(facing)*1.05);head3.rotation.y=facing;
+          for(const[ox,oz]of[[-.3,-.55],[.3,-.55],[-.3,.55],[.3,.55]]){
+            const lx=x+ox*Math.cos(facing)-oz*Math.sin(facing),lz=z+ox*Math.sin(facing)+oz*Math.cos(facing);
+            cylinder(.09,.9,0x4b3a2a,lx,.45,lz);
+          }
+        }
+        reserve(cx,cz,radius+.6);
+      };
+      pasture(-26,-9,9.5,12,false);
+      pasture(21,19,7.5,7,true);
+      terrainLabels.push(["OVA BÖLGESİ",-20,4,13],["OTLAK · SÜRÜ 12 BAŞ",-26,4.6,-9],["KERVAN YOLU",14,4,10],["HASAT TARLASI",17,4,-16]);
       treeBelt("plainEdge",30,20,34,0x5f3e25,0x33643a,1,true);outskirts("plainOutskirts",150,0x5f3e25,0x33643a,1.15);
     }
 
     // Çimen bütün arazilerde var ama yoğunluğu ve rengi araziye göre değişir.
     const grassRandom=makeRandom("grass"),grassSpots:Array<{x:number;z:number;y:number;s:number;rot:number}>=[];
     for(let i=0;i<plan.grass*2&&grassSpots.length<plan.grass;i++){const angle=grassRandom()*Math.PI*2,radius=3+grassRandom()*26,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius;if(!isFree(x,z,.4))continue;const size=.7+grassRandom()*1.1;grassSpots.push({x,z,y:.26*size,s:size,rot:grassRandom()*Math.PI})}
+    // Çim eteği: şehrin ötesinde de tutam kalsın, ufka doğru seyrelerek. Renk
+    // değil doku olduğu için kenar düz bir yeşil tabak gibi durmuyor.
+    const skirtRandom=makeRandom("grassSkirt");
+    for(let i=0;i<plan.grass*3&&grassSpots.length<plan.grass*2.4;i++){
+      const angle=skirtRandom()*Math.PI*2;
+      // Karekök dağılımı halkayı eşit doldurur; seyrelme uzaklıkla gelsin diye
+      // dışa doğru bir eleme uygulanır.
+      const radius=32+Math.sqrt(skirtRandom())*96;
+      if(skirtRandom()>1-radius/190)continue;
+      const size=.6+skirtRandom()*.85;
+      grassSpots.push({x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,y:groundY+.3*size,s:size,rot:skirtRandom()*Math.PI});
+    }
     const grass=scatter(geom("grass",()=>new THREE.ConeGeometry(.17,.6,5)),mat(plan.grassColor),grassSpots);
     if(grass)grass.castShadow=false;
 

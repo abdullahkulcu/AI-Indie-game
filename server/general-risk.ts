@@ -65,15 +65,20 @@ export function assessAction(action: ProposedAction, state: KingdomSnapshot, cos
   let level: RiskLevel = "low";
 
   // 1) Hazine tüketimi
-  let spendRatio = 0;
+  // Oran EN SIKIŞAN kaynaktan gelir; adı da ondan gelmeli. Eskiden ad
+  // maliyetin en BÜYÜK kalemine göre seçiliyordu, dolayısıyla "odun stokunun
+  // %194'ü" derken oran taşa ait olabiliyordu: rakam bir kaynağı, isim
+  // başkasını anlatıyordu.
+  let spendRatio = 0, tightest = "";
   for (const [key, amount] of Object.entries(cost)) {
     if (!amount) continue;
     const held = Math.max(1, state.resources[key] ?? 0);
-    spendRatio = Math.max(spendRatio, amount / held);
+    const ratio = amount / held;
+    if (ratio > spendRatio) { spendRatio = ratio; tightest = key; }
   }
   if (spendRatio >= SPEND_SEVERE) {
     level = highest(level, "severe");
-    reasons.push(`Bu emir ${key0(cost)} stokunun %${Math.round(spendRatio * 100)}'ini tüketiyor; hazine savunmasız kalır.`);
+    reasons.push(`Bu emir ${labelOf(tightest) || key0(cost)} stokunun %${Math.round(spendRatio * 100)}'ini tüketiyor; hazine savunmasız kalır.`);
   } else if (spendRatio >= SPEND_ELEVATED) {
     level = highest(level, "elevated");
     reasons.push(`Emir kaynakların %${Math.round(spendRatio * 100)}'ini bağlıyor; beklenmedik bir saldırıda hareket alanımız kalmaz.`);
@@ -130,11 +135,14 @@ export function assessAction(action: ProposedAction, state: KingdomSnapshot, cos
 }
 
 /** Maliyette en ağır basan kaynağın adı; mesajı somutlaştırmak için. */
+const RESOURCE_LABELS: Record<string, string> = { gold: "altın", food: "yiyecek", stone: "taş", wood: "odun", iron: "demir", ale: "bira" };
+
+export const labelOf = (key: string) => RESOURCE_LABELS[key] ?? "";
+
 function key0(cost: ActionCost) {
   const entries = Object.entries(cost).filter(([, value]) => Boolean(value));
   if (!entries.length) return "hazine";
-  const labels: Record<string, string> = { gold: "altın", food: "yiyecek", stone: "taş", wood: "odun", iron: "demir", ale: "bira" };
-  return labels[entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0]] ?? "hazine";
+  return RESOURCE_LABELS[entries.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0]] ?? "hazine";
 }
 
 /**

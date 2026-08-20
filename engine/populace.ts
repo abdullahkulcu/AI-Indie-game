@@ -69,6 +69,16 @@ export type MoodInputs = {
   buildings: Array<{ type: string; level: number }>;
   /** Son akından bu yana geçen saat. Akın halkı bir süre sarsılmış bırakır. */
   hoursSinceRaid?: number | null;
+  /**
+   * Yerel pazardaki geçim maliyetinin rızaya yansıması (puan). Artı = ucuz
+   * ekmek, eksi = pahalı ekmek. Hesabı `engine/market.ts` yapar
+   * (`livingCostMood`); burada hazır puan olarak alınır, çünkü kuralın kendisi
+   * pazarın kuralıdır ve iki modülün birbirini içe aktarması gerekmesin.
+   *
+   * Eski kayıtlarda ve pazarı olmayan çağrılarda 0'dır: halkın defteri
+   * bilinmiyorsa fiyat normal sayılır ve rıza bu kalemden etkilenmez.
+   */
+  livingMood?: number;
 };
 
 /** Eğlence ve idare yapılarının rızaya katkısı. */
@@ -98,6 +108,12 @@ export function moodTarget(input: MoodInputs) {
 
   // Vergi: %15 nötr kabul edilir.
   target -= (input.taxRate - 15) * 0.9;
+
+  // Pazardaki geçim maliyeti. İstihkak halkın AĞZINA ne girdiğini söyler; bu
+  // ise kendi cebinden aldığı ekmeğin kaça mal olduğunu. Kral ambarı açıp
+  // fiyatı kırarsa rıza yükselir, halkın kilerini pazardan süpürürse düşer.
+  // `fed` ile ölçeklenmez: aç halk ekmeğin fiyatını daha çok umursar, az değil.
+  target += input.livingMood ?? 0;
 
   for (const building of input.buildings) {
     const value = AMENITY_VALUE[building.type];

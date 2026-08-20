@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BUILDABLE_TYPES } from "../engine/catalog";
 import { resolveRaids } from "../engine/raids";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
@@ -11,13 +12,20 @@ import type { Game } from "../engine/types";
  * engellemez ama "bir milyar altın" sınıfı hileleri keser.
  */
 
-export const BUILDING_TYPES = [
-  "keep", "wheat_farm", "lumberjack", "quarry", "town_square",
-  "barracks", "apple_orchard", "mill", "market", "wall", "mine",
-  "park", "brewery", "marriage_hall", "theater",
-] as const;
+/**
+ * Kabul edilen bina türleri. KATALOGDAN TÜRETİLİR.
+ *
+ * Elle yazıldığında kataloğdan saptı ve sonucu ağırdı: listede olmayan bir bina
+ * kuran oyuncunun kaydı sunucuda TAMAMEN reddediliyordu. Kral Ambar kurdu,
+ * kaydı reddedildi, istemci sunucudaki eski kopyayı aldı ve bina "kaybolmuş"
+ * göründü. Depo'nun seviye atlaması da aynı sebeple hiç kalıcı olmadı.
+ */
+export const BUILDING_TYPES: readonly string[] = BUILDABLE_TYPES;
 
 export const RESOURCE_KEYS = ["gold", "food", "stone", "wood", "iron", "ale"] as const;
+
+/** Yerel pazarda işlem gören kaynaklar; halkın defteri yalnızca bunları tutar. */
+export const TRADED_RESOURCE_KEYS = ["food", "wood", "stone", "iron", "ale"] as const;
 
 export const TERRAIN_IDS = ["plain", "forest", "mountain", "riverbank"] as const;
 
@@ -78,7 +86,10 @@ const resourcesSchema = z.object(
 ).strict();
 
 const buildingSchema = z.object({
-  type: z.enum(BUILDING_TYPES),
+  // z.enum sabit bir demet ister; katalogdan türetilen liste için refine kullanılır.
+  type: z.string().min(1).max(40).refine(value => BUILDING_TYPES.includes(value), {
+    message: "Bilinmeyen bina türü.",
+  }),
   name: z.string().min(1).max(60),
   category: z.string().min(1).max(40),
   level: z.number().int().min(1).max(CAPS.buildingLevel),
@@ -157,6 +168,22 @@ export const gameSaveSchema = z.object({
     completesAt: timestamp,
   }).strict()).max(6).optional(),
   marketDayAt: z.number().finite().optional(),
+  /**
+   * Halkın kendi stoğu — yerel pazarın fiyatı buradan doğar. Eski kayıtlarda
+   * yoktur; motor o zaman halkı normal stoğunda kabul eder, yani fiyat taban
+   * fiyattır ve kimsenin kaydı bu alan yüzünden reddedilmez.
+   *
+   * Şişirilmesi kaynak yaratmaz, yalnızca fiyatı oynatır ve fiyatın kendisi
+   * taban/tavan arasına kilitlidir (bkz. engine/market.ts). Elde edilecek
+   * altın ayrıca `checkAgainstSimulation` ve `checkGrowth` ile sınırlıdır.
+   */
+  commons: z.object(
+    Object.fromEntries(TRADED_RESOURCE_KEYS.map(key => [key, finite(CAPS.resource)])) as Record<
+      (typeof TRADED_RESOURCE_KEYS)[number],
+      z.ZodNumber
+    >,
+  ).strict().optional(),
+  lastSpoilNoticeAt: z.number().finite().optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),

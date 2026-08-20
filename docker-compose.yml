@@ -1,3 +1,7 @@
+# Aynı anda birden fazla kopya çalıştırmak için:
+#   COMPOSE_PROJECT_NAME=demirkale-b WEB_PORT=8080 PG_PORT=5434 docker compose up -d
+# Proje adı konteyner ve HACİM adlarını da ayırır, yani iki kopya aynı
+# veritabanını paylaşmaz. Portlar çakışmasın diye WEB_PORT/PG_PORT verilir.
 # Demirkale'yi tek komutla ayağa kaldırır: oyun sunucusu + gece vardiyası cron'u.
 #
 #   cp .env.example .env   (CRON_SECRET'i .dev.vars ile aynı yapın)
@@ -13,7 +17,7 @@ services:
       POSTGRES_DB: demirkale
       POSTGRES_USER: demirkale
       POSTGRES_PASSWORD: demirkale
-    ports: ["5433:5432"]
+    ports: ["${PG_PORT:-5433}:5432"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U demirkale"], interval: 3s, timeout: 3s, retries: 30}
     volumes: ["postgres_data:/var/lib/postgresql/data"]
 
@@ -28,10 +32,17 @@ services:
     working_dir: /app
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
-    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --hostname 0.0.0.0"
-    # Dışarıya 80, konteyner içinde 3000. Healthcheck ve cron konteyner içinden
-    # konuştuğu için onlar 3000'de kalır.
-    ports: ["80:3000"]
+    # Şema açılışta uygulanır. Bu olmadan yeni bir VM'de tablolar eksik kalıyor
+    # ve uygulama "relation ... does not exist" ile 500 dönüyordu. Kapatmak için
+    # DB_AUTO_PUSH=0 verin; o zaman şemayı elle uygularsınız (./run.sh db:push).
+    command: >
+      sh -c "npm ci --no-audit --no-fund &&
+      if [ \"$$DB_AUTO_PUSH\" != \"0\" ]; then npx drizzle-kit push --force || echo 'şema uygulanamadı, elle deneyin: ./run.sh db:push'; fi &&
+      npm run dev -- --hostname 0.0.0.0"
+    # Dışarıya nginx bakar. Uygulama 3000'i yalnızca compose ağına açar; 3000'i
+    # hostta da görmek isterseniz aşağıdaki satırı açın (yerel hata ayıklama).
+    # ports: ["${APP_PORT:-3000}:3000"]
+    expose: ["3000"]
     volumes:
       - .:/app
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
@@ -45,6 +56,7 @@ services:
       # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
       # sızıyor ve "Another vinext dev server is already running" hatasına yol açıyor.
       VINEXT_NO_DEV_LOCK: "1"
+      DB_AUTO_PUSH: ${DB_AUTO_PUSH:-1}
     healthcheck:
       # node her zaman var; curl/wget imaja göre değişir.
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
@@ -80,6 +92,23 @@ services:
           echo
           sleep "$$CRON_INTERVAL_SECONDS"
         done
+
+  # VM'de 80 portunu uygulamaya doğrudan bağlamak yerine önüne nginx koyuyoruz:
+  # tek giriş noktası, ileride TLS için yer ve HMR websocket'inin düzgün geçmesi.
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["${WEB_PORT:-80}:80"]
+    volumes:
+      - ./deploy/upgrade-map.conf:/etc/nginx/conf.d/00-upgrade-map.conf:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app: {condition: service_started}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_data: {}

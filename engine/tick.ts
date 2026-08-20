@@ -1,6 +1,9 @@
-import { catalog, resourceLabels, terrainCatalog } from "./catalog";
+export { materialScaleOf } from "./catalog";
+import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
+import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
+import { applySpoilage, storageCaps } from "./storage";
 import type { Game, Key, Res } from "./types";
 
 /** Defteri gereksiz satırla doldurmamak için, hareket bu eşiği aşınca yazılır. */
@@ -20,8 +23,62 @@ export const debit = (resources: Res, cost: Partial<Res>): Res => {
 };
 
 /** Bir binanın mevcut seviyesine göre bir sonraki seviyenin maliyeti. */
-export const costFor = (base: Partial<Res>, level: number): Partial<Res> =>
-  Object.fromEntries(Object.entries(base).map(([key, value]) => [key, Math.ceil((value ?? 0) * Math.pow(1.65, level))])) as Partial<Res>;
+/**
+ * Seviye maliyeti.
+ *
+ * Odun ve taş daha dik büyür (1.85), altın ve yiyecek eskisi gibi (1.65):
+ * glut olan kaynak yüksek seviyelerde gerçek bir gider olsun, zaten dar olan
+ * altın daha da darlaşmasın.
+ *
+ * `materialScale` channel'dan gelir: hızlı channel'da saatte daha çok odun
+ * çıkar, dolayısıyla aynı seviye orada da bir anlam taşısın diye malzeme
+ * maliyeti aynı oranda büyür. Yalnızca malzemeye uygulanır.
+ */
+const MATERIALS = new Set<string>(["wood", "stone", "iron"]);
+
+export const costFor = (base: Partial<Res>, level: number, materialScale = 1): Partial<Res> =>
+  Object.fromEntries(Object.entries(base).map(([key, value]) => {
+    const material = MATERIALS.has(key);
+    const growth = key === "wood" || key === "stone" ? 1.85 : 1.65;
+    return [key, Math.ceil((value ?? 0) * Math.pow(growth, level) * (material ? materialScale : 1))];
+  })) as Partial<Res>;
+
+
+
+/**
+ * Kurulabilecek/yükseltilebilecek yapıların listesi: ad, sıradaki seviye, süre
+ * ve MALİYET. Tek kaynak olması şart — panel maliyeti bir yerde, General'in
+ * bağlamı başka yerde hesapladığında ikisi saptı: Kral panelde 204 taş görüp
+ * emri verdi, General 4.884 taşa göre itiraz etti.
+ */
+export type BuildOption = { type: string; name: string; nextLevel: number; seconds: number; cost: Partial<Res> };
+
+export function buildOptions(g: Game): BuildOption[] {
+  const level = keep(g), scale = materialScaleOf(g.speed);
+  const options: BuildOption[] = catalog.filter(item => item.unlock <= level).map(item => {
+    const current = g.buildings.find(building => building.type === item.type)?.level ?? 0;
+    return {
+      type: item.type, name: item.name, nextLevel: current + 1,
+      seconds: Math.round(item.seconds / g.speed),
+      cost: costFor(item.cost, current, scale),
+    };
+  });
+  if (level < MAX_KEEP_LEVEL) {
+    options.unshift({
+      type: "keep", name: "Kale", nextLevel: level + 1,
+      seconds: Math.round(keepSeconds[level] / g.speed),
+      cost: keepUpgradeCosts[level],
+    });
+  }
+  return options;
+}
+
+/**
+ * Yapıların bakımı: üretimin bu payı kereste ve taş ocağının kendi onarımına,
+ * yol ve sur bakımına gider. Ölçüldü — bu olmadan odunun tek gideri inşaattı,
+ * yani inşaat durunca ambar sonsuza kadar büyüyordu.
+ */
+export const UPKEEP = { wood: .35, stone: .35 } as const;
 
 /** Ham üretim: halkın tüketimi ve iş bırakma etkisi hesaba katılmadan önce. */
 /**
@@ -60,6 +117,11 @@ export function rates(g: Game): Res {
   const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0));
   const net = { ...gross };
   for (const [key] of resourceLabels) net[key] = gross[key] * state.production;
+  // Bakım: odun ve taşın tek sürekli gideri. Bunlar olmadan net = brüt idi ve
+  // ambar sonsuza kadar şişiyordu. Sabit sayı değil ORAN, çünkü seviye başına
+  // sabit gider büyük krallıkta üretimi aşıyor, küçükte hissedilmiyor.
+  net.wood -= gross.wood * UPKEEP.wood;
+  net.stone -= gross.stone * UPKEEP.stone;
   net.food -= demand.food;
   net.ale -= demand.ale;
   net.gold -= demand.gold;
@@ -79,7 +141,7 @@ export function tick(g: Game, now: number): Game {
   if (hours <= 0) return g;
 
   const gross = grossRates(g), demand = hourlyDemand(g), army = armySize(g.units ?? {});
-  const rt = rates(g), resources = { ...g.resources };
+  const rt = rates(g); let resources = { ...g.resources };
   resourceLabels.forEach(([key]) => { resources[key] = Math.max(0, resources[key] + rt[key] * hours); });
 
   let buildings = g.buildings, units = g.units, queue = g.queue, notices = g.notices;
@@ -130,10 +192,18 @@ export function tick(g: Game, now: number): Game {
     pay: rations.soldierPay * satisfaction(demand.gold * hours, g.resources.gold + gross.gold * hours),
   };
 
+  // --- Halkın defteri -----------------------------------------------------
+  // Krallığın İKİNCİ defteri: halkın kendi stoğu. Fiyat buradan doğar ve
+  // pahalı ekmeğin rızaya bedeli buradan hesaplanır. Sürücüler (nüfus, fiilen
+  // dağıtılan istihkak) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur.
+  const commonsNow = commonsOf(g);
+  const commonsRef = commonsReference(g.population);
+
   const target = moodTarget({
     servedFood: served.food, servedAle: served.ale, taxRate: g.taxRate,
     population: g.population, capacity, buildings,
     hoursSinceRaid: g.lastRaidAt ? (now - g.lastRaidAt) / 3_600_000 : null,
+    livingMood: livingCostMood(livingCost(commonsNow, commonsRef)),
   });
   // Yağmalanan krallıkta halkın rızası da düşer.
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
@@ -151,6 +221,24 @@ export function tick(g: Game, now: number): Game {
     // Firar: maaşsız kalan askerlerin bir kısmı dağılır.
     mutinyLoss = Math.min(army, Math.ceil(army * (soldierUnrest >= SOLDIER_THRESHOLDS.mutiny ? .12 : .05) * hours));
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
+  }
+
+  // Depo tavanı: aşan stok saatte bir oranla bozulur. Anında kırpılmaz ki Kral
+  // depo kurmaya ya da Pazarda satmaya vakit bulsun.
+  const caps = storageCaps({ buildings, speed: g.speed });
+  const spoiled = applySpoilage(resources, caps, hours);
+  resources = spoiled.resources;
+  const spoiledEntries = (Object.entries(spoiled.lost) as Array<[Key, number]>).filter(([, amount]) => amount >= 1);
+  // Depo taşması sürerken her tick'te bildirim yazmak defteri doldurur ve akın
+  // gibi asıl kayıtları 20 satırlık pencereden dışarı iter. "En üstteki AMBAR
+  // ise yazma" yetmedi: araya GENERAL/İNŞAAT bildirimi girince engel sıfırlandı
+  // ve Kralın defterinin 20 satırından 16'sı taşma uyarısı oldu. Artık ZAMANA
+  // bağlı: oyun saatinde en fazla saatte bir uyarı.
+  let spoilNoticeAt = g.lastSpoilNoticeAt ?? 0;
+  if (spoiledEntries.length && now - spoilNoticeAt >= 3_600_000) {
+    spoilNoticeAt = now;
+    const text = spoiledEntries.map(([key, amount]) => `${Math.round(amount)} ${labelOf(key)}`).join(", ");
+    notices = [{ kind: "AMBAR", text: `Depo taştı; ${text} bozuldu. Ambar yükseltilmeli ya da fazlası satılmalı.`, at: now }, ...notices].slice(0, 20);
   }
 
   // Pazar teklifleri: süresi dolan teklif kapanır, karşılığı ancak şimdi gelir.
@@ -184,9 +272,16 @@ export function tick(g: Game, now: number): Game {
     notices = [{ kind: "GÖÇ", text: `${came} kişi krallığa yerleşti; nüfus ${Math.round(settled)} oldu.`, at: now }, ...notices].slice(0, 20);
   }
 
+  // Halkın kileri: istihkak fazlası kilere girer, eksiği kilerden yenir, geri
+  // kalanı ortalamaya döner. Kapalı çözüm olduğu için altı adım tek adımla
+  // birebir aynı sonucu verir (bkz. tests/market.test.ts).
+  const commons = advanceCommons(commonsNow, commonsRef, commonsFlow(g.population, served), hours);
+
   return {
     ...g,
+    commons,
     marketOrders,
+    lastSpoilNoticeAt: spoilNoticeAt,
     peopleJoined: joined,
     peopleLeft: left,
     migrationDrift: drift,

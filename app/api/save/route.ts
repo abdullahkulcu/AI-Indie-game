@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "Oturum gerekli." }, { status: 401, headers: noStore });
-  const body = await request.json() as { game?: unknown };
+  const body = await request.json() as { game?: unknown; baseRevision?: number };
 
   const [existing] = await getDb().select().from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
   const channel = await activeChannel(user.id);
@@ -45,6 +45,18 @@ export async function PUT(request: Request) {
     channelName: channel?.name ?? null,
   });
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status, headers: noStore });
+
+  // İyimser kilit: istemci hangi sürümün üstüne yazdığını bildirir. Sunucu o
+  // arada başka bir şey yazdıysa (gece vardiyası, haraç ödemesi, akın) istemcinin
+  // eski kopyası KABUL EDİLMEZ. Bu olmadan açık bir tarayıcı sekmesi, arka
+  // planda yapılan her işi 5 saniye içinde sessizce siliyordu.
+  if (typeof body.baseRevision === "number" && existing && existing.revision !== body.baseRevision) {
+    const current = parseStoredSave(existing.gameState);
+    return Response.json(
+      { error: "Kayıt geride kaldı; sunucudaki güncel durum uygulandı.", conflict: true, game: current, revision: existing.revision },
+      { status: 409, headers: noStore },
+    );
+  }
 
   const encoded = JSON.stringify(result.game);
   if (encoded.length > 200_000) return Response.json({ error: "Oyun kaydı çok büyük." }, { status: 413, headers: noStore });

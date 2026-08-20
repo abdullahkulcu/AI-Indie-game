@@ -1,3 +1,5 @@
+import { catalog } from "../engine/catalog";
+import { BUILDING_TYPES } from "../server/save-validation";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { STARTING_STATE, parseStoredSave, validateGameSave } from "../server/save-validation";
@@ -169,4 +171,43 @@ test("bozuk kayıt okunurken çökmez, null döner", () => {
   assert.equal(parseStoredSave("{bozuk json"), null);
   assert.equal(parseStoredSave(JSON.stringify({ version: 2, kingdomName: "X" })), null);
   assert.notEqual(parseStoredSave(JSON.stringify(startingSave())), null);
+});
+
+test("kayıt şeması kataloğdaki her binayı kabul eder", () => {
+  // Bu satır bir kez kırıldı ve sonucu ağırdı: şemadaki liste elle yazılmıştı,
+  // Ambar ve Depo yoktu. Kral Ambar kurunca kaydının TAMAMI okunamaz oldu;
+  // cron "Okunabilir bulut kaydı yok" dedi, istemci eski kopyayı aldı ve bina
+  // kaybolmuş göründü. Depo'nun seviye atlaması da hiç kalıcı olmadı.
+  const missing = catalog.map(item => item.type).filter(type => !BUILDING_TYPES.includes(type));
+  assert.deepEqual(missing, [], `kayıt şemasında eksik binalar: ${missing.join(", ")}`);
+  assert.ok(BUILDING_TYPES.includes("keep"));
+});
+
+test("kataloğdaki her bina içeren kayıt kabul edilir", () => {
+  const now = Date.now();
+  const everything = {
+    version: 2, kingdomName: "D", rulerName: "A", channel: "Standart Sezon I", channelId: "standard",
+    speed: 1, terrain: "plain", foundedAt: now - 1000, lastTickAt: now, protectionEndsAt: now + 1000,
+    resources: { gold: 1, food: 1, stone: 1, wood: 1, iron: 1, ale: 1 },
+    population: 20, capacity: 150, popularity: 50, reputation: 50, loyalty: 75, taxRate: 15,
+    buildings: [
+      { type: "keep", name: "Kale", category: "Yönetim", level: 1 },
+      ...catalog.map(item => ({ type: item.type, name: item.name, category: item.category, level: 1 })),
+    ],
+    units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
+  };
+  assert.ok(parseStoredSave(JSON.stringify(everything)), "her binayı içeren kayıt okunabilmeli");
+});
+
+test("gerçekten bilinmeyen bina türü hâlâ reddedilir", () => {
+  const now = Date.now();
+  const bogus = {
+    version: 2, kingdomName: "D", rulerName: "A", channel: "Standart Sezon I", channelId: "standard",
+    speed: 1, terrain: "plain", foundedAt: now - 1000, lastTickAt: now, protectionEndsAt: now + 1000,
+    resources: { gold: 1, food: 1, stone: 1, wood: 1, iron: 1, ale: 1 },
+    population: 20, capacity: 150, popularity: 50, reputation: 50, loyalty: 75, taxRate: 15,
+    buildings: [{ type: "altin_basimevi", name: "Darphane", category: "Ekonomi", level: 6 }],
+    units: {}, queue: null, notices: [], provider: null, model: null, generalConnected: false,
+  };
+  assert.equal(parseStoredSave(JSON.stringify(bogus)), null, "uydurma bina kabul edilmemeli");
 });

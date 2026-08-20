@@ -7,6 +7,16 @@ export type Key = "gold" | "food" | "stone" | "wood" | "iron" | "ale";
 export type Res = Record<Key, number>;
 export type TerrainId = "plain" | "forest" | "mountain" | "riverbank";
 
+/** Yerel pazarda işlem gören kaynaklar. Altın bir mal değil, ödeme aracıdır. */
+export type TradeKey = "food" | "wood" | "stone" | "iron" | "ale";
+
+/**
+ * Halkın kendi stoğu — krallığın İKİNCİ defteri. Kale ambarı (`Game.resources`)
+ * Kralın malıdır; bu ise halkın elindekidir ve yerel pazarın fiyatı buradan
+ * doğar. Kurallar `engine/market.ts` içindedir.
+ */
+export type Commons = Record<TradeKey, number>;
+
 export type Building = { type: string; name: string; category: string; level: number };
 
 export type Queue = {
@@ -95,11 +105,18 @@ export type Game = {
   migrationDrift?: number;
   /** Son göçmen çağrısı; ard arda çağrı yapılmasın diye bekleme süresi buradan sayılır. */
   lastSettlerCallAt?: number;
+  /**
+   * Halkın kendi stoğu; yerel pazarın fiyatı buradan doğar. Eski kayıtlarda
+   * yoktur — motor o zaman halkı normal stoğunda kabul eder (fiyat = taban).
+   */
+  commons?: Commons;
   /** Pazarda bugün alınıp satılan toplam birim ve o günün başlangıcı. */
   marketVolume?: number;
   marketDayAt?: number;
   /** Pazarda bekleyen açık teklifler; yuva sayısı Pazar seviyesidir. */
   marketOrders?: MarketOrder[];
+  /** Son depo taşması bildirimi; defteri saniyede bir uyarıyla doldurmamak için. */
+  lastSpoilNoticeAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

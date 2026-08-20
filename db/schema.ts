@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -47,6 +47,8 @@ export const channelMembers = pgTable("channel_members", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
   status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
+  /** Kral müzakereye kapalıysa kimse masa açamaz; kendi BYOK kredisini korur. */
+  acceptsNegotiation: boolean("accepts_negotiation").notNull().default(true),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   primaryKey({ columns: [table.userId, table.channelId] }),
@@ -114,8 +116,11 @@ export const sharedMineWorkers = pgTable("shared_mine_workers", {
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
 
 // Kralın gece emri. Kayıt yoksa General arka planda hiç uyanmaz.
+// Bir Kralın birden fazla kalıcı emri olabilir. Eskiden user_id birincil
+// anahtardı ve yeni emir eskisini SESSİZCE eziyordu; Kral listesini göremiyordu.
 export const standingOrders = pgTable("standing_orders", {
-  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   channelId: text("channel_id").notNull(),
   instruction: text("instruction").notNull(),
   autonomy: text("autonomy", { enum: ["autonomous", "ask"] }).notNull().default("ask"),
@@ -127,7 +132,7 @@ export const standingOrders = pgTable("standing_orders", {
   lastRunAt: bigint("last_run_at", { mode: "number" }),
   lastOutcome: text("last_outcome"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("idx_standing_orders_status").on(table.status)]);
+}, (table) => [index("idx_standing_orders_status").on(table.status), index("idx_standing_orders_user").on(table.userId)]);
 
 // General riskli bulup teyit istediği emri burada bekletir.
 export const pendingDecisions = pgTable("pending_decisions", {
@@ -177,3 +182,56 @@ export const rateLimits = pgTable("rate_limits", {
   count: integer("count").notNull().default(1),
   windowStart: bigint("window_start", { mode: "number" }).notNull(),
 });
+
+// --- Müzakere: iki krallığın Generallerinin masası ------------------------
+// Kural katmanı engine/negotiation.ts içindedir; burada yalnızca kalıcılık var.
+export const negotiations = pgTable("negotiations", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  initiatorId: text("initiator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetId: text("target_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  topic: text("topic", { enum: ["tribute", "non_aggression", "alliance", "passage", "ultimatum"] }).notNull(),
+  status: text("status", { enum: ["open", "awaiting_king", "agreed", "declined", "expired"] }).notNull().default("open"),
+  turns: integer("turns").notNull().default(0),
+  /** Sunulmuş şart (JSON). Kral onaylayınca anlaşmaya dönüşür. */
+  proposed: text("proposed"),
+  proposedBy: text("proposed_by", { enum: ["initiator", "target"] }),
+  openedAt: bigint("opened_at", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  lastTurnAt: bigint("last_turn_at", { mode: "number" }).notNull(),
+}, (table) => [
+  index("idx_negotiations_initiator").on(table.initiatorId, table.status),
+  index("idx_negotiations_target").on(table.targetId, table.status),
+]);
+
+export const negotiationMessages = pgTable("negotiation_messages", {
+  id: text("id").primaryKey(),
+  negotiationId: text("negotiation_id").notNull().references(() => negotiations.id, { onDelete: "cascade" }),
+  side: text("side", { enum: ["initiator", "target"] }).notNull(),
+  /** General mi konuştu Kral mı? Kral yokken General bağlayamaz. */
+  speaker: text("speaker", { enum: ["general", "king"] }).notNull().default("general"),
+  body: text("body").notNull(),
+  at: bigint("at", { mode: "number" }).notNull(),
+}, (table) => [index("idx_negotiation_messages_table").on(table.negotiationId, table.at)]);
+
+// Onaylanmış anlaşma. Haraç ödemeleri cron'da bu tablodan yürür.
+export const agreements = pgTable("agreements", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  negotiationId: text("negotiation_id"),
+  topic: text("topic", { enum: ["tribute", "non_aggression", "alliance", "passage", "ultimatum"] }).notNull(),
+  /** Haraçta ödeyen ve alan. Diğer konularda iki taraf da eşittir. */
+  payerId: text("payer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  payeeId: text("payee_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  terms: text("terms").notNull(),
+  startedAt: bigint("started_at", { mode: "number" }).notNull(),
+  endsAt: bigint("ends_at", { mode: "number" }).notNull(),
+  everyHours: integer("every_hours").notNull().default(6),
+  paidCount: integer("paid_count").notNull().default(0),
+  /** Ödenemeyen vade sayısı; belli sayıda kaçırma anlaşmayı bozar. */
+  missedCount: integer("missed_count").notNull().default(0),
+  status: text("status", { enum: ["active", "completed", "broken"] }).notNull().default("active"),
+}, (table) => [
+  index("idx_agreements_payer").on(table.payerId, table.status),
+  index("idx_agreements_payee").on(table.payeeId, table.status),
+]);

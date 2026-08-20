@@ -10,6 +10,7 @@ type GeneralRequest = {
   history?: Array<{ role: "king" | "general"; text: string }>;
   kingdom?: {
     name?: string;
+    generalName?: string;
     ruler?: string;
     keepLevel?: number;
     population?: number;
@@ -48,12 +49,17 @@ type GeneralRequest = {
   pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
   /** Sunucunun eklediği kalıcı hafıza ve talep blokları; istemciden gelmez. */
   memoryLines?: string[];
+  /** Açık müzakere masaları; sunucu ekler, istemci gönderemez. */
+  negotiationLines?: string[];
 };
 
 const actionTools = [
-  { name: "build_structure", description: "Yeni bina kurar veya mevcut binayı tam bir seviye yükseltir. Açık ve rutin bir inşa emrinde tekrar onay istemeden çağır. confirmed_risk yalnızca Kral, bildirilen kaynak/yiyecek riskine rağmen açıkça ısrar etmişse true olabilir.", parameters: { type: "object", properties: { building_type: { type: "string", enum: ["keep","wheat_farm","lumberjack","quarry","town_square","barracks","apple_orchard","mill","market","wall","mine"] }, target_level: { type: "integer", minimum: 1, maximum: 6 }, confirmed_risk: { type: "boolean" } }, required: ["building_type","target_level"], additionalProperties: false } },
+  { name: "build_structure", description: "Yeni bina kurar veya mevcut binayı tam bir seviye yükseltir. Açık ve rutin bir inşa emrinde tekrar onay istemeden çağır. confirmed_risk yalnızca Kral, bildirilen kaynak/yiyecek riskine rağmen açıkça ısrar etmişse true olabilir.", parameters: { type: "object", properties: { building_type: { type: "string", enum: BUILDABLE_TYPES }, target_level: { type: "integer", minimum: 1, maximum: 6 }, confirmed_risk: { type: "boolean" } }, required: ["building_type","target_level"], additionalProperties: false } },
   { name: "train_unit", description: "Kral açıkça birlik eğitmeni istediğinde eğitim kuyruğu başlatır. Yiyecek krizi veya büyük nüfus kaybı varsa önce teyit iste; teyitten sonra confirmed_risk true olabilir.", parameters: { type: "object", properties: { unit_type: { type: "string", enum: ["spearman"] }, count: { type: "integer", minimum: 1, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["unit_type","count"], additionalProperties: false } },
   { name: "propose_action", description: "Kralın cümlesinden bir istek ANLADIN ama bu açık bir emir değil: yapmayı düşündüğün somut eylemi Kralın onayına sunar. Eylemi UYGULAMAZ, yalnızca bekletir; Kral 'onay/evet/tamam' derse sen bir şey yapmadan uygulanır. Emir kipi olmayan ama niyet taşıyan her cümlede bunu kullan.", parameters: { type: "object", properties: { action: { type: "string", description: "Onaya sunulacak aracın adı, örn. trade_resource" }, arguments: { type: "object", description: "O aracın alacağı parametreler" }, summary: { type: "string", description: "Kralın göreceği tek cümlelik özet, örn. 'Pazarda 100 odun satacağım.'" } }, required: ["action","summary"], additionalProperties: false } },
+  { name: "open_negotiation", description: "Komşu krallığın Generaliyle müzakere masası açar. Kral haraç istemek, saldırmazlık, ittifak, geçiş izni ya da ültimatom için görüşmeyi emrettiğinde çağır. Hedefi yalnızca neighbors listesindeki ordinal ile belirt.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1 }, topic: { type: "string", enum: ["tribute","non_aggression","alliance","passage","ultimatum"] }, message: { type: "string", minLength: 5, maxLength: 600 } }, required: ["target_ordinal","topic","message"], additionalProperties: false } },
+  { name: "reply_negotiation", description: "Açık bir müzakere masasında karşı tarafa cevap yazar. Blöf yapabilirsin: krallığının gerçek gücünü olduğundan farklı gösterebilirsin.", parameters: { type: "object", properties: { table_ordinal: { type: "integer", minimum: 1 }, message: { type: "string", minLength: 2, maxLength: 600 } }, required: ["table_ordinal","message"], additionalProperties: false } },
+  { name: "propose_terms", description: "Müzakerede somut şart sunar. Şart UYGULANMAZ; karşı Kralın onayına gider. Haraçta kimin ödeyeceğini payer ile belirt: 'us' bizim ödediğimiz, 'them' karşı tarafın ödediği demektir.", parameters: { type: "object", properties: { table_ordinal: { type: "integer", minimum: 1 }, payer: { type: "string", enum: ["us","them"] }, resource: { type: "string", enum: ["gold","food","stone","wood","iron","ale"] }, amount_per_payment: { type: "integer", minimum: 0, maximum: 5000 }, every_hours: { type: "integer", minimum: 1, maximum: 72 }, hours: { type: "integer", minimum: 1, maximum: 72 }, message: { type: "string", maxLength: 600 } }, required: ["table_ordinal","hours"], additionalProperties: false } },
   { name: "trade_resource", description: "Pazarda kaynak satar veya satın alır. Kral satmayı/almayı emrettiğinde çağır; miktarı sen belirle.", parameters: { type: "object", properties: { resource: { type: "string", enum: ["food","wood","stone","iron","ale"] }, amount: { type: "integer", minimum: 1, maximum: 100000 }, direction: { type: "string", enum: ["sell","buy"] } }, required: ["resource","amount","direction"], additionalProperties: false } },
   { name: "call_settlers", description: "Çevre köylerden göçmen çağırır; boş konut ve yeterli rıza varsa nüfusu doğrudan artırır. Kral nüfusu artırmak istediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "host_festival", description: "Halkın rızasını artırmak için şenlik düzenler.", parameters: { type: "object", properties: {}, additionalProperties: false } },
@@ -64,7 +70,7 @@ const actionTools = [
   { name: "set_ale_ration", description: "Bira istihkakını yüzde olarak belirler; halkın moralini yükseltir ama açlığı telafi etmez. Bira Evi kurulu değilse uygulanamaz.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 } }, required: ["percent"], additionalProperties: false } },
   { name: "set_soldier_pay", description: "Asker maaşını yüzde olarak belirler. Eksik ödenen askerler önce maaş ister, sonra firar eder, en sonunda isyan eder ve halkı zapt etmeyi bırakır. %60'ın altına inmek için Kralın açık teyidi gerekir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 200 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
   { name: "set_watch_ratio", description: "Ordunun ne kadarının sürekli nöbet tutacağını yüzde olarak belirler. Nöbetteki asker dağdan inen kurt, haydut ve akıncıları karşılar; ama nöbette olduğu için halkın huzursuzluğunu bastırmaya daha az kalır. %30'un altı kaleyi akınlara açar, %85'in üstü halkı zapt edecek kuvvet bırakmaz; iki uç da Kralın açık teyidini gerektirir.", parameters: { type: "object", properties: { percent: { type: "integer", minimum: 0, maximum: 100 }, confirmed_risk: { type: "boolean" } }, required: ["percent"], additionalProperties: false } },
-  { name: "set_night_order", description: "Kral 'ben yokken', 'gece', 'çevrimdışıyken' veya 'sen idare et' diyerek kalıcı bir gece emri verdiğinde çağır. Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar. Onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
+  { name: "set_night_order", description: "Kral ŞU ANLA SINIRLI OLMAYAN bir talimat verdiğinde çağır. Belirli kelimeleri bekleme; cümlenin biçimine değil, zamana yayılıp yayılmadığına bak. Kalıcı sayılanlar: koşullu talimat ('kışla biter bitmez Meydana geç'), sıralı plan ('önce X sonra Y'), süregelen ilke ('halkı aç bırakma', 'hazineyi 500 altının altına düşürme') ve hedef ('Kale Sv.5 olana kadar ekonomiyi büyüt'). Kalıcı SAYILMAYAN: şu an yapılacak tek bir iş ('Taş Ocağı kur'). Bu araç yetkiyi AÇMAZ; emri Kralın onayına sunar ve onay alınmadan gece hiçbir şey yapılmaz.", parameters: { type: "object", properties: { instruction: { type: "string", minLength: 5, maxLength: 300 } }, required: ["instruction"], additionalProperties: false } },
   { name: "cancel_night_order", description: "Kral gece emrini iptal ettiğinde veya 'artık ben yokken bir şey yapma' dediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. İşçiler halkın içinden çıkar: madene giden her el tarlada eksilir ama yine de istihkakını yer. En fazla nüfusun %20'si gönderilebilir, ayrıca channel'daki yuva sayısı sınırlıdır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 200 } }, required: ["workers"], additionalProperties: false } },
   { name: "recall_miners", description: "Ortak madendeki bütün işçileri geri çeker. Kral işçileri geri çağırmayı emrettiğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
@@ -98,7 +104,7 @@ function gamePrompt(body: GeneralRequest) {
   const state: Record<string, unknown> = { ...(body.kingdom ?? {}) };
   delete state.quota;
   return [
-    "Sen Demirkale oyunundaki General Aldric'sin; bir yardım botu gibi değil, Kralını uzun zamandır tanıyan sakin ve açık sözlü bir komutan gibi konuş.",
+    `Sen Demirkale oyunundaki ${body.kingdom?.generalName ?? "General Aldric"}'sin; bir yardım botu gibi değil, Kralını uzun zamandır tanıyan sakin ve açık sözlü bir komutan gibi konuş.`,
     "Türkçe, doğal ve kısa konuş. Her yanıta selamla veya durum raporuyla başlama; doğrudan Kralın son cümlesine karşılık ver.",
     "Kısa soruya kısa cevap ver. Gereksiz başlık, emoji, slogan, tekrar ve dramatik hitap kullanma.",
     "Karşılaştırma varsa Markdown tablosu; sıralı işler varsa numaralı liste kullan. Aksi halde 1-3 doğal paragraf yeterlidir.",
@@ -111,6 +117,8 @@ function gamePrompt(body: GeneralRequest) {
     "Kral kalıcı bir öncelik/doktrin belirttiğinde set_strategy_note aracını kullan. Doktrin sonraki değerlendirmelerinde bağlayıcı bağlamdır fakat krallığı felakete götürüyorsa itiraz edebilirsin.",
     "Açık ve rutin bir emir geldiğinde uygun aracı hemen çağır; yeniden 'yapayım mı?' diye sorma.",
     "Araçlar her turda elinin altındadır; emir ile sohbeti AYIRT ETMEK SENİN İŞİNDİR. Soru, varsayım, fikir alma, olasılık tartışması, durum raporu isteği ve 'şöyle olsa ne yaparsın?' cümlelerinde hiçbir araç çağırma — bunlarda yalnızca konuş. Aracı, Kral bir işin yapılmasını istediğinde çağır; bunu cümlenin kelimelerinden değil niyetinden anla. 'Biraları satabilirsin', 'sat', 'o zaman odun sat' gibi kısa ve dolaylı cümleler de emirdir.",
+    "Kral kalıcı bir talimat verdiğinde bunu KENDİN fark et ve set_night_order ile deftere geçir; 'bunu gece emri olarak al' demesini bekleme. Ölçüt kelimeler değil, talimatın zamana yayılıp yayılmadığıdır: bir koşul ileride gerçekleşecekse, bir sıra takip edilecekse ya da bir ilke sürekli geçerli olacaksa bu kalıcı bir emirdir. Kaydettikten sonra Krala kısaca 'deftere geçirdim' de ve yetki sorusunu sor; kayıt tek başına gece çalışma izni değildir.",
+    "Aynı şeyi iki kez deftere geçirme. Kral zaten var olan bir emri tekrarlıyor ya da ayrıntısını değiştiriyorsa yeni emir açma, mevcut olanı güncellemeyi öner. Şu an yapılacak tek bir iş kalıcı emir değildir; onu doğrudan uygula.",
     "Kral emir kipi kullanmak zorunda değil. 'Altına ihtiyacım var', 'şu odunlar fazla', 'halk aç kalmasın', 'bir şeyler yapmalıyız' gibi cümleler de bir istek taşır. Böyle bir cümlede ne yapılması gerektiğini SEN çıkar, somut bir eyleme çevir ve propose_action ile Kralın onayına sun; kararı ona bırak ama seçeneği sen üret. 'Ne yapmamı istersiniz?' diye topu geri atma.",
     "propose_action ile sunduğun öneri beklemeye alınır. Kral 'onay', 'evet', 'tamam' derse eylem sen bir şey yapmadan uygulanır; 'iptal' derse düşer. Öneriyi sunduktan sonra aynı turda ayrıca aracı çağırma.",
     "Açık ve rutin emirlerde öneriye gerek yok: aracı doğrudan çağır. propose_action yalnızca niyeti yorumladığın, emrin açık olmadığı durumlar içindir.",
@@ -126,6 +134,10 @@ function gamePrompt(body: GeneralRequest) {
     "Akını yalnızca NÖBETTEKİ asker, Sur seviyesi ve arazinin savunma avantajı karşılar. Savunma akının şiddetini aşarsa akın kayıpsız püskürtülür; aşamazsa yarılan pay kadar asker ölür, yiyecek ve altın yağmalanır, halkın rızası düşer. Maaşsız kalıp huzursuzlaşan asker iyi savunmaz.",
     "Nöbet oranı gerçek bir seçimdir: nöbete verdiğin asker akını karşılar ama halkın huzursuzluğunu bastırmaya daha az kalır, yani üretim ve iş bırakma riski artar. Az askerle iki işi birden yapamazsın; Krala bu bedeli açıkça söyle. Oranı set_watch_ratio ile ayarla, savunma gücünü KRALLIK_DURUMU içindeki defense alanından oku ve rakam uydurma.",
     "Hızlandırma parayla bitirme DEĞİLDİR: dışarıdan gezgin usta tutulur ve kalan süre yalnızca yarıya iner. Ustalar krallığın nüfusundan çıkmaz, tarlada bir el eksiltmez; buna karşılık yevmiyeleri ağırdır ve aynı işe ikinci kez usta çağrılamaz. Krala 'anında biter' deme.",
+    // Müzakere doktrini paylaşılan modülden gelir; Kral çevrimdışıyken cron'da
+    // konuşan General de aynı satırları okur, aksi halde bilgi sınırı iki yerde
+    // ayrı ayrı yazılır ve sessizce birbirinden sapardı.
+    ...NEGOTIATION_DOCTRINE,
     "Pazar kaynağı altına, altını kaynağa çevirir ve bunu YALNIZCA trade_resource aracı yapar. Alış fiyatı satıştan yüksektir, yani alıp satmak hep zarardır. Günlük hacim Pazar seviyesi başına 500 birimdir. Pazar kurulu değilse hiçbir kaynak altına çevrilemez; bu durumda Krala açıkça 'Pazarımız yok, satamam' de.",
     "Sana verilen araçların DIŞINDA hiçbir yetenek yoktur. Ticaret, diplomasi, ittifak, saldırı, kuşatma, kaynak bağışı, kredi, kervan ve pazarlık gibi araç listesinde karşılığı olmayan işleri yapabilirmiş gibi konuşma, söz verme ve 'hemen yaparım' deme. Kral olmayan bir şeyi isterse 'bu krallıkta böyle bir şey yok' diye açıkça söyle.",
     "Ortak maden channel'daki bütün krallıklarla paylaşılır; toplam yuva sınırlıdır, komşular doldurursa sana az kalır. Madenciler halkın içinden çıkar, yerel üretimi düşürür. Maden emirlerinde send_miners/recall_miners kullan.",
@@ -142,6 +154,9 @@ function gamePrompt(body: GeneralRequest) {
          "Kral bu bekleyen emre cevap veriyor. Onaylıyorsa uygulanacağını, gerekçe sunmasını beklediğini ya da vazgeçtiyse emrin düştüğünü kendi ağzınla kısaca belirt."]
       : []),
     ...(body.memoryLines ?? []),
+    // Masalar sunucudan gelir. İstemci göndermediği için General eskiden hangi
+    // masada ne konuşulduğunu göremiyor, `table_ordinal` değerini kör uyduruyordu.
+    ...(body.negotiationLines ?? []),
     `KRALLIK_DURUMU=${JSON.stringify(state)}`,
   ].join("\n");
 }
@@ -217,6 +232,9 @@ async function anthropic(body: GeneralRequest) {
  * 1) General emri kaydeder → status "pending_approval", gece hiçbir şey yapılmaz.
  * 2) Kral "sen uygula" derse → "active" + autonomous; "önce bana sor" derse → "active" + ask.
  */
+/** Bir Kralın aynı anda tutabileceği kalıcı emir sayısı. */
+const MAX_STANDING_ORDERS = 5;
+
 async function handleNightOrder(
   actions: GeneralAction[],
   body: GeneralRequest,
@@ -244,36 +262,50 @@ async function handleNightOrder(
       .limit(1);
     const channelId = membership?.channelId ?? body.kingdom?.channelId?.trim();
     if (!channelId) return ["🌙 Gece emri için önce bir channel'a katılmalısınız."];
-    const values = {
+    // Her emir kendi satırında durur. Eskiden user_id birincil anahtardı ve
+    // ikinci emir birincisini sessizce siliyordu.
+    const open = await db.select({ id: standingOrders.id, instruction: standingOrders.instruction }).from(standingOrders).where(eq(standingOrders.userId, userId));
+    // General artık kalıcı niyeti kendisi fark ediyor; aynı emri her turda
+    // yeniden deftere geçirmesin diye tekrar burada da engellenir.
+    const fingerprint = (text: string) => text.toLocaleLowerCase("tr-TR").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    if (open.some(entry => fingerprint(entry.instruction) === fingerprint(instruction))) {
+      return ["🌙 Bu emir zaten defterimde; ikinci kez yazmadım."];
+    }
+    if (open.length >= MAX_STANDING_ORDERS) {
+      return [`🌙 Zaten ${MAX_STANDING_ORDERS} kalıcı emriniz var. Yenisini almadan önce birini kaldırmalıyız; hangisinden vazgeçiyorsunuz?`];
+    }
+    await db.insert(standingOrders).values({
+      id: `so_${userId}_${Date.now()}`,
       userId, channelId, instruction,
       autonomy: "ask" as const, status: "pending_approval" as const,
       maxActionsPerWake: 1, dailyActionCap: 8, actionsToday: 0, dayStartedAt: Date.now(),
-    };
-    await db.insert(standingOrders).values(values).onConflictDoUpdate({ target: standingOrders.userId, set: values });
-    notes.push(`🌙 Gece emrinizi not ettim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
+    });
+    notes.push(`🌙 Kalıcı emir olarak deftere geçirdim: “${instruction}”\n\n**Bunu siz yokken kendim uygulayayım mı, yoksa her adımda onayınızı mı bekleyeyim?** Siz karar verene kadar arka planda hiçbir şey yapmayacağım.`);
     return notes;
   }
 
   // Bekleyen bir gece emri varsa, Kralın bu mesajı yetki cevabıdır.
-  const [existing] = await db.select().from(standingOrders).where(eq(standingOrders.userId, userId)).limit(1);
-  if (!existing || existing.status !== "pending_approval") return notes;
+  const [existing] = await db.select().from(standingOrders)
+    .where(and(eq(standingOrders.userId, userId), eq(standingOrders.status, "pending_approval")))
+    .orderBy(desc(standingOrders.createdAt)).limit(1);
+  if (!existing) return notes;
 
   const message = (body.message ?? "").toLocaleLowerCase("tr-TR");
   const wantsSupervision = /(bana sor|onayımı|onayimi|önce sor|once sor|sorarak|danış|danis|bekle)/.test(message);
   const grantsAutonomy = confirmation.insisted || /(sen uygula|kendin uygula|sen hallet|sen idare et|yetki|serbest|uygulayabilirsin)/.test(message);
 
   if (confirmation.cancelled) {
-    await db.delete(standingOrders).where(eq(standingOrders.userId, userId));
+    await db.delete(standingOrders).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Gece emrinden vazgeçildi.");
     return notes;
   }
   if (wantsSupervision) {
-    await db.update(standingOrders).set({ status: "active", autonomy: "ask" }).where(eq(standingOrders.userId, userId));
+    await db.update(standingOrders).set({ status: "active", autonomy: "ask" }).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Anlaşıldı. Gece uygun bir hamle görürsem uygulamayacağım, önerimi hazırlayıp onayınızı bekleyeceğim.");
     return notes;
   }
   if (grantsAutonomy) {
-    await db.update(standingOrders).set({ status: "active", autonomy: "autonomous" }).where(eq(standingOrders.userId, userId));
+    await db.update(standingOrders).set({ status: "active", autonomy: "autonomous" }).where(eq(standingOrders.id, existing.id));
     notes.push("🌙 Yetkiyi aldım. Siz yokken saatte en fazla bir hamle yapacağım, günde en çok sekiz. Sabah defterde ne yaptığımı göreceksiniz.");
   }
   return notes;
@@ -335,6 +367,20 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
   const { open } = await syncRequests(userId, derived, now);
   const entries = await loadLedger(userId);
   return { lines: renderGeneralMemory(entries, open, now), open, derived };
+}
+
+/**
+ * Açık müzakere masalarını sistem promptuna taşır.
+ *
+ * Sıra numaraları paylaşılan yükleyiciden gelir; Kralın arayüzünde gördüğü sıra
+ * ile Generalin çağrısındaki `table_ordinal` aynı masayı göstermek zorundadır.
+ */
+async function loadNegotiationLines(userId: string) {
+  const [row] = await getDb().select({ channelId: channelMembers.channelId, channelName: channels.name })
+    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
+    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
+  if (!row) return [];
+  return renderNegotiationLines(await briefsFor(userId, row.channelId, row.channelName));
 }
 
 /** Bir talebin "geçiştirildi" sayılması için açık kalması gereken süre. */
@@ -455,6 +501,7 @@ export async function POST(request: Request) {
     const now = Date.now();
     const memory = await loadGeneralMemory(user.id, body, now);
     body.memoryLines = memory.lines;
+    body.negotiationLines = await loadNegotiationLines(user.id);
 
     if (pending && confirmation.cancelled) {
       await clearPendingDecision(user.id);
@@ -530,9 +577,12 @@ export async function POST(request: Request) {
   }
 }
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { channelMembers, channels, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { NEGOTIATION_DOCTRINE, renderNegotiationLines } from "../../../server/negotiation-brief";
+import { briefsFor } from "../../../server/negotiation-desk";
+import { BUILDABLE_TYPES } from "../../../engine/catalog";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
 import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
@@ -542,4 +592,4 @@ import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";
 import { readProposal } from "../../../server/general-proposal";
-import { CLAIM_PATTERN, isConfirmationReply, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";
+import { CLAIM_PATTERN, isExplicitOrder, shouldOfferTools } from "../../../server/general-intent";

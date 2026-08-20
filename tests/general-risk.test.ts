@@ -97,3 +97,30 @@ test("vazgeçme onay sayılmaz", () => {
     assert.equal(readConfirmation(reply).insisted, false, `"${reply}" onay olmamalı`);
   }
 });
+
+test("itiraz, oranı hangi kaynaktan aldıysa onun adını söyler", () => {
+  // Bu satır bir kez yanlıştı: oran EN SIKIŞAN kaynaktan alınıyor ama ad
+  // maliyetin en BÜYÜK kalemine göre seçiliyordu. Kralın taşı azken odunu
+  // boldu, dolayısıyla General "odun stokunun %120'si" diyor ama gerçekte
+  // sıkışan taştı — rakam bir kaynağı, isim başkasını anlatıyordu.
+  const state: KingdomSnapshot = {
+    resources: { gold: 4258, food: 23763, stone: 2524, wood: 3700, iron: 468, ale: 977 },
+    hourlyRates: { gold: 18.6, food: 34.2, stone: 9.4, wood: 28.6, iron: 6.3, ale: 2.6 },
+    population: 506, popularity: 54, loyalty: 81, army: 49, protectionHoursLeft: 0, counterIntelligenceActive: false,
+  };
+  // Odun kalemi daha BÜYÜK, ama sıkışan taş.
+  const assessment = assessAction({ name: "build_structure", arguments: {} }, state, { wood: 3683, stone: 3036 });
+  assert.match(assessment.reasons[0], /taş/, `sıkışan kaynağın adı geçmeli: ${assessment.reasons[0]}`);
+  assert.doesNotMatch(assessment.reasons[0], /odun/, "büyük kalemin adı geçmemeli");
+});
+
+test("depo yükseltmeleri bol kaynakla itiraz görmez", () => {
+  const state: KingdomSnapshot = {
+    resources: { gold: 4258, food: 23763, stone: 2524, wood: 3700, iron: 468, ale: 977 },
+    hourlyRates: { gold: 18.6, food: 34.2, stone: 9.4, wood: 28.6, iron: 6.3, ale: 2.6 },
+    population: 506, popularity: 54, loyalty: 81, army: 49, protectionHoursLeft: 0, counterIntelligenceActive: false,
+  };
+  for (const cost of [{ wood: 241, stone: 111 }, { wood: 204, stone: 204 }]) {
+    assert.equal(assessAction({ name: "build_structure", arguments: {} }, state, cost).level, "low");
+  }
+});
