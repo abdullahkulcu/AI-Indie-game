@@ -243,10 +243,17 @@ function checkFirstSave(game: GameSave): ValidationFailure | null {
 /**
  * Sunucu, önceki kayıttan bu ana kadarki üretimi aynı motorla kendisi simüle eder.
  *
- * Oyunda kaynak yaratan tek yol tick üretimidir: bütün emirler kaynak *harcar*,
- * ortak maden ise oyuncunun kaydına cevher yazmaz. Dolayısıyla istemcinin bildirdiği
- * kaynak, sunucunun kendi simülasyonunun üstüne çıkamaz. Bu, genel tavanlardan çok
- * daha dar bir sınırdır ve uydurma kaynağı gerçek üretim eğrisiyle yakalar.
+ * İstemcinin kendi başına kaynak yaratabildiği tek yol tick üretimidir: bütün
+ * emirler kaynak *harcar*. Dolayısıyla istemcinin bildirdiği kaynak, sunucunun
+ * kendi simülasyonunun üstüne çıkamaz. Bu, genel tavanlardan çok daha dar bir
+ * sınırdır ve uydurma kaynağı gerçek üretim eğrisiyle yakalar.
+ *
+ * DIŞARIDAN GELEN KAYNAK TAVANI BOZMAZ, çünkü hepsini SUNUCU yazar ve kayda
+ * yazıldığı an `previous`ın içine girer: haraç tahsilatı (app/api/cron/route.ts)
+ * ve ortak madenin cevher teslimi (app/api/mine/route.ts) sürüm korumalı yazma
+ * ile doğrudan `game_saves`e işlenir. İstemci o cevheri ancak sunucudan aldıktan
+ * sonra bildirebilir; kendi başına "madenden 500 demir aldım" diyemez, çünkü
+ * `previous` onu içermiyorsa tavan da yükselmez ve kayıt reddedilir.
  *
  * Akınlar bu varsayımı bozmaz çünkü kaynak ÇALARLAR, üretmezler. Yine de yağmayı
  * tavandan düşmüyoruz: istemci iki kayıt arasında nöbeti yükseltip akını

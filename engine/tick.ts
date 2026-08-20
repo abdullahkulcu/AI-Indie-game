@@ -1,5 +1,5 @@
 export { materialScaleOf } from "./catalog";
-import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
+import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, millMultiplier, resourceLabels, terrainCatalog } from "./catalog";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
@@ -97,7 +97,10 @@ export function grossRates(g: Game): Res {
   const labor = laborFactor(g);
   return {
     gold: g.population * g.taxRate / 100 * .22 * labor,
-    food: ((levels.wheat_farm ?? 0) * 18 + (levels.apple_orchard ?? 0) * 10) * terrain.food * labor,
+    // Değirmen yalnızca BUĞDAYI büyütür: tarlanın ürününü öğütür, kendi başına
+    // tarla ekmez. Çarpan üretim hızına uygulandığı için hesap adımlara
+    // bölününce de tek adımda da aynı sonucu verir (bkz. tests/engine.test.ts).
+    food: ((levels.wheat_farm ?? 0) * 18 * millMultiplier(levels.mill ?? 0) + (levels.apple_orchard ?? 0) * 10) * terrain.food * labor,
     stone: (levels.quarry ?? 0) * 16 * terrain.stone * labor,
     wood: (levels.lumberjack ?? 0) * 22 * terrain.wood * labor,
     iron: (levels.mine ?? 0) * 7 * terrain.iron * labor,

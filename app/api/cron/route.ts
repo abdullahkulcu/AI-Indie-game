@@ -15,6 +15,8 @@ import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
 import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
+// Koşullu (sürüm korumalı) yazma tek kopyadır; ortak maden de aynı kapıyı kullanır.
+import { writeSaveIfUnchanged } from "../../../server/save-write";
 
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
@@ -43,22 +45,6 @@ const NIGHT_PROMPT = [
  * biri araç şemasını, öbürü zaman aşımını farklı kurar ve fark ancak yayında
  * görülürdü.
  */
-/**
- * Kaydı YALNIZCA okuduğumuz sürüm hâlâ geçerliyse yazar.
- *
- * Cron kaydı okur, sağlayıcıya gider (saniyeler sürer), sonra okuduğu hâlin
- * üstüne yazardı. Kralın tarayıcısı 5 saniyede bir kaydettiği için o aralıkta
- * biten inşaat, tamamlanan kuyruk ya da kurulan bina SESSİZCE siliniyordu.
- * Artık yazma koşulludur; sürüm değiştiyse çağıran taze durumla tekrar dener.
- */
-async function writeSaveIfUnchanged(userId: string, expectedRevision: number, game: unknown) {
-  const rows = await getDb().update(gameSaves)
-    .set({ gameState: JSON.stringify(game), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
-    .where(and(eq(gameSaves.userId, userId), eq(gameSaves.revision, expectedRevision)))
-    .returning({ revision: gameSaves.revision });
-  return rows.length > 0;
-}
-
 async function callProvider(input: {
   provider: string; model: string; apiKey: string;
   system: string; tools: DeskTool[]; user: string; maxTokens?: number;

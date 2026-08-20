@@ -1,4 +1,4 @@
-import { keepUpgradeCosts } from "../engine/catalog";
+import { MILL_WHEAT_BONUS, catalog, keepUpgradeCosts, millMultiplier } from "../engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
@@ -362,4 +362,65 @@ test("inşa maliyeti tek kaynaktan gelir", () => {
   assert.deepEqual(warehouse.cost, costFor({ wood: 110, stone: 110 }, 0, materialScaleOf(24)));
   // Kale ayrı tarifeden gelir ve çarpanla büyümez.
   assert.deepEqual(options.find(option => option.type === "keep")?.cost, keepUpgradeCosts[4]);
+});
+
+// --- Değirmen ---------------------------------------------------------------
+// Değirmen'in HİÇBİR etkisi yoktu: Kral 100 odun + 120 taş ödüyor, karşılığında
+// sıfır alıyordu; üstelik General onu yiyecek çözümü diye öneriyordu. Aşağıdaki
+// testler ya etkinin ölçülebilir olmasını ya da kataloğun boş vaat vermemesini
+// güvence altına alır.
+
+const withBuildings = (extra: Array<{ type: string; level: number }>) =>
+  newGame({ buildings: [...newGame().buildings, ...extra.map(item => ({ type: item.type, name: item.type, category: "Ekonomi", level: item.level }))] });
+
+test("katalogdaki Değirmen'in ölçülebilir bir etkisi var", () => {
+  const item = catalog.find(entry => entry.type === "mill");
+  assert.ok(item, "Değirmen katalogda yoksa bu test silinmeli");
+  const plain = grossRates(newGame());
+  const milled = grossRates(withBuildings([{ type: "mill", level: 1 }]));
+  assert.ok(milled.food > plain.food, "Değirmen yiyecek üretimini artırmalı");
+  assert.equal(Math.round((milled.food - plain.food) * 100) / 100, 18 * MILL_WHEAT_BONUS);
+});
+
+test("Değirmen yalnızca buğdayı büyütür; tarlası olmayana faydası yoktur", () => {
+  const noFarm = newGame({ buildings: [{ type: "keep", name: "Kale", category: "Yönetim", level: 2 }] });
+  const noFarmMill = newGame({ buildings: [
+    { type: "keep", name: "Kale", category: "Yönetim", level: 2 },
+    { type: "mill", name: "Değirmen", category: "Ekonomi", level: 1 },
+  ] });
+  assert.equal(grossRates(noFarmMill).food, grossRates(noFarm).food);
+  // Elma Bahçesi buğday zincirinin dışındadır; Değirmen ona dokunmaz.
+  const orchard = withBuildings([{ type: "apple_orchard", level: 1 }]);
+  const orchardMill = withBuildings([{ type: "apple_orchard", level: 1 }, { type: "mill", level: 1 }]);
+  assert.equal(grossRates(orchardMill).food - grossRates(orchard).food, 18 * MILL_WHEAT_BONUS);
+});
+
+test("Değirmen'in etkisi seviyeyle doğrusal büyür ve tek kaynaktan gelir", () => {
+  const wheat = 3;
+  for (let level = 0; level <= 6; level += 1) {
+    const game = withBuildings([{ type: "mill", level: Math.max(1, level) }]);
+    const buildings = game.buildings.map(b => b.type === "wheat_farm" ? { ...b, level: wheat } : b);
+    const rates = grossRates({ ...game, buildings: level === 0 ? buildings.filter(b => b.type !== "mill") : buildings });
+    assert.equal(Math.round(rates.food * 1e6) / 1e6, Math.round(wheat * 18 * millMultiplier(level) * 1e6) / 1e6);
+  }
+});
+
+test("Değirmen çarpanı hesabı adımlara bölünce bozmaz", () => {
+  // Depo bozulması üstel yazılıp iki kez kırıldığı için kural: çarpımsal her
+  // etki adım testinden geçmeli. İstemci saniyelik adımlarla, sunucu tek adımda
+  // ilerliyor; ayrışırsa sunucu kaydı reddeder.
+  const step = (game: Game, steps: number) => {
+    let current = game;
+    for (let i = 1; i <= steps; i += 1) current = tick(current, T0 + i * (3_600_000 / steps));
+    return current;
+  };
+  const deviation = (game: Game) => {
+    const single = tick(game, T0 + 3_600_000).resources.food;
+    return Math.abs(step(game, 3600).resources.food - single) / single;
+  };
+  const plain = deviation(newGame());
+  const milled = deviation(withBuildings([{ type: "mill", level: 3 }]));
+  // Değirmen yeni bir adım bağımlılığı EKLEMEMELİ.
+  assert.ok(milled <= plain + 1e-9, `Değirmen adım sapması büyüttü: ${milled} > ${plain}`);
+  assert.ok(milled < .01, `adım sapması çok büyük: ${milled}`);
 });

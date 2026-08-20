@@ -10,6 +10,21 @@ export const terrainCatalog: Record<TerrainId, {
   riverbank: { label: "NEHİR KIYISI", description: "Verimli kıyı ve geniş geçit", bonus: "+%25 yiyecek · +%8 savunma · yavaş geçiş", food: 1.25, wood: 1, stone: .9, iron: .9, defense: 1.08, travel: .75 },
 };
 
+/**
+ * Değirmen'in buğday zincirine katkısı: seviye başına Buğday Tarlası üretimini
+ * bu oranda büyütür.
+ *
+ * Değirmen'in HİÇBİR etkisi yoktu: Kral 100 odun + 120 taş ödüyor, karşılığında
+ * sıfır alıyordu. Etki çarpımsaldır çünkü Değirmen kendi başına buğday üretmez,
+ * eldeki buğdayı öğütür — tarlası olmayanın değirmeni de boş döner. Çarpan
+ * saatlik ÜRETİM HIZINA uygulanır (biriken stoğa değil), yani hesap saniyelik
+ * adımlara bölününce de tek adımda da aynı sonucu verir.
+ */
+export const MILL_WHEAT_BONUS = .25;
+
+/** Değirmen seviyesinin buğday üretimine çarpanı. Tek kaynak burasıdır. */
+export const millMultiplier = (level: number) => 1 + MILL_WHEAT_BONUS * Math.max(0, level || 0);
+
 export const catalog = [
   { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", unlock: 1, seconds: 3600, cost: { wood: 80 }, detail: "+18 yiyecek/sa" },
   { type: "lumberjack", name: "Oduncu Kulübesi", category: "Ekonomi", unlock: 1, seconds: 3600, cost: { gold: 40, stone: 25 }, detail: "+22 odun/sa" },
@@ -19,7 +34,7 @@ export const catalog = [
   { type: "apple_orchard", name: "Elma Bahçesi", category: "Ekonomi", unlock: 1, seconds: 4200, cost: { wood: 90, gold: 30 }, detail: "+10 yiyecek/sa" },
   { type: "granary", name: "Ambar", category: "Ekonomi", unlock: 1, seconds: 4800, cost: { wood: 130, stone: 60 }, detail: "Yiyecek ve bira deposu · seviye başına +2.600 yiyecek" },
   { type: "warehouse", name: "Depo", category: "Ekonomi", unlock: 1, seconds: 5400, cost: { wood: 110, stone: 110 }, detail: "Odun ve taş deposu · seviye başına +2.200" },
-  { type: "mill", name: "Değirmen", category: "Ekonomi", unlock: 2, seconds: 10800, cost: { wood: 100, stone: 120 }, detail: "Buğday zincirini büyütür" },
+  { type: "mill", name: "Değirmen", category: "Ekonomi", unlock: 2, seconds: 10800, cost: { wood: 100, stone: 120 }, detail: `Buğday Tarlası üretimini seviye başına +%${Math.round(MILL_WHEAT_BONUS * 100)} büyütür · tarlası olmayana faydası yok` },
   { type: "market", name: "Pazar", category: "Ekonomi", unlock: 2, seconds: 14400, cost: { wood: 160, stone: 80 }, detail: "Kaynak alıp satar · seviye başına 1.500 birim/gün" },
   { type: "wall", name: "Sur", category: "Askerî", unlock: 3, seconds: 28800, cost: { stone: 500, wood: 100 }, detail: "+%20 savunma" },
   { type: "mine", name: "Maden", category: "Ekonomi", unlock: 1, seconds: 10800, cost: { wood: 150, stone: 80 }, detail: "50.000 cevher rezervi" },
