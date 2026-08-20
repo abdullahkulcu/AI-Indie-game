@@ -6,9 +6,10 @@ import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
 import { agreements, channels, gameSaves, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
-  LIMITS, canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide,
-  shouldGeneralAnswer, tributePayment, validateTerms, type Side, type Terms,
+  LIMITS, MISSES_BEFORE_BREACH, canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide,
+  settleTribute, shouldGeneralAnswer, validateTerms, type Side, type Terms, type TributeSettlement,
 } from "../../../engine/negotiation";
+import { reputationChange } from "../../../server/game/diplomacy";
 import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, type DeskTool } from "../../../server/negotiation-brief";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
@@ -366,11 +367,55 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
  * Ambarda yoksa olan gider, borç birikmez — ve tek ödemede ambarın yarısından
  * fazlası hiçbir koşulda çıkmaz.
  */
+/**
+ * Vadeleri deftere yazar ve kaçırılanı cezalandırır.
+ *
+ * Eskiden ödenemeyen vade de "ödendi" sayılıyordu: ambarı boş olan taraf
+ * bedelsiz sıyrılıyordu — ne bildirim, ne itibar kaybı, ne anlaşmanın bozulması.
+ */
+async function recordTribute(
+  deal: typeof agreements.$inferSelect,
+  due: number,
+  settlement: TributeSettlement,
+  now: number,
+) {
+  const db = getDb();
+  if (settlement.missed === 0) {
+    await db.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
+    return;
+  }
+  const missed = deal.missedCount + settlement.missed;
+  const breached = missed >= MISSES_BEFORE_BREACH;
+  await db.update(agreements)
+    .set({ paidCount: deal.paidCount + due, missedCount: missed, status: breached ? "broken" : "active" })
+    .where(eq(agreements.id, deal.id));
+
+  const notes: Array<[string, string, number]> = [
+    [deal.payerId, breached
+      ? "Haracı ödeyemediniz; anlaşma bozuldu ve itibarınız zedelendi."
+      : `Haraç vadesi ödenemedi (${missed}/${MISSES_BEFORE_BREACH}). Ambar yetmiyor; anlaşma bozulmak üzere.`,
+      breached ? reputationChange("betrayal") : 0],
+    [deal.payeeId, breached
+      ? "Karşı taraf haracı ödemedi; anlaşma bozuldu. Sözünü tutmayanın itibarı düştü."
+      : `Beklenen haraç gelmedi (${missed}/${MISSES_BEFORE_BREACH} vade kaçtı).`, 0],
+  ];
+  for (const [userId, text, penalty] of notes) {
+    const [row] = await db.select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
+    const game = row ? parseStoredSave(row.gameState) : null;
+    if (!game) continue;
+    await writeSaveIfUnchanged(userId, row!.revision, {
+      ...game,
+      reputation: Math.max(0, Math.min(100, game.reputation + penalty)),
+      notices: [{ kind: "HARAÇ", text, at: now }, ...game.notices].slice(0, 20),
+    });
+  }
+}
+
 async function settleTributes(now: number) {
   const db = getDb();
   const deals = await db.select().from(agreements)
     .where(and(eq(agreements.status, "active"), eq(agreements.topic, "tribute")));
-  let paid = 0;
+  let paid = 0, missedTotal = 0;
 
   for (const deal of deals) {
     let terms: { resource?: Key; tributeRate?: number; tributeAmount?: number };
@@ -384,14 +429,9 @@ async function settleTributes(now: number) {
       const payee = payeeRow ? parseStoredSave(payeeRow.gameState) : null;
       if (payer && payee) {
         const key = (terms.resource ?? "gold") as Key;
-        let moved = 0;
-        // Her vade ayrı hesaplanır; ambar azaldıkça oranlı haraç da azalır.
-        let stock = payer.resources[key];
-        for (let i = 0; i < due; i++) {
-          const amount = tributePayment(stock, terms);
-          if (amount <= 0) break;
-          stock -= amount; moved += amount;
-        }
+        // Kaçırılan vade artık "ödendi" sayılmıyor; ayrı sayılıyor.
+        const settlement = settleTribute(payer.resources[key], due, terms);
+        const moved = settlement.moved, stock = payer.resources[key] - moved;
         if (moved > 0) {
           const nextPayer = { ...payer, resources: { ...payer.resources, [key]: stock },
             notices: [{ kind: "HARAÇ", text: `Anlaşma gereği ${moved} ${key} ödendi.`, at: now }, ...payer.notices].slice(0, 20) };
@@ -412,18 +452,19 @@ async function settleTributes(now: number) {
               .where(and(eq(gameSaves.userId, deal.payeeId), eq(gameSaves.revision, payeeRow!.revision)))
               .returning({ userId: gameSaves.userId });
             if (!payeeWrite.length) { trx.rollback(); return false; }
-            await trx.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
             return true;
           }).catch(() => false);
-          if (settled) paid += moved;
+          if (settled) paid += moved; else continue;
         }
+        await recordTribute(deal, due, settlement, now);
+        missedTotal += settlement.missed;
       }
     }
     if (now >= deal.endsAt) {
       await db.update(agreements).set({ status: "completed" }).where(eq(agreements.id, deal.id));
     }
   }
-  return { deals: deals.length, paid };
+  return { deals: deals.length, paid, missed: missedTotal };
 }
 
 export async function POST(request: Request) {

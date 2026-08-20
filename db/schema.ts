@@ -228,6 +228,8 @@ export const agreements = pgTable("agreements", {
   endsAt: bigint("ends_at", { mode: "number" }).notNull(),
   everyHours: integer("every_hours").notNull().default(6),
   paidCount: integer("paid_count").notNull().default(0),
+  /** Ödenemeyen vade sayısı; belli sayıda kaçırma anlaşmayı bozar. */
+  missedCount: integer("missed_count").notNull().default(0),
   status: text("status", { enum: ["active", "completed", "broken"] }).notNull().default("active"),
 }, (table) => [
   index("idx_agreements_payer").on(table.payerId, table.status),

@@ -281,3 +281,34 @@ export function duePayments(agreement: { startedAt: number; everyHours: number; 
   const elapsed = Math.floor((until - agreement.startedAt) / (agreement.everyHours * 3_600_000));
   return Math.max(0, elapsed - agreement.paidCount);
 }
+
+/** Anlaşmanın bozulması için gereken kaçırılmış vade sayısı. */
+export const MISSES_BEFORE_BREACH = 2;
+
+export type TributeSettlement = {
+  /** Fiilen taşınan miktar. */
+  moved: number;
+  /** Bu turda ödenebilen vade sayısı. */
+  paid: number;
+  /** Ambar yetmediği için ödenemeyen vade sayısı. */
+  missed: number;
+};
+
+/**
+ * Bir turda kapatılan vadeleri hesaplar.
+ *
+ * Eskiden ödenemeyen vade de "ödendi" sayılıyordu: ambarı boş olan taraf hiçbir
+ * bedel ödemeden anlaşmadan sıyrılıyordu — ne itibar kaybı, ne bildirim, ne
+ * anlaşmanın bozulması. Artık kaçırılan vade ayrı sayılır.
+ */
+export function settleTribute(stock: number, due: number, terms: Pick<Terms, "tributeRate" | "tributeAmount">): TributeSettlement {
+  let left = Math.max(0, stock), moved = 0, paid = 0, missed = 0;
+  for (let i = 0; i < due; i++) {
+    const amount = tributePayment(left, terms);
+    // Beklenen tutar: sabit rakam varsa o, yoksa orandan çıkan miktar.
+    const expected = terms.tributeAmount && terms.tributeAmount > 0 ? Math.floor(terms.tributeAmount) : amount;
+    if (amount > 0 && amount >= expected) { left -= amount; moved += amount; paid++; }
+    else { missed++; }
+  }
+  return { moved, paid, missed };
+}

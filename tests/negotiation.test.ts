@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { KING_PRESENCE_MS, LIMITS, MAX_TRIBUTE_RATE, canBind, canOpen, canProposeTerms, canSpeak, clampTerms, duePayments, isKingPresent, shouldGeneralAnswer, sideOf, tributePayment, validateTerms, type Negotiation } from "../engine/negotiation";
+import { KING_PRESENCE_MS, LIMITS, MAX_TRIBUTE_RATE, canBind, canOpen, canProposeTerms, canSpeak, clampTerms, duePayments, settleTribute, isKingPresent, shouldGeneralAnswer, sideOf, tributePayment, validateTerms, type Negotiation } from "../engine/negotiation";
 
 const T0 = 1_800_000_000_000;
 
@@ -212,4 +212,22 @@ test("General payını doldurunca susar, Kral konuşmaya devam eder", () => {
     negotiation: open, side: "initiator", lastMessageSide: "target",
     generalTurnsUsed: LIMITS.maxGeneralTurns - 1, kingPresent: false, now: T0,
   }).ok, true);
+});
+
+test("ödenemeyen vade kaçırılmış sayılır, ödenmiş sayılmaz", () => {
+  // Eskiden ambarı boş olan taraf hiçbir bedel ödemeden sıyrılıyordu.
+  const terms = { tributeAmount: 100 };
+  assert.deepEqual(settleTribute(1000, 3, terms), { moved: 300, paid: 3, missed: 0 });
+  // 250 stokla: ilk ödeme 100 (tavan 125), sonra 150'nin yarısı 75 < 100 → kaçtı.
+  const tight = settleTribute(250, 3, terms);
+  assert.equal(tight.paid, 1);
+  assert.equal(tight.missed, 2);
+  assert.deepEqual(settleTribute(0, 2, terms), { moved: 0, paid: 0, missed: 2 });
+});
+
+test("oranlı haraçta eksik ödeme kaçırılmış sayılmaz", () => {
+  // Oran ambarla küçülür; az ödemek anlaşmayı ihlal etmez.
+  const result = settleTribute(1000, 2, { tributeRate: .2 });
+  assert.equal(result.missed, 0);
+  assert.ok(result.moved > 0);
 });
