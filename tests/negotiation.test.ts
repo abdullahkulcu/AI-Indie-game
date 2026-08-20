@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
-  KING_PRESENCE_MS, LIMITS, MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE,
-  MAX_TRIBUTE_RATE_PERCENT, MISSES_BEFORE_BREACH, TRIBUTE_RESOURCES, TRIBUTE_TOPICS,
-  canBind, canOpen, canProposeTerms, canSpeak, carriesTribute, clampTerms, duePayments,
+  DECLINABLE_STATUSES, KING_PRESENCE_MS, LIMITS, MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT,
+  MAX_TRIBUTE_RATE, MAX_TRIBUTE_RATE_PERCENT, MISSES_BEFORE_BREACH, SIGNABLE_STATUS,
+  TRIBUTE_RESOURCES, TRIBUTE_TOPICS,
+  canBind, canDecline, canOpen, canProposeTerms, canSpeak, carriesTribute, clampTerms, duePayments,
   settleTribute, isKingPresent, shouldGeneralAnswer, sideOf, tributeExpected, tributePayment,
   tributeRateFromPercent, validateTerms,
-  type Negotiation, type NegotiationTopic,
+  type Negotiation, type NegotiationStatus, type NegotiationTopic,
 } from "../engine/negotiation";
+import { newId } from "../server/ids";
 import { REPUTATION_CHANGES, reputationChange } from "../engine/diplomacy";
 import { offlineDeskTools } from "../server/negotiation-brief";
 
@@ -351,4 +353,125 @@ test("itibar cezası canlı motordan okunur ve değeri korunur", () => {
   assert.equal(Math.max(0, Math.min(100, 50 + reputationChange("betrayal"))), 30, "itibar 50 → 30");
   assert.equal(REPUTATION_CHANGES.broke_ceasefire, -12);
   assert.equal(REPUTATION_CHANGES.kept_promise, 2);
+});
+
+
+// --- Bu paketin kapattığı kusurlar ---------------------------------------
+// Uç rotası testten import EDİLEMEZ (`cloudflare:workers`). Saf kural motora
+// çıkarıldı ve orada gerçek testi var; uçtaki uygulanışı kaynak metin üzerinden
+// kilitleniyor — önceki paketin cron için kullandığı desenin aynısı.
+
+const routeSource = readFileSync(new URL("../app/api/negotiate/route.ts", import.meta.url), "utf8");
+const panelSource = readFileSync(new URL("../components/KingdomGame.tsx", import.meta.url), "utf8");
+const schemaSource = readFileSync(new URL("../db/schema.ts", import.meta.url), "utf8");
+const membershipSource = readFileSync(new URL("../server/active-membership.ts", import.meta.url), "utf8");
+const saveRouteSource = readFileSync(new URL("../app/api/save/route.ts", import.meta.url), "utf8");
+
+test("imzalanmış masa reddedilemez", () => {
+  // Kusur: decline dalı hiçbir durum denetimi yapmıyordu. Anlaşma yürürlükte
+  // kalırken masa "declined" görünüyor, Kral anlaşmadan çıktığını sanıyordu.
+  assert.equal(canDecline("open").ok, true);
+  assert.equal(canDecline(SIGNABLE_STATUS).ok, true);
+  const signed = canDecline("agreed");
+  assert.equal(signed.ok, false);
+  assert.match(signed.ok ? "" : signed.reason, /anlaşma/i, "Kral anlaşmanın sürdüğünü okumalı");
+  assert.equal(canDecline("declined").ok, false);
+  assert.equal(canDecline("expired").ok, false);
+  // Liste ile kural ayrışmasın: uçtaki koşullu UPDATE de aynı listeden türer.
+  const all: NegotiationStatus[] = ["open", "awaiting_king", "agreed", "declined", "expired"];
+  for (const status of all) {
+    assert.equal(canDecline(status).ok, (DECLINABLE_STATUSES as readonly string[]).includes(status), status);
+  }
+});
+
+test("kimlikler çakışmaz", () => {
+  // Kusur: `ng_${user.id}_${Date.now()}` ve `nm_${row.id}_${now}_${row.turns}`.
+  // Aynı milisaniyede iki masa ya da aynı bayat turns'ü okuyan iki cevap
+  // birincil anahtarı çakıştırıp isteği 500'e düşürüyordu.
+  const ids = new Set(Array.from({ length: 5000 }, () => newId("nm")));
+  assert.equal(ids.size, 5000, "5000 kimlikte tek bir çakışma bile olmamalı");
+  assert.match(newId("ng"), /^ng_[0-9a-f-]{36}$/, "önek korunur, gövde rastgeledir");
+  assert.doesNotMatch(newId("ag"), /\d{13}/, "kimlikte zaman damgası taşınmaz");
+});
+
+test("uç imza yarışını koşullu UPDATE ile kapatır", () => {
+  // Kusur: durum okuması ile yazma arasında koruma yoktu. İki eşzamanlı accept
+  // iki aktif anlaşma yaratıyor ve cron ikisini birden tahsil ediyordu; haracı
+  // ALAN taraf bunu kendi lehine tetikleyebiliyordu.
+  const accept = routeSource.slice(routeSource.indexOf('body.action === "accept"'));
+  assert.match(accept, /eq\(negotiations\.status, SIGNABLE_STATUS\)/, "durum geçişi koşullu olmalı");
+  assert.match(accept, /\.returning\(\{ id: negotiations\.id \}\)/, "yarışın kazananı returning ile anlaşılmalı");
+  assert.match(accept, /if \(!signed\) return json\([^)]*409\)/, "yarışı kaybeden 409 almalı");
+  // Anlaşma ANCAK koşullu update tuttuysa yazılır: sıra tersine dönerse yarış geri gelir.
+  assert.ok(accept.indexOf("if (!signed)") < accept.indexOf("db.insert(agreements)"),
+    "anlaşma insert'i koşullu update'in ARDINDAN gelmeli");
+  assert.doesNotMatch(accept, /status: "agreed" \}\)\.where\(eq\(negotiations\.id/, "koşulsuz update kalmamalı");
+});
+
+test("uç kapanmış masayı reddettirmez", () => {
+  const decline = routeSource.slice(routeSource.indexOf('body.action === "decline"'), routeSource.indexOf('body.action === "accept"'));
+  assert.match(decline, /canDecline\(row\.status\)/, "durum kuralı motordan okunmalı");
+  assert.match(decline, /inArray\(negotiations\.status, \[\.\.\.DECLINABLE_STATUSES\]\)/, "UPDATE koşullu ve liste motordan olmalı");
+  assert.match(decline, /if \(!closed\) return json\([^)]*409\)/, "yarışı kaybeden 409 almalı");
+});
+
+test("uç kimlikleri ve tur sayacını yarışa dayanıklı yazar", () => {
+  assert.doesNotMatch(routeSource, /id: `(ng|nm|ag)_[^`]*\$\{now\}/, "zaman damgalı kimlik kalmamalı");
+  assert.doesNotMatch(routeSource, /row\.turns \+ 1/, "tur sayacı bayat okumadan artmamalı");
+  const bumps = routeSource.match(/turns: sql`\$\{negotiations\.turns\} \+ 1`/g) ?? [];
+  assert.equal(bumps.length, 2, "reply ve propose dallarının ikisi de sayacı veritabanında artırmalı");
+  assert.equal((routeSource.match(/newId\("(ng|nm|ag)"\)/g) ?? []).length, 5, "beş kimlik de newId'den gelmeli");
+});
+
+test("müzakere ucu hesap bazında hız sınırlar", () => {
+  // set_open hiçbir motor kuralına takılmıyordu; sınırsız tek uç kalmasın.
+  assert.match(routeSource, /consumeRateLimit\(RATE_LIMITS\.negotiate, `user:\$\{user\.id\}`\)/, "sınır hesap bazında olmalı");
+  assert.match(routeSource, /rateLimitResponse\(limit,/, "sınıra takılan istek 429 almalı");
+  assert.doesNotMatch(routeSource, /clientIp\(/, "IP bazlı sınır konmamalı");
+  const rules = readFileSync(new URL("../server/rate-limit.ts", import.meta.url), "utf8");
+  assert.match(rules, /negotiate: \{ scope: "negotiate", limit: \d+, windowMs: /, "kural RATE_LIMITS'te tanımlı olmalı");
+  // Sınır, POST gövdesi okunmadan önce tüketilmeli: aksi halde dev bir gövde
+  // sınırın önüne geçer.
+  assert.ok(routeSource.indexOf("consumeRateLimit") < routeSource.indexOf("await request.json()"),
+    "sınır gövde okunmadan önce tüketilmeli");
+});
+
+test("aktif üyelik tek ve belirli bir kuraldan okunur", () => {
+  // Kusur: sırasız limit(1) rastgele bir üyelik seçiyordu; kayıt bir channel'a,
+  // müzakere başkasına gidebiliyordu.
+  assert.match(routeSource, /activeMembershipOf\(user\.id\)/, "uç paylaşılan kuralı çağırmalı");
+  assert.doesNotMatch(routeSource, /from\(channelMembers\)\.where\(and\(eq\(channelMembers\.userId/, "uçta ikinci bir üyelik sorgusu kalmamalı");
+  assert.match(membershipSource, /\.orderBy\(desc\(channelMembers\.joinedAt\), asc\(channelMembers\.channelId\)\)/, "sıra belirli olmalı");
+  // Aday kümesi app/api/save/route.ts ile AYNI üç koşuldan doğmalı; ayrışırsa
+  // kayıt ve müzakere yine iki ayrı channel görür.
+  for (const predicate of [/eq\(channelMembers\.userId, userId\)/, /eq\(channelMembers\.status, "active"\)/, /eq\(channels\.status, "active"\)/]) {
+    assert.match(membershipSource, predicate, "üyelik kuralı eksik");
+    assert.match(saveRouteSource, predicate, "kayıt ucunun kuralı ayrışmış");
+  }
+});
+
+test("bir masadan bir anlaşma çıkar: şema seviyesinde ağ", () => {
+  assert.match(schemaSource, /uniqueIndex\("idx_agreements_negotiation"\)\.on\(table\.negotiationId\)/,
+    "agreements.negotiationId tekil olmalı");
+});
+
+test("panel müzakereye kapanma anahtarını sunar", () => {
+  // Kusur: acceptsNegotiation DEFAULT TRUE ve set_open panelde HİÇ çağrılmıyordu;
+  // hiçbir Kral müzakereye kapanamıyor, yabancı masalar onun BYOK kredisini yakıyordu.
+  assert.match(panelSource, /action:"set_open",accepts/, "panel kapıyı değiştirebilmeli");
+  assert.match(panelSource, /data\.acceptsNegotiation==="boolean"/, "mevcut durum GET yanıtından okunmalı");
+  assert.match(panelSource, /Açık masalar ve sizin açtığınız masalar sürer/, "kapalıyken ne olduğu Krala yazılmalı");
+});
+
+test("panel oranlı haraç sunabilir ve tavanları motordan okur", () => {
+  // Kusur: sunucu ve araç şeması hazırdı, panel yalnızca tributeAmount gönderiyordu.
+  assert.match(panelSource, /tributeRate:tributeRateFromPercent\(action\.arguments\.rate_percent\)/, "Generalin oranı masaya ulaşmalı");
+  assert.match(panelSource, /tributeRate:envoyTerm\.mode==="rate"\?tributeRateFromPercent\(value\):0/, "Kral kendi eliyle oran önerebilmeli");
+  assert.match(panelSource, /tributeAmount:envoyTerm\.mode==="amount"\?Math\.floor\(value\):0/, "sabit miktar ile oran aynı anda gönderilmemeli");
+  // Tavanlar motordan import edilir; panelde elle yazılan bir tavan sunucununkinden sapar.
+  assert.match(panelSource, /MAX_TRIBUTE_RATE_PERCENT/, "oran tavanı motordan okunmalı");
+  assert.match(panelSource, /MAX_TRIBUTE_AMOUNT/, "miktar tavanı motordan okunmalı");
+  assert.match(panelSource, /max=\{MAX_HOURS\}/, "saat tavanı motordan okunmalı");
+  assert.doesNotMatch(panelSource, /maxLength=\{600\}/, "mesaj tavanı elle yazılmamalı");
+  assert.doesNotMatch(panelSource, /%50/, "oran tavanı panele elle yazılmamalı");
 });

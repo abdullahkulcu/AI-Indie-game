@@ -234,4 +234,9 @@ export const agreements = pgTable("agreements", {
 }, (table) => [
   index("idx_agreements_payer").on(table.payerId, table.status),
   index("idx_agreements_payee").on(table.payeeId, table.status),
+  // Bir masadan BİR anlaşma çıkar. İki eşzamanlı imza isteği iki aktif anlaşma
+  // yaratıyor ve cron ikisini birden tahsil ediyordu; haracı ALAN taraf bunu
+  // kendi lehine tetikleyebiliyordu. Uçtaki koşullu UPDATE mantık seviyesinde,
+  // bu kısıt veritabanı seviyesinde aynı yarışı kapatır.
+  uniqueIndex("idx_agreements_negotiation").on(table.negotiationId),
 ]);

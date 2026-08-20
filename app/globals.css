@@ -141,4 +141,16 @@
 .envoy-new select,.envoy-new input{min-width:0;flex:1;padding:5px 7px;border:1px solid rgba(214,168,80,.3);border-radius:3px;background:rgba(20,13,7,.85);color:#efe0c0;font:inherit;font-size:.74rem}
 .envoy-new input{width:100%;margin-bottom:6px}
 .envoy-new>button{width:100%;padding:6px;font-size:.7rem;letter-spacing:.06em;border:1px solid rgba(190,150,220,.5);border-radius:3px;background:rgba(150,110,190,.2);color:#efe0c0;cursor:pointer}
+.envoy-door{display:flex;align-items:center;gap:9px;padding:7px 9px;margin-bottom:9px;border-left:3px solid #7f9d5c;border-radius:3px;background:rgba(127,157,92,.12)}
+.envoy-door.shut{border-left-color:#8d2b21;background:rgba(141,43,33,.14)}
+.envoy-door>div{flex:1;min-width:0}
+.envoy-door b{display:block;font-size:.68rem;letter-spacing:.1em}
+.envoy-door span{display:block;margin-top:2px;font-size:.68rem;line-height:1.4;opacity:.7}
+.envoy-door button{padding:5px 10px;font-size:.68rem;letter-spacing:.06em;border:1px solid rgba(214,168,80,.45);border-radius:3px;background:rgba(214,168,80,.16);color:#f2e2be;cursor:pointer;white-space:nowrap}
+.envoy-door button:disabled{opacity:.4;cursor:not-allowed}
+.envoy-term-form{margin-top:7px;padding:8px 9px;border:1px dashed rgba(190,150,220,.4);border-radius:4px;background:rgba(150,110,190,.08)}
+.envoy-term-form .envoy-fields{display:flex;gap:6px;margin-bottom:6px}
+.envoy-term-form select,.envoy-term-form input{min-width:0;flex:1;width:100%;padding:5px 7px;border:1px solid rgba(214,168,80,.3);border-radius:3px;background:rgba(20,13,7,.85);color:#efe0c0;font:inherit;font-size:.74rem}
+.envoy-term-form>input{margin-bottom:6px}
+.envoy-term-form small{display:block;font-size:.66rem;line-height:1.4;opacity:.62}
 .envoy-new>button:disabled{opacity:.4;cursor:not-allowed}

@@ -378,3 +378,27 @@ export function settleTribute(stock: number, due: number, terms: Pick<Terms, "tr
   }
   return { moved, paid, missed };
 }
+
+/**
+ * Masanın imzaya HAZIR olduğu tek durum.
+ *
+ * Hem uçtaki koşullu UPDATE hem de buradaki kural bu değeri okur: iki eşzamanlı
+ * imza isteği "durumu oku → anlaşmayı yaz" arasında yarışıyordu ve masa başına
+ * İKİ aktif anlaşma doğuyordu; cron ikisini birden tahsil ediyor, haracı ALAN
+ * taraf bunu kendi lehine tetikleyebiliyordu.
+ */
+export const SIGNABLE_STATUS = "awaiting_king" as const;
+
+/**
+ * Reddedilebilir masa durumları. İmzalanmış masa REDDEDİLEMEZ: anlaşma yürürlükte
+ * kalırken masa "declined" görünüyordu ve Kral anlaşmadan çıktığını sanıyordu.
+ */
+export const DECLINABLE_STATUSES = ["open", SIGNABLE_STATUS] as const;
+
+/** Bu masa reddedilebilir mi? Uçtaki koşullu UPDATE de aynı listeden türer. */
+export function canDecline(status: NegotiationStatus): TurnDecision {
+  if ((DECLINABLE_STATUSES as readonly NegotiationStatus[]).includes(status)) return { ok: true };
+  return status === "agreed"
+    ? { ok: false, reason: "Bu masa imzalandı; reddetmek anlaşmayı bozmaz. Anlaşma yürürlüktedir." }
+    : { ok: false, reason: "Bu masa zaten kapandı." };
+}

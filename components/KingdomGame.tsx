@@ -13,6 +13,9 @@ import { generalNameFor } from "@/engine/general-name";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
+// Müzakere sınırları TEK kaynaktan gelir. Panelde elle yazılan bir tavan,
+// sunucunun uyguladığı tavandan sapınca Kral reddedilecek bir şart öneriyor.
+import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, carriesTribute, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
 import type { Building as EngineBuilding, Game, GameAction, TerrainId as EngineTerrainId } from "@/engine/types";
 
 
@@ -42,7 +45,7 @@ const left=(at:number,now:number)=>{const s=Math.max(0,Math.ceil((at-now)/1000))
 
 export default function KingdomGame(){
  const[ready,setReady]=useState(false),[account,setAccount]=useState<Account|null|undefined>(undefined),[setup,setSetup]=useState<Setup>("welcome"),[availableChannels,setAvailableChannels]=useState<Channel[]>(fallbackChannels),[selected,setSelected]=useState<Channel>(fallbackChannels[2]);const[name,setName]=useState(""),[ruler,setRuler]=useState(""),[terrain,setTerrain]=useState<TerrainId>("plain"),[provider,setProvider]=useState<keyof typeof modelOptions>("openai"),[model,setModel]=useState("gpt-5.6-terra"),[apiKey,setApiKey]=useState("");
- const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
+ const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[envoyAccepts,setEnvoyAccepts]=useState(true),[envoyTerm,setEnvoyTerm]=useState<{tableId:string;mode:"amount"|"rate";value:string;resource:string;payer:"us"|"them";hours:string;everyHours:string;note:string}|null>(null),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
  const lastCloudSave=useRef(0),saving=useRef(false),revision=useRef<number|null>(null),worldRefresh=useRef<(()=>void)|null>(null),negotiationRefresh=useRef<(()=>void)|null>(null),lastEnvoySeen=useRef<number|null>(null),chatEnd=useRef<HTMLDivElement|null>(null);
  // Yeni mesaj gelince sohbet dibe kaysın; uzun konuşmada son söz görünmez kalıyordu.
  useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth",block:"end"})},[chat,connecting]);
@@ -83,8 +86,9 @@ export default function KingdomGame(){
  useEffect(()=>{if(!game?.channelId){setNegotiationTables([]);setAgreementList([]);return}
   let active=true;
   const load=async()=>{try{const response=await fetch("/api/negotiate",{cache:"no-store"});
-    if(!response.ok)return;const data=await response.json() as {tables?:NegotiationTable[];agreements?:Agreement[];limits?:{maxTurns:number;maxOpen:number}};
+    if(!response.ok)return;const data=await response.json() as {tables?:NegotiationTable[];agreements?:Agreement[];limits?:{maxTurns:number;maxOpen:number};acceptsNegotiation?:boolean};
     if(!active)return;
+    if(typeof data.acceptsNegotiation==="boolean")setEnvoyAccepts(data.acceptsNegotiation);
     const tables=data.tables??[];
     // Karşı taraftan gelen en yeni sözün zamanı; büyüdüyse Kralı uyarırız.
     const latest=Math.max(0,...tables.flatMap(table=>table.messages.filter(message=>!message.mine).map(message=>message.at)));
@@ -159,6 +163,46 @@ async function openNegotiation(){
   finally{setWorldBusy(false)}
  }
 
+ // Elçilik kapısı. Kapalıyken kimse yeni masa açamaz; Kral çevrimdışıyken
+ // Generalinin YABANCI masalarda kendi BYOK anahtarıyla cevap yazması buradan
+ // durur. Anahtar hiç panelde yoktu: hiçbir Kral müzakereye kapanamıyordu.
+ async function setEnvoyDoor(accepts:boolean){
+  if(worldBusy)return;setWorldBusy(true);
+  try{
+   const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"set_open",accepts})});
+   const data=await response.json() as {error?:string;acceptsNegotiation?:boolean};
+   if(!response.ok)throw new Error(data.error||"Elçilik kapısı değiştirilemedi.");
+   setEnvoyAccepts(data.acceptsNegotiation??accepts);
+   setToast(accepts?"Elçilik kapısı açıldı; size yeniden masa açılabilir.":"Elçilik kapısı kapandı; size yeni masa açılamaz, açık masalar sürer.");
+   negotiationRefresh.current?.();
+  }catch(error){setToast(error instanceof Error?error.message:"Elçilik kapısı değiştirilemedi.")}
+  finally{setWorldBusy(false)}
+ }
+
+ // Kral kendi eliyle şart sunar. Haraç ya SABİT miktar ya ORAN olur; ikisi
+ // birden gönderilmez, çünkü motor ikisi birden gelince sabit rakamı esas alır
+ // ve Kral yazdığı oranın yok sayıldığını göremezdi.
+ async function proposeTerms(table:NegotiationTable){
+  if(worldBusy||!envoyTerm||envoyTerm.tableId!==table.id)return;
+  const tribute=carriesTribute(table.topic as NegotiationTopic),value=Number(envoyTerm.value)||0;
+  const karsiTaraf=table.side==="initiator"?"target":"initiator";
+  setWorldBusy(true);
+  try{
+   const terms={topic:table.topic,hours:Number(envoyTerm.hours)||24,everyHours:Number(envoyTerm.everyHours)||6,
+    ...(tribute?{payerSide:envoyTerm.payer==="us"?table.side:karsiTaraf,resource:envoyTerm.resource,
+      tributeAmount:envoyTerm.mode==="amount"?Math.floor(value):0,
+      tributeRate:envoyTerm.mode==="rate"?tributeRateFromPercent(value):0}:{})};
+   const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},
+     body:JSON.stringify({action:"propose",speaker:"king",negotiationId:table.id,message:envoyTerm.note.trim()||"Şartımız ektedir.",terms})});
+   const data=await response.json() as {error?:string};
+   if(!response.ok)throw new Error(data.error||"Şart sunulamadı.");
+   setEnvoyTerm(null);
+   setToast(`Şart ${table.counterpart} tarafına sunuldu; imzaları bekleniyor.`);
+   negotiationRefresh.current?.();
+  }catch(error){setToast(error instanceof Error?error.message:"Şart sunulamadı.")}
+  finally{setWorldBusy(false)}
+ }
+
  async function negotiationAction(negotiationId:string,action:"accept"|"decline"){
   if(worldBusy)return;setWorldBusy(true);
   try{
@@ -204,6 +248,9 @@ async function openNegotiation(){
           payerSide:String(action.arguments.payer??"them")==="us"?table.side:(table.side==="initiator"?"target":"initiator"),
           resource:String(action.arguments.resource??"gold"),
           tributeAmount:Math.floor(Number(action.arguments.amount_per_payment)||0),
+          // Oranlı haraç sunucuda hazırdı ama panel `rate_percent` alanını
+          // düşürüyordu: General oran önerse bile masaya hiç ulaşmıyordu.
+          tributeRate:tributeRateFromPercent(action.arguments.rate_percent),
           everyHours:Math.floor(Number(action.arguments.every_hours)||6),
           hours:Math.floor(Number(action.arguments.hours)||24)}}
       :{action:"reply",speaker:"general",negotiationId:table.id,message:String(action.arguments.message??"")};
@@ -276,6 +323,13 @@ async function openNegotiation(){
    </button>
    {negotiationOpen&&<div className="envoy-sheet">
     <div className="envoy-head"><b>Elçilik</b><small>{negotiationTables.length} masa · {agreementList.length} anlaşma</small><button onClick={()=>setNegotiationOpen(false)}>✕</button></div>
+    <div className={envoyAccepts?"envoy-door":"envoy-door shut"}>
+     <div><b>{envoyAccepts?"KAPI AÇIK":"KAPI KAPALI"}</b>
+      <span>{envoyAccepts
+       ?"Yabancı Krallar size masa açabilir. Siz masada değilken Generaliniz o masalara SİZİN anahtarınızla cevap yazar."
+       :"Size yeni masa açılamaz. Açık masalar ve sizin açtığınız masalar sürer."}</span></div>
+     <button disabled={worldBusy} onClick={()=>void setEnvoyDoor(!envoyAccepts)}>{envoyAccepts?"KAPAT":"AÇ"}</button>
+    </div>
     <div className="envoy-new">
      <span>YENİ MASA</span>
      {otherKingdoms.length===0
@@ -293,7 +347,7 @@ async function openNegotiation(){
          <option value="ultimatum">Ültimatom</option>
         </select>
        </div>
-       <input value={envoyMessage} onChange={event=>setEnvoyMessage(event.target.value)} placeholder="Açılış sözünüz…" maxLength={600}/>
+       <input value={envoyMessage} onChange={event=>setEnvoyMessage(event.target.value)} placeholder="Açılış sözünüz…" maxLength={MAX_MESSAGE_LENGTH}/>
        <button disabled={worldBusy||!envoyTarget||envoyMessage.trim().length<5} onClick={()=>void openNegotiation()}>ELÇİ GÖNDER</button></>}
     </div>
     <p className="envoy-note">Karşı Generalin sözleri onun iddiasıdır, doğrulanmış bilgi değil. Şartı Generaliniz sunar, imzayı siz atarsınız.</p>
@@ -301,7 +355,17 @@ async function openNegotiation(){
       <div><b>{deal.iPay?"Ödüyorsunuz":"Tahsil ediyorsunuz"} · {deal.counterpart}</b>
        <span>{özet(deal.terms)} · {deal.paidCount} ödeme yapıldı</span></div>
       <strong>{left(deal.endsAt,now)}</strong></div>)}
-    {negotiationTables.map((table,index)=><article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
+    {negotiationTables.map((table,index)=>{
+     // Şart sunulabilir mi sorusunu MOTOR yanıtlar; panelde ikinci bir kopyası
+     // yazılsaydı Kral, sunucunun reddedeceği bir düğme görürdü. Kimlik alanları
+     // kuralın dışındadır, canProposeTerms yalnızca durum/tur/süreye bakar.
+     const asNegotiation:Negotiation={id:table.id,channelId:"",initiatorId:"",targetId:"",topic:table.topic as NegotiationTopic,
+      status:table.status as NegotiationStatus,turns:table.turns,proposed:table.proposed as Terms|null,
+      proposedBy:table.proposedBy as Side|null,openedAt:0,expiresAt:table.expiresAt,lastTurnAt:0};
+     const sunabilir=canProposeTerms(asNegotiation,table.side,true,now).ok;
+     const haracVar=carriesTribute(table.topic as NegotiationTopic);
+     const form=envoyTerm&&envoyTerm.tableId===table.id?envoyTerm:null;
+     return <article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
       <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{table.status==="awaiting_king"?"ŞART SUNULDU":table.status==="agreed"?"ANLAŞILDI":table.status==="declined"?"REDDEDİLDİ":`${table.turns}/${envoyLimits.maxTurns} söz`}</small></div>
       <div className="envoy-log">{table.messages.slice(-4).map((message,i)=><p className={message.mine?"mine":""} key={i}>{message.body}</p>)}</div>
       {table.proposed&&<div className="envoy-terms"><span>SUNULAN ŞART</span><b>{özet(table.proposed)}</b></div>}
@@ -309,7 +373,44 @@ async function openNegotiation(){
         <button disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"accept")}>ONAYLA</button>
         <button className="ghost" disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"decline")}>REDDET</button>
       </div>}
-    </article>)}
+      {sunabilir&&!form&&<div className="envoy-actions">
+        <button className="ghost" onClick={()=>setEnvoyTerm({tableId:table.id,mode:"amount",value:"",resource:"gold",payer:"them",hours:"24",everyHours:"6",note:""})}>KENDİ ŞARTINI SUN</button>
+      </div>}
+      {sunabilir&&form&&<div className="envoy-term-form">
+        {haracVar&&<><div className="envoy-fields">
+          <select value={form.payer} onChange={event=>setEnvoyTerm({...form,payer:event.target.value as "us"|"them"})}>
+           <option value="them">Karşı taraf öder</option>
+           <option value="us">Biz öderiz</option>
+          </select>
+          <select value={form.resource} onChange={event=>setEnvoyTerm({...form,resource:event.target.value})}>
+           {TRIBUTE_RESOURCES.map(id=><option key={id} value={id}>{resourceLabels.find(([key])=>key===id)?.[1]??id}</option>)}
+          </select>
+         </div>
+         <div className="envoy-fields">
+          <select value={form.mode} onChange={event=>setEnvoyTerm({...form,mode:event.target.value as "amount"|"rate",value:""})}>
+           <option value="amount">Sabit miktar</option>
+           <option value="rate">Ambar oranı</option>
+          </select>
+          <input type="number" min={1} max={form.mode==="rate"?MAX_TRIBUTE_RATE_PERCENT:MAX_TRIBUTE_AMOUNT}
+           value={form.value} onChange={event=>setEnvoyTerm({...form,value:event.target.value})}
+           placeholder={form.mode==="rate"?`yüzde · en çok ${MAX_TRIBUTE_RATE_PERCENT}`:`birim · en çok ${MAX_TRIBUTE_AMOUNT}`}/>
+         </div></>}
+        <div className="envoy-fields">
+         <input type="number" min={1} max={MAX_HOURS} value={form.hours} onChange={event=>setEnvoyTerm({...form,hours:event.target.value})} placeholder={`süre saat · en çok ${MAX_HOURS}`}/>
+         <input type="number" min={1} max={MAX_HOURS} value={form.everyHours} onChange={event=>setEnvoyTerm({...form,everyHours:event.target.value})} placeholder="ödeme aralığı saat"/>
+        </div>
+        <input value={form.note} onChange={event=>setEnvoyTerm({...form,note:event.target.value})} placeholder="Şartın yanına bir söz…" maxLength={MAX_MESSAGE_LENGTH}/>
+        <small>{haracVar
+         ?(form.mode==="rate"
+           ?`Her ödemede ambarın yüzdesi kadarı gider; tavan yüzde ${MAX_TRIBUTE_RATE_PERCENT}. Oran seçiliyken sabit miktar gönderilmez.`
+           :`Her ödemede sabit miktar gider; tavan ${MAX_TRIBUTE_AMOUNT} birim. Sabit miktar seçiliyken oran gönderilmez.`)
+         :"Bu konu haraç taşımaz; yalnızca süre konuşulur."}</small>
+        <div className="envoy-actions">
+         <button disabled={worldBusy||(haracVar&&!(Number(form.value)>0))} onClick={()=>void proposeTerms(table)}>ŞARTI SUN</button>
+         <button className="ghost" disabled={worldBusy} onClick={()=>setEnvoyTerm(null)}>VAZGEÇ</button>
+        </div>
+      </div>}
+    </article>})}
    </div>}
   </div>})()}
 {(()=>{const pazar=marketState(game,now);
