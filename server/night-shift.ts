@@ -1,5 +1,4 @@
-import { catalog, keepUpgradeCosts, MAX_KEEP_LEVEL } from "../engine/catalog";
-import { affordable, costFor, keep, materialScaleOf, rates } from "../engine/tick";
+import { affordable, buildOptions, keep, rates } from "../engine/tick";
 import type { Game } from "../engine/types";
 
 /**
@@ -47,15 +46,12 @@ export function detectEmergency(game: Game): string | null {
 /** Şu an gerçekten başlatılabilecek inşa/eğitim seçenekleri; boşsa modeli çağırmaya gerek yok. */
 export function affordableOptions(game: Game): string[] {
   if (game.queue) return [];
-  const level = keep(game), options: string[] = [];
-
-  if (level < MAX_KEEP_LEVEL && affordable(game.resources, keepUpgradeCosts[level])) {
-    options.push(`keep→Sv.${level + 1}`);
-  }
-  for (const item of catalog) {
-    if (item.unlock > level) continue;
-    const current = game.buildings.find(b => b.type === item.type)?.level ?? 0;
-    if (affordable(game.resources, costFor(item.cost, current, materialScaleOf(game.speed)))) options.push(`${item.type}→Sv.${current + 1}`);
+  // Maliyet TEK KAYNAKTAN okunur. Burada katalog + costFor + materialScaleOf
+  // üçlüsü ayrıca hesaplanıyordu; panelden ve General'in bağlamından sapabilen
+  // ikinci bir maliyet hesabıydı ve seviye tavanını da tanımıyordu.
+  const options: string[] = [];
+  for (const option of buildOptions(game)) {
+    if (affordable(game.resources, option.cost)) options.push(`${option.type}→Sv.${option.nextLevel}`);
   }
   if (game.buildings.some(b => b.type === "barracks")) {
     const cost = { gold: 8 * 5, food: 10 * 5, iron: 5 };

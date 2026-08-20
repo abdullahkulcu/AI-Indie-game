@@ -1,5 +1,5 @@
 export { materialScaleOf } from "./catalog";
-import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
+import { MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
@@ -43,6 +43,27 @@ export const costFor = (base: Partial<Res>, level: number, materialScale = 1): P
     return [key, Math.ceil((value ?? 0) * Math.pow(growth, level) * (material ? materialScale : 1))];
   })) as Partial<Res>;
 
+/**
+ * Kale yükseltmesinin maliyeti; katalog binalarıyla AYNI kuralla ölçeklenir:
+ * yalnızca malzeme (odun, taş, demir) channel çarpanını yer, altın yemez.
+ *
+ * Kale bu çarpanın dışında kaldığı sürece katalog kendi içinde tutarsızdı ve
+ * başlangıç stoğu hıza göre ölçeklenince tutarsızlık dengesizliğe dönüşüyordu:
+ * hız 24'te 7.200 taşla 400 taşlık Kale Sv.2 ilk dakikada alınıyor, tier-2
+ * binalar (Pazar, Bira Evi) sezonun ilk dakikasında açılıyordu.
+ */
+export const keepCostFor = (level: number, materialScale = 1): Partial<Res> =>
+  Object.fromEntries(Object.entries(keepUpgradeCosts[level] ?? {}).map(([key, value]) =>
+    [key, Math.ceil((value ?? 0) * (MATERIALS.has(key) ? materialScale : 1))],
+  )) as Partial<Res>;
+
+/**
+ * Nüfus kapasitesi — TEK KAYNAK. Kuruluşta (`engine/founding.ts`) elle "150"
+ * yazılıydı; formül burada değişince o kopya sessizce sapıyordu.
+ */
+export const capacityFor = (buildings: Game["buildings"]) =>
+  150 + (buildings.find(b => b.type === "town_square")?.level ?? 0) * 80 + (keep({ buildings }) - 1) * 50;
+
 
 
 /**
@@ -55,19 +76,24 @@ export type BuildOption = { type: string; name: string; nextLevel: number; secon
 
 export function buildOptions(g: Game): BuildOption[] {
   const level = keep(g), scale = materialScaleOf(g.speed);
-  const options: BuildOption[] = catalog.filter(item => item.unlock <= level).map(item => {
-    const current = g.buildings.find(building => building.type === item.type)?.level ?? 0;
-    return {
-      type: item.type, name: item.name, nextLevel: current + 1,
-      seconds: Math.round(item.seconds / g.speed),
-      cost: costFor(item.cost, current, scale),
-    };
-  });
+  const options: BuildOption[] = catalog
+    .filter(item => item.unlock <= level)
+    // Tavana ulaşan bina listeden düşer. Düşmediğinde Sv.7 öneriliyor, emir
+    // kabul ediliyor, sonra kayıt şeması bütün kaydı reddediyordu.
+    .filter(item => (g.buildings.find(building => building.type === item.type)?.level ?? 0) < MAX_BUILDING_LEVEL)
+    .map(item => {
+      const current = g.buildings.find(building => building.type === item.type)?.level ?? 0;
+      return {
+        type: item.type, name: item.name, nextLevel: current + 1,
+        seconds: Math.round(item.seconds / g.speed),
+        cost: costFor(item.cost, current, scale),
+      };
+    });
   if (level < MAX_KEEP_LEVEL) {
     options.unshift({
       type: "keep", name: "Kale", nextLevel: level + 1,
       seconds: Math.round(keepSeconds[level] / g.speed),
-      cost: keepUpgradeCosts[level],
+      cost: keepCostFor(level, scale),
     });
   }
   return options;
@@ -178,9 +204,7 @@ export function tick(g: Game, now: number): Game {
     notices = [...raid.events.map(event => ({ kind: "AKIN", text: raidNotice(event), at: event.at })).reverse(), ...notices].slice(0, 20);
   }
 
-  const level = keep({ buildings });
-  const square = buildings.find(b => b.type === "town_square")?.level ?? 0;
-  const capacity = 150 + square * 80 + (level - 1) * 50;
+  const capacity = capacityFor(buildings);
 
   // --- Halk sistemi -------------------------------------------------------
   // İstihkak fiilen ne kadar dağıtılabildi? Stok yetmezse kâğıt üstündeki oran

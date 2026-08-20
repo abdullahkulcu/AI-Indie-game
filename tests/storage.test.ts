@@ -124,8 +124,11 @@ test("hiçbir channel hızında yükseltme tavanın üstünde kalmaz", () => {
       ...fixture, speed,
       buildings: [
         { type: "keep", name: "Kale", category: "Yönetim", level: 6 },
-        { type: "granary", name: "Ambar", category: "Ekonomi", level: 6 },
-        { type: "warehouse", name: "Depo", category: "Ekonomi", level: 6 },
+        // Sv.5: tavana ulaşan bina `buildOptions`tan düştüğü için Sv.6 depo/ambar
+        // hiç seçenek üretmezdi ve bu kontrol boşa dönerdi. Sv.5 ile en pahalı
+        // GERÇEK yükseltme (Sv.6) yine ölçülüyor.
+        { type: "granary", name: "Ambar", category: "Ekonomi", level: 5 },
+        { type: "warehouse", name: "Depo", category: "Ekonomi", level: 5 },
       ],
     } as unknown as Game;
     const caps = storageCaps(game);

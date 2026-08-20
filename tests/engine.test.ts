@@ -2,7 +2,7 @@ import { keepUpgradeCosts } from "../engine/catalog";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { UPKEEP, buildOptions, costFor, grossRates, keep, materialScaleOf, rates, tick } from "../engine/tick";
+import { UPKEEP, buildOptions, costFor, grossRates, keep, keepCostFor, materialScaleOf, rates, tick } from "../engine/tick";
 import { marketDuration } from "../engine/actions";
 import type { Game } from "../engine/types";
 
@@ -360,6 +360,16 @@ test("inşa maliyeti tek kaynaktan gelir", () => {
   const warehouse = options.find(option => option.type === "warehouse")!;
   assert.equal(warehouse.nextLevel, 1);
   assert.deepEqual(warehouse.cost, costFor({ wood: 110, stone: 110 }, 0, materialScaleOf(24)));
-  // Kale ayrı tarifeden gelir ve çarpanla büyümez.
-  assert.deepEqual(options.find(option => option.type === "keep")?.cost, keepUpgradeCosts[4]);
+  // Kale de AYNI kuralı yer: yalnızca malzeme (odun, taş, demir) çarpanla büyür,
+  // altın büyümez. Kale çarpanın dışında kaldığında katalog kendi içinde
+  // tutarsızdı: hız 24'te ölçekli başlangıç stoğuyla Kale Sv.2 ilk dakikada
+  // alınıyor ve tier-2 binalar sezonun başında açılıyordu.
+  const keepCost = options.find(option => option.type === "keep")?.cost;
+  assert.deepEqual(keepCost, keepCostFor(4, materialScaleOf(24)));
+  assert.equal(keepCost?.gold, keepUpgradeCosts[4].gold, "altın çarpanı yemez");
+  assert.equal(keepCost?.stone, (keepUpgradeCosts[4].stone ?? 0) * 24);
+  assert.equal(keepCost?.wood, (keepUpgradeCosts[4].wood ?? 0) * 24);
+  assert.equal(keepCost?.iron, (keepUpgradeCosts[4].iron ?? 0) * 24);
+  // Hız 1'de hiçbir şey değişmez.
+  assert.deepEqual(keepCostFor(4, materialScaleOf(1)), keepUpgradeCosts[4]);
 });

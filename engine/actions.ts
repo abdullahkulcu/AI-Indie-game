@@ -1,8 +1,8 @@
-import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
+import { catalog, keepSeconds, MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
 import { clampWatch, watchRatioOf } from "./raids";
-import { affordable, costFor, debit, keep, materialScaleOf, rates, tick } from "./tick";
+import { affordable, costFor, debit, keep, keepCostFor, materialScaleOf, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
@@ -119,7 +119,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
       if (type === "keep") {
         if (target !== level + 1 || level >= MAX_KEEP_LEVEL) { blocked(`Kale yalnızca Sv.${level + 1} seviyesine yükseltilebilir.`); continue; }
-        const cost = keepUpgradeCosts[level];
+        const cost = keepCostFor(level, materialScaleOf(next.speed));
         if (!affordable(next.resources, cost)) { blocked("Kale yükseltmesi kaynak yetersizliği nedeniyle engellendi."); continue; }
         if (majorSpend(cost) && !confirmed) { blocked("Kale yükseltmesi hazinenin kritik bölümünü tüketeceği için açık teyit bekliyor."); continue; }
         next = { ...next, resources: debit(next.resources, cost), queue: { kind: "building", type: "keep", name: `Kale Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + keepSeconds[level] / next.speed * 1000 } };
@@ -130,6 +130,10 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const item = catalog.find(entry => entry.type === type);
       if (!item) { blocked("Bilinmeyen bina emri reddedildi."); continue; }
       const current = next.buildings.find(b => b.type === type)?.level ?? 0;
+      // Seviye tavanı. Olmadığında Sv.7 emri kabul ediliyor, sonra kayıt şeması
+      // (`level` ≤ MAX_BUILDING_LEVEL) kaydın TAMAMINI reddediyor ve Kralın
+      // ilerlemesi sessizce kayboluyordu.
+      if (current >= MAX_BUILDING_LEVEL) { blocked(`${item.name} Sv.${MAX_BUILDING_LEVEL} tavanına ulaştı; daha ileri yükseltilemez.`); continue; }
       if (target !== current + 1) { blocked(`${item.name} yalnızca Sv.${current + 1} seviyesine çıkarılabilir.`); continue; }
       if (item.unlock > level) { blocked(`${item.name} için Kale Sv.${item.unlock} gerekli.`); continue; }
       const cost = costFor(item.cost, current, materialScaleOf(next.speed));

@@ -2,7 +2,10 @@ import { catalog } from "../engine/catalog";
 import { BUILDING_TYPES } from "../server/save-validation";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { STARTING_STATE, parseStoredSave, validateGameSave } from "../server/save-validation";
+import { startingState, parseStoredSave, validateGameSave } from "../server/save-validation";
+
+/** Hız 1'deki kanonik başlangıç; bu dosyadaki kayıtlar onun üstüne kurulur. */
+const STARTING_STATE = startingState(1);
 
 const NOW = 1_800_000_000_000;
 

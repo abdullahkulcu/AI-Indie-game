@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { BUILDABLE_TYPES } from "../engine/catalog";
+import { BUILDABLE_TYPES, MAX_BUILDING_LEVEL } from "../engine/catalog";
+import { PROTECTION_DAYS, STARTING_BUILDINGS, STARTING_POPULATION, startingResources } from "../engine/founding";
 import { resolveRaids } from "../engine/raids";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
@@ -36,7 +37,9 @@ export const CAPS = {
   resource: 5_000_000,
   population: 200_000,
   capacity: 200_000,
-  buildingLevel: 6,
+  // Motorun tavanından TÜRETİLİR. İkisi ayrı yazıldığında motor Sv.7 öneriyor,
+  // şema Sv.7'yi reddediyor ve kaydın tamamı 400 alıyordu.
+  buildingLevel: MAX_BUILDING_LEVEL,
   buildings: 40,
   unitCount: 100_000,
   unitKinds: 24,
@@ -45,13 +48,22 @@ export const CAPS = {
   taxRate: 50,
 } as const;
 
-/** Kuruluş anındaki kanonik başlangıç. İlk buluta kayıtta bunun üstüne çıkılamaz. */
-export const STARTING_STATE = {
-  resources: { gold: 1000, food: 500, stone: 300, wood: 300, iron: 100, ale: 0 },
-  population: 100,
-  buildings: 3,
-  protectionDays: 4,
-} as const;
+/**
+ * Kuruluş anındaki kanonik başlangıç. İlk buluta kayıtta bunun üstüne çıkılamaz.
+ *
+ * Artık HIZA BAĞLI bir fonksiyon: başlangıç malzemesi channel hızıyla
+ * ölçeklendiği için sabit bir tavan hız 24'ü tamamen oynanamaz hâle getirirdi
+ * (7.200 odun > 300 + 5.000 → her yeni krallığın ilk kaydı 409). Değerler
+ * `engine/founding.ts`'ten gelir; burada ikinci bir kopya tutulmaz.
+ */
+export function startingState(speed: number) {
+  return {
+    resources: startingResources(speed),
+    population: STARTING_POPULATION,
+    buildings: STARTING_BUILDINGS.length,
+    protectionDays: PROTECTION_DAYS,
+  };
+}
 
 /** Saatlik makul kazanç tavanları; channel hızıyla çarpılır. Sıçramalar için ayrıca sabit pay verilir. */
 const GROWTH = {
@@ -221,20 +233,32 @@ function checkTimestamps(game: GameSave, now: number): ValidationFailure | null 
   if (game.foundedAt > horizon) return fail(400, "Kuruluş zamanı gelecekte olamaz.");
   if (game.lastTickAt > horizon) return fail(400, "Kayıt zamanı gelecekte olamaz.");
   if (game.quotaAt !== undefined && game.quotaAt > horizon) return fail(400, "Emir kotası zamanı gelecekte olamaz.");
-  const maxProtection = game.foundedAt + STARTING_STATE.protectionDays * 86_400_000 + CLOCK_SKEW_MS;
+  const maxProtection = game.foundedAt + PROTECTION_DAYS * 86_400_000 + CLOCK_SKEW_MS;
   if (game.protectionEndsAt > maxProtection) return fail(400, "Koruma süresi izin verilen sınırı aşıyor.");
   return null;
 }
 
-/** İlk buluta kayıt kanonik başlangıcın belirgin biçimde ötesinde olamaz. */
-function checkFirstSave(game: GameSave): ValidationFailure | null {
+/**
+ * İlk buluta kayıt kanonik başlangıcın belirgin biçimde ötesinde olamaz.
+ *
+ * Tavan channel hızıyla ölçeklenmek ZORUNDA: başlangıç odunu hız 24'te 7.200
+ * olduğu için sabit tavan her yeni krallığın ilk kaydını 409 ile reddederdi.
+ *
+ * Ölçek, channel hızı ile kaydın kendi hızının BÜYÜĞÜdür. Sebebi bir yarış:
+ * istemci `found()` sırasında channel üyeliğini yazan isteği beklemiyor, ilk
+ * PUT üyelik satırından önce gelebiliyor ve o an `options.channelSpeed`
+ * varsayılan 1 oluyor. Yalnızca channel hızına bakılsaydı hız 24 channel'ında
+ * kurulan krallığın ilk kaydı bu yarış yüzünden reddedilirdi.
+ */
+function checkFirstSave(game: GameSave, channelSpeed: number): ValidationFailure | null {
+  const starting = startingState(Math.max(1, channelSpeed, game.speed));
   for (const key of RESOURCE_KEYS) {
-    if (game.resources[key] > STARTING_STATE.resources[key] + 5_000) {
+    if (game.resources[key] > starting.resources[key] + 5_000) {
       return fail(409, "İlk kayıt başlangıç kaynaklarının ötesinde olamaz.");
     }
   }
-  if (game.population > STARTING_STATE.population * 2) return fail(409, "İlk kayıt başlangıç nüfusunu aşamaz.");
-  if (game.buildings.length > STARTING_STATE.buildings + 3) return fail(409, "İlk kayıt başlangıç yapılarını aşamaz.");
+  if (game.population > starting.population * 2) return fail(409, "İlk kayıt başlangıç nüfusunu aşamaz.");
+  if (game.buildings.length > starting.buildings + 3) return fail(409, "İlk kayıt başlangıç yapılarını aşamaz.");
   if (game.buildings.some(building => building.level > 2)) return fail(409, "İlk kayıtta yapı seviyesi 2'yi aşamaz.");
   if (totalUnits(game.units) > 50) return fail(409, "İlk kayıtta ordu mevcudu geçersiz.");
   return null;
@@ -325,7 +349,7 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
   }
 
   if (!options.previous) {
-    const firstFailure = checkFirstSave(game);
+    const firstFailure = checkFirstSave(game, options.channelSpeed);
     if (firstFailure) return firstFailure;
     return { ok: true, game };
   }

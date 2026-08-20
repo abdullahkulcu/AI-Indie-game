@@ -91,6 +91,17 @@ export const keepUpgradeCosts: Array<Partial<Res>> = [
 
 export const MAX_KEEP_LEVEL = 6;
 
+/**
+ * Katalog binalarının seviye TAVANI — TEK KAYNAK.
+ *
+ * Tavan yokken `buildOptions` Sv.6'daki binaya Sv.7 öneriyordu, `applyActions`
+ * emri kabul ediyordu, ama `server/save-validation.ts` `level` alanını 6 ile
+ * sınırladığı için kaydın TAMAMI 400 alıyordu: Kralın ilerlemesi sessizce
+ * kayboluyor, bina "silinmiş" görünüyordu. Motor, arayüz ve kayıt şeması artık
+ * bu tek sabitten okur.
+ */
+export const MAX_BUILDING_LEVEL = 6;
+
 export const resourceLabels: Array<[Key, string]> = [
   ["gold", "ALTIN"], ["food", "YİYECEK"], ["stone", "TAŞ"],
   ["wood", "ODUN"], ["iron", "DEMİR"], ["ale", "BİRA"],
