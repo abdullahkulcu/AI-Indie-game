@@ -251,6 +251,8 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
 
     const allowed = shouldGeneralAnswer({
       negotiation: table, side, lastMessageSide: last!.side,
+      // Generalin kendi payı: Kralın yazdıkları sayılmaz, token harcamıyorlar.
+      generalTurnsUsed: messages.filter(message => message.side === side && message.speaker === "general").length,
       kingPresent: isKingPresent(game.lastTickAt, now), now,
     });
     if (!allowed.ok) continue;

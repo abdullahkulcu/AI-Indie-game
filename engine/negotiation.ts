@@ -69,8 +69,15 @@ export type Negotiation = {
  * General birbiriyle sonsuza kadar nazikleşir ve iki Kralın da kredisi yanar.
  */
 export const LIMITS = {
-  /** Bir masada toplam mesaj. */
-  maxTurns: 6,
+  /**
+   * Bir masada toplam mesaj. Kralın kendi yazdığı sözler token harcamadığı
+   * için bu tavan cömert olabilir; asıl gider Generalin yazdıklarıdır ve
+   * onun payı ayrıca sınırlıdır (maxGeneralTurns). Eskiden ikisi aynı 6'ydı
+   * ve pazarlık daha başlamadan masa kapanıyordu.
+   */
+  maxTurns: 14,
+  /** Bir tarafın Generalinin yazabileceği mesaj; iki LLM'in sohbeti buradan tavanlanır. */
+  maxGeneralTurns: 5,
   /** Bir krallığın aynı anda açık tutabileceği masa. */
   maxOpenPerKingdom: 3,
   /** Bir krallığa günde açılabilecek masa; spam ve kredi yakma buradan engellenir. */
@@ -192,12 +199,19 @@ export function shouldGeneralAnswer(input: {
   side: Side;
   /** Masadaki son mesajı kim yazdı? Hiç mesaj yoksa null. */
   lastMessageSide: Side | null;
+  /** Bu tarafta General'in şimdiye kadar yazdığı mesaj sayısı. */
+  generalTurnsUsed?: number;
   kingPresent: boolean;
   now: number;
 }): TurnDecision {
   if (input.kingPresent) return { ok: false, reason: "Kral masada; sözü Kral söyler." };
   if (input.lastMessageSide === null) return { ok: false, reason: "Masada henüz söz yok." };
   if (input.lastMessageSide === input.side) return { ok: false, reason: "Son söz bizim; sıra karşı tarafta." };
+  // Generalin payı ayrı tavanlanır: masanın toplam söz hakkı cömert olabilir
+  // çünkü Kralın kendi yazdığı sözler token harcamıyor.
+  if ((input.generalTurnsUsed ?? 0) >= LIMITS.maxGeneralTurns) {
+    return { ok: false, reason: `General bu masada söz hakkını doldurdu (${LIMITS.maxGeneralTurns} mesaj); sözü Kral almalı.` };
+  }
   return canSpeak(input.negotiation, input.side, input.now);
 }
 

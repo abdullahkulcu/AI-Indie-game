@@ -188,3 +188,28 @@ test("yönü olmayan haraç şartı reddedilir", () => {
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /hangi taraf/);
 });
+
+test("masanın söz hakkı cömert, Generalin payı sınırlı", () => {
+  // Kral 6/6'da tıkandı: pazarlık daha başlamadan masa kapanıyordu. Toplam
+  // tavan büyütüldü çünkü Kralın kendi yazdığı sözler token harcamıyor;
+  // asıl gider Generalin payı ve o ayrıca sınırlı.
+  assert.ok(LIMITS.maxTurns > LIMITS.maxGeneralTurns * 2, "Kralın elle pazarlık edecek alanı olmalı");
+  assert.equal(canSpeak(table({ turns: 10 }), "initiator", T0).ok, true, "10. sözde masa hâlâ açık");
+});
+
+test("General payını doldurunca susar, Kral konuşmaya devam eder", () => {
+  const open = table({ turns: 8 });
+  const spent = shouldGeneralAnswer({
+    negotiation: open, side: "initiator", lastMessageSide: "target",
+    generalTurnsUsed: LIMITS.maxGeneralTurns, kingPresent: false, now: T0,
+  });
+  assert.equal(spent.ok, false);
+  if (!spent.ok) assert.match(spent.reason, /söz hakkını doldurdu/);
+  // Aynı masada Kral hâlâ konuşabilir.
+  assert.equal(canSpeak(open, "initiator", T0).ok, true);
+  // Payı dolmadıysa General konuşur.
+  assert.equal(shouldGeneralAnswer({
+    negotiation: open, side: "initiator", lastMessageSide: "target",
+    generalTurnsUsed: LIMITS.maxGeneralTurns - 1, kingPresent: false, now: T0,
+  }).ok, true);
+});
