@@ -249,8 +249,13 @@ export function tick(g: Game, now: number): Game {
 
   // Depo tavanı: aşan stok saatte bir oranla bozulur. Anında kırpılmaz ki Kral
   // depo kurmaya ya da Pazarda satmaya vakit bulsun.
+  //
+  // Adım başındaki stok (`g.resources`) da verilir: bozulmanın ne kadar sürdüğü
+  // stoğun aralık boyunca izlediği yola bağlıdır. Yalnızca varış noktasına
+  // bakıldığında tek adım ile saniyelik adımlar %19'a varan farklı sonuç
+  // veriyordu ve bu, motorun determinizm kuralının sessiz ihlaliydi.
   const caps = storageCaps({ buildings, speed: g.speed });
-  const spoiled = applySpoilage(resources, caps, hours);
+  const spoiled = applySpoilage(resources, caps, hours, g.resources);
   resources = spoiled.resources;
   const spoiledEntries = (Object.entries(spoiled.lost) as Array<[Key, number]>).filter(([, amount]) => amount >= 1);
   // Depo taşması sürerken her tick'te bildirim yazmak defteri doldurur ve akın

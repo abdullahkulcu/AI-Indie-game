@@ -84,6 +84,64 @@ test("doluluk oranı okunur", () => {
   assert.equal(fillRatio(resources, caps, "food"), .5);
 });
 
+/**
+ * ÖLÇÜM KİLİDİ. İncelemede bulunan sapma buydu: tavan 1000, stok 1200, net
+ * −100/saat, 5 saat →  tek adım 700 · saatlik adım 600 · saniyelik adım 566,7
+ * (%19). Sebep, bozulmanın yalnızca aralık SONUNDAKİ stoğa bakmasıydı; stok
+ * aralığın ortasında tavanın altına indiğinde bölünme ayrışıyordu.
+ *
+ * Yön oyuncunun aleyhine olduğu için sunucu kaydı reddetmiyor, yani kural
+ * sessizce ihlal ediliyordu. Buradaki eşik bunun bir daha sessizce dönmesini
+ * engeller.
+ */
+test("üretim varken de bozulma adım boyundan bağımsızdır", () => {
+  const caps = storageCaps(keepOnly);
+  const cap = caps.food;
+  const start = cap * 1.2, rate = -cap * .1, hours = 5;
+
+  const run = (steps: number) => {
+    const step = hours / steps;
+    let stock = start;
+    for (let i = 0; i < steps; i++) {
+      const before: Res = { gold: 0, food: stock, stone: 0, wood: 0, iron: 0, ale: 0 };
+      const after: Res = { ...before, food: Math.max(0, stock + rate * step) };
+      stock = applySpoilage(after, caps, step, before).resources.food;
+    }
+    return stock;
+  };
+
+  const single = run(1), hourly = run(hours), perSecond = run(hours * 3600);
+  // Kabul edilen sınır: tavanın on binde biri. Ölçülen fark 1e-9 mertebesinde;
+  // sınır kayan nokta birikimi için var, gerçek bir toleransı örtmek için değil.
+  const bound = cap / 10_000;
+  assert.ok(Math.abs(single - hourly) < bound, `tek adım ${single}, saatlik ${hourly}`);
+  assert.ok(Math.abs(single - perSecond) < bound, `tek adım ${single}, saniyelik ${perSecond}`);
+
+  // Kesin çözüm elle de doğrulanır: stok (1200−1000)/(200+100) saatte tavana
+  // iner, o ana kadar saatte 200 bozulur, sonrası yalnızca tüketimdir.
+  const decay = cap * SPOIL_RATE, reach = (start - cap) / (decay - rate);
+  assert.ok(Math.abs(single - (cap + rate * (hours - reach))) < 1e-6, `kapalı formülle uyuşmalı: ${single}`);
+});
+
+test("üretim tavanı aşarsa fazlası bozulur ama stok tavanda kalır", () => {
+  // Tavana yapışma: üretim erimeden küçükse üretilen fazlalık üretildiği anda
+  // bozulur. Bu da adım boyundan bağımsız olmalı.
+  const caps = storageCaps(keepOnly);
+  const cap = caps.food, rate = cap * .05, hours = 4;
+  const run = (steps: number) => {
+    const step = hours / steps;
+    let stock = cap;
+    for (let i = 0; i < steps; i++) {
+      const before: Res = { gold: 0, food: stock, stone: 0, wood: 0, iron: 0, ale: 0 };
+      const after: Res = { ...before, food: stock + rate * step };
+      stock = applySpoilage(after, caps, step, before).resources.food;
+    }
+    return stock;
+  };
+  assert.ok(Math.abs(run(1) - cap) < 1e-9, `tek adımda tavanda kalmalı: ${run(1)}`);
+  assert.ok(Math.abs(run(1) - run(hours * 3600)) < 1e-9, "adım boyu sonucu değiştirmemeli");
+});
+
 test("bozulma adımlara bölününce aynı sonucu verir", () => {
   // Motorun determinizmi buna bağlı: istemci küçük adımlarla, sunucu tek
   // adımda ilerliyor. Üstel erime bu eşitliği bozuyordu.

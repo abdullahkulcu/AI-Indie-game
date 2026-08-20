@@ -1,22 +1,16 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, gameSaves } from "../../../db/schema";
+import { agreements, gameSaves, negotiations } from "../../../db/schema";
+import { DECLINABLE_STATUSES } from "../../../engine/negotiation";
 import { currentUser } from "../../../server/account-auth";
+import { activeMembershipOf } from "../../../server/active-membership";
+import { noteToKing } from "../../../server/king-notice";
 import { RATE_LIMITS, consumeRateLimit, rateLimitResponse } from "../../../server/rate-limit";
 import { parseTimestamp, parseStoredSave, validateGameSave } from "../../../server/save-validation";
 
 export const dynamic = "force-dynamic";
 
 const noStore = { "cache-control": "no-store" };
-
-/** Oyuncunun gerçekten üye olduğu aktif channel; kayıttaki channel iddiası buna karşı doğrulanır. */
-async function activeChannel(userId: string) {
-  const [row] = await getDb().select({ name: channels.name, speed: channels.speed })
-    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
-    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"), eq(channels.status, "active")))
-    .limit(1);
-  return row ?? null;
-}
 
 export async function GET(request: Request) {
   const user = await currentUser(request);
@@ -57,12 +51,16 @@ export async function PUT(request: Request) {
   if (existing && typeof body.baseRevision !== "number") {
     return Response.json({ error: "Kayıt sürümü bildirilmedi." }, { status: 400, headers: noStore });
   }
-  const channel = await activeChannel(user.id);
+  // Üyelik seçimi TEK yerden gelir. Burada ayrı bir SIRASIZ `limit(1)` duruyordu:
+  // iki aktif üyeliği olan Kralın hangi channel'ına yazıldığı rastgeleydi ve
+  // müzakere yolu (server/active-membership) başka bir channel seçebiliyordu —
+  // kayıt bir sezona, masa başkasına giderdi.
+  const channel = await activeMembershipOf(user.id);
   const result = validateGameSave(body.game, {
     previous: existing ? parseStoredSave(existing.gameState) : null,
     previousUpdatedAt: existing ? parseTimestamp(existing.updatedAt) : null,
-    channelSpeed: channel?.speed ?? 1,
-    channelName: channel?.name ?? null,
+    channelSpeed: channel?.channelSpeed ?? 1,
+    channelName: channel?.channelName ?? null,
   });
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status, headers: noStore });
 
@@ -104,9 +102,64 @@ export async function PUT(request: Request) {
   return Response.json({ saved: true, revision: created?.revision ?? 1 }, { headers: noStore });
 }
 
+/**
+ * Krallığını sıfırlayan Kralın DIŞ TAAHHÜTLERİ de kapanır.
+ *
+ * Kusur: yalnızca kayıt siliniyordu. `negotiations` ve `agreements` yerinde
+ * kalıyor, cron `parseStoredSave` null dönünce sessizce atlıyordu — karşı taraf
+ * ne ödeme alıyor, ne ihlal görüyordu; anlaşma `endsAt`'e kadar hayalet olarak
+ * duruyor, masa da cevaplanmayı bekliyordu.
+ *
+ * Sıra önemli: önce masalar ve anlaşmalar kapanır, sonra kayıt silinir. Tersi
+ * olsaydı, arada düşen bir istek kaydı silinmiş ama taahhütleri açık bir Kral
+ * bırakırdı — yani düzeltmeye çalıştığımız durumun aynısı.
+ */
+async function closeCommitments(userId: string, now: number) {
+  const db = getDb();
+  const mine = or(eq(negotiations.initiatorId, userId), eq(negotiations.targetId, userId));
+
+  // Açık masalar kapanır. Karşı tarafa haber verilebilmesi için önce kimlerle
+  // konuşulduğu okunur.
+  const openTables = await db.select().from(negotiations)
+    .where(and(mine, inArray(negotiations.status, [...DECLINABLE_STATUSES])));
+  if (openTables.length) {
+    await db.update(negotiations).set({ status: "declined", lastTurnAt: now })
+      .where(and(mine, inArray(negotiations.status, [...DECLINABLE_STATUSES])));
+  }
+
+  // Yürürlükteki anlaşmalar bozulur. Sıfırlayan taraf sözünden dönmüştür;
+  // itibar cezası kaydı silindiği için yazılamaz, ama karşı taraf durumu görür.
+  const deals = await db.select().from(agreements)
+    .where(and(eq(agreements.status, "active"), or(eq(agreements.payerId, userId), eq(agreements.payeeId, userId))));
+  if (deals.length) {
+    await db.update(agreements).set({ status: "broken" })
+      .where(and(eq(agreements.status, "active"), or(eq(agreements.payerId, userId), eq(agreements.payeeId, userId))));
+  }
+
+  // Karşı taraflara TEK bildirim: aynı Kralla hem masası hem anlaşması olan
+  // oyuncunun defterini iki satırla doldurmayalım.
+  const affected = new Map<string, { tables: number; deals: number }>();
+  const bump = (id: string, key: "tables" | "deals") => {
+    if (id === userId) return;
+    const entry = affected.get(id) ?? { tables: 0, deals: 0 };
+    entry[key] += 1; affected.set(id, entry);
+  };
+  for (const table of openTables) bump(table.initiatorId === userId ? table.targetId : table.initiatorId, "tables");
+  for (const deal of deals) bump(deal.payerId === userId ? deal.payeeId : deal.payerId, "deals");
+
+  for (const [otherId, counts] of affected) {
+    const parts: string[] = [];
+    if (counts.deals) parts.push(`${counts.deals} anlaşma bozuldu`);
+    if (counts.tables) parts.push(`${counts.tables} masa kapandı`);
+    await noteToKing(otherId, "ELÇİLİK", `Karşı krallık ortadan kalktı; ${parts.join(", ")}. Bundan sonra o taraftan ödeme beklemeyin.`, now);
+  }
+  return { tables: openTables.length, deals: deals.length };
+}
+
 export async function DELETE(request: Request) {
   const user = await currentUser(request);
   if (!user) return Response.json({ error: "Oturum gerekli." }, { status: 401, headers: noStore });
+  const closed = await closeCommitments(user.id, Date.now());
   await getDb().delete(gameSaves).where(eq(gameSaves.userId, user.id));
-  return Response.json({ deleted: true }, { headers: noStore });
+  return Response.json({ deleted: true, closed }, { headers: noStore });
 }

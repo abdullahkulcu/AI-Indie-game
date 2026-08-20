@@ -2,9 +2,9 @@ import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { agreements, channelMembers, negotiationMessages, negotiations } from "../../../db/schema";
 import {
-  DECLINABLE_STATUSES, LIMITS, SIGNABLE_STATUS,
-  canBind, canDecline, canOpen, canProposeTerms, canSpeak, clampTerms, sideOf, validateTerms,
-  type NegotiationTopic, type Side, type Terms,
+  DECLINABLE_STATUSES, LIMITS, MAX_MESSAGE_LENGTH, NEGOTIATION_TOPICS, SIGNABLE_STATUS,
+  canBind, canDecline, canOpen, canProposeTerms, canSpeak, clampTerms, isNegotiationTopic, sideOf, validateTerms,
+  type Side, type Terms,
 } from "../../../engine/negotiation";
 import { currentUser } from "../../../server/account-auth";
 import { activeMembershipOf } from "../../../server/active-membership";
@@ -16,12 +16,18 @@ export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: noStore });
 
-const TOPICS: NegotiationTopic[] = ["tribute", "non_aggression", "alliance", "passage", "ultimatum"];
-const MAX_MESSAGE = 600;
+// Konu listesi ve mesaj tavanı MOTORDAN gelir; burada elle yazılan bir kopya
+// motor değiştiğinde sessizce geride kalıyordu.
+const MAX_MESSAGE = MAX_MESSAGE_LENGTH;
 
 export async function GET(request: Request) {
   const user = await currentUser(request);
   if (!user) return json({ error: "Oturum gerekli." }, 401);
+  // Okuma da sınırlıdır. Uç sınırsızdı; her çağrı masaları, bütün mesajları ve
+  // her karşı taraf için ayrı bir kayıt okuyor. Sınır HESAP bazındadır ve
+  // panelin 20 saniyelik yoklamasının üç katından geniş tutuldu.
+  const limit = await consumeRateLimit(RATE_LIMITS.negotiateRead, `user:${user.id}`);
+  if (!limit.allowed) return rateLimitResponse(limit, "Elçilik defteri çok sık okundu; birazdan tekrar denenecek.");
   const membership = await activeMembershipOf(user.id);
   if (!membership) return json({ error: "Aktif bir channel'a katılmadınız." }, 403);
 
@@ -48,7 +54,9 @@ export async function GET(request: Request) {
 
   return json({
     acceptsNegotiation: membership.acceptsNegotiation,
-    limits: { maxTurns: LIMITS.maxTurns, maxOpen: LIMITS.maxOpenPerKingdom },
+    limits: { maxTurns: LIMITS.maxTurns, maxOpen: LIMITS.maxOpenPerKingdom, maxMessage: MAX_MESSAGE },
+    // Panel konu listesini de motordan okusun; elle yazılan üçüncü bir kopya olmasın.
+    topics: NEGOTIATION_TOPICS,
     tables,
     agreements: await Promise.all(deals.map(async deal => ({
       id: deal.id, topic: deal.topic, terms: JSON.parse(deal.terms) as Terms,
@@ -88,8 +96,8 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "open") {
-    const topic = String(body.topic ?? "") as NegotiationTopic;
-    if (!TOPICS.includes(topic)) return json({ error: "Geçersiz müzakere konusu." }, 400);
+    const topic = body.topic;
+    if (!isNegotiationTopic(topic)) return json({ error: "Geçersiz müzakere konusu." }, 400);
     const targetId = String(body.targetId ?? "");
     if (!targetId || targetId === user.id) return json({ error: "Geçerli bir karşı krallık seçilmeli." }, 400);
 

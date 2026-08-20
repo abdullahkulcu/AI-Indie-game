@@ -63,8 +63,13 @@ function taxComment(game: Game, next: number, previous: number) {
 /**
  * Politika değişikliğini uygular ve General'in tepkisini döndürür.
  * Halkın o anki durumu yorumu sertleştirebilir.
+ *
+ * `now` DIŞARIDAN gelir. `engine/` saf kalmak zorunda: içeride `Date.now()`
+ * çağrılırsa aynı girdi iki farklı çıktı verir ve motorun determinizmi —
+ * sunucunun kaydı doğrulama biçimi buna dayanıyor — sessizce kırılır. Kural
+ * artık eslint.config.mjs içindeki `engine/` kuralıyla da denetleniyor.
  */
-export function applyPolicy(game: Game, change: PolicyChange): PolicyResult {
+export function applyPolicy(game: Game, change: PolicyChange, now: number): PolicyResult {
   const value = clampPolicy(change.key, change.value);
   const rations = rationsOf(game);
   const previous = change.key === "taxRate" ? game.taxRate : change.key === "foodRation" ? rations.food : rations.ale;
@@ -87,7 +92,7 @@ export function applyPolicy(game: Game, change: PolicyChange): PolicyResult {
 
   const label = change.key === "taxRate" ? "Vergi" : change.key === "foodRation" ? "Yiyecek istihkakı" : "Bira istihkakı";
   return {
-    game: { ...next, notices: [{ kind: "FERMAN", text: `${label} %${value} olarak belirlendi.`, at: Date.now() }, ...next.notices].slice(0, 20) },
+    game: { ...next, notices: [{ kind: "FERMAN", text: `${label} %${value} olarak belirlendi.`, at: now }, ...next.notices].slice(0, 20) },
     comment,
   };
 }

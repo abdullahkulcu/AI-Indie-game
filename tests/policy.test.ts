@@ -25,42 +25,42 @@ test("politika değerleri sınırlara oturur", () => {
 });
 
 test("Kral istihkakı doğrudan çevirir; General'e sormaz", () => {
-  const { game, comment } = applyPolicy(newGame(), { key: "foodRation", value: 150 });
+  const { game, comment } = applyPolicy(newGame(), { key: "foodRation", value: 150 }, T0);
   assert.equal(game.foodRation, 150);
   assert.ok(comment.length > 0, "General her değişiklikte bir şey söylemeli");
 });
 
 test("vergi doğrudan değişir ve deftere ferman düşer", () => {
-  const { game } = applyPolicy(newGame(), { key: "taxRate", value: 35 });
+  const { game } = applyPolicy(newGame(), { key: "taxRate", value: 35 }, T0);
   assert.equal(game.taxRate, 35);
   assert.equal(game.notices[0].kind, "FERMAN");
   assert.match(game.notices[0].text, /Vergi %35/);
 });
 
 test("açlık sınırındaki istihkakta General sert konuşur", () => {
-  const { comment } = applyPolicy(newGame(), { key: "foodRation", value: 30 });
+  const { comment } = applyPolicy(newGame(), { key: "foodRation", value: 30 }, T0);
   assert.match(comment, /açlıktan/);
 });
 
 test("soygun düzeyindeki vergide General isyanı hatırlatır", () => {
-  const { comment } = applyPolicy(newGame(), { key: "taxRate", value: 48 });
+  const { comment } = applyPolicy(newGame(), { key: "taxRate", value: 48 }, T0);
   assert.match(comment, /soygun|isyan/);
 });
 
 test("Bira Evi yokken bira istihkakının kâğıt üstünde kalacağı söylenir", () => {
-  const { comment } = applyPolicy(newGame(), { key: "aleRation", value: 100 });
+  const { comment } = applyPolicy(newGame(), { key: "aleRation", value: 100 }, T0);
   assert.match(comment, /Bira Evi/);
 });
 
 test("halk iş bırakmışken General zamanlamayı eleştirir", () => {
   const striking = newGame({ popularity: 12 });
-  const { comment } = applyPolicy(striking, { key: "taxRate", value: 30 });
+  const { comment } = applyPolicy(striking, { key: "taxRate", value: 30 }, T0);
   assert.match(comment, /zamanlaması kötü/);
 });
 
 test("politika değişikliği başka alanları bozmaz", () => {
   const before = newGame();
-  const { game } = applyPolicy(before, { key: "aleRation", value: 80 });
+  const { game } = applyPolicy(before, { key: "aleRation", value: 80 }, T0);
   assert.deepEqual(game.resources, before.resources);
   assert.equal(game.population, before.population);
   assert.equal(game.taxRate, before.taxRate);

@@ -2,14 +2,21 @@
 #   COMPOSE_PROJECT_NAME=demirkale-b WEB_PORT=8080 PG_PORT=5434 docker compose up -d
 # Proje adı konteyner ve HACİM adlarını da ayırır, yani iki kopya aynı
 # veritabanını paylaşmaz. Portlar çakışmasın diye WEB_PORT/PG_PORT verilir.
-# Demirkale'yi tek komutla ayağa kaldırır: oyun sunucusu + gece vardiyası cron'u.
+# Demirkale'yi tek komutla ayağa kaldırır: postgres + oyun sunucusu + gece
+# vardiyası cron'u + nginx.
 #
-#   cp .env.example .env   (CRON_SECRET'i .dev.vars ile aynı yapın)
-#   docker compose up
+# BU DOSYA TEK BAŞINA GELİŞTİRME YIĞINIDIR: `app` servisi dev sunucusu (HMR,
+# derleme optimizasyonu yok) çalıştırır ve şemayı `drizzle-kit push` ile
+# uygular. Yayına ÇIKARKEN üretim örtüsünü ekleyin:
 #
-# `app` vinext/miniflare çalıştırır; veritabanı Cloudflare D1'in yerel karşılığı
-# olduğu için ayrı bir Postgres gerekmez. `cron` yalnızca saatte bir /api/cron'u
-# çağırır; asıl karar sunucuda verilir.
+#   geliştirme       : docker compose up -d                        (./run.sh)
+#   üretim (http)    : docker compose -f docker-compose.yml \
+#                                     -f docker-compose.prod.yml up -d   (./run.sh prod)
+#   üretim (https)   : yukarıdakine -f docker-compose.tls.yml ekleyin     (./run.sh prod:tls)
+#
+# Üretim örtüsü üç şeyi değiştirir: `npm run build` + `npm start`,
+# NODE_ENV=production ve şemanın `drizzle-kit migrate` ile uygulanması.
+# `cron` yalnızca saatte bir /api/cron'u çağırır; asıl karar sunucuda verilir.
 services:
   postgres:
     image: postgres:17
@@ -32,8 +39,13 @@ services:
     working_dir: /app
     # Bayrak --hostname; vinext --host'u tanımaz ve konteynerin içinde loopback'e
     # bağlanır, o zaman dışarıdan ERR_CONNECTION_RESET alırsınız.
-    # Şema açılışta uygulanır. Bu olmadan yeni bir VM'de tablolar eksik kalıyor
-    # ve uygulama "relation ... does not exist" ile 500 dönüyordu. Kapatmak için
+    #
+    # ŞEMA — GELİŞTİRME YOLU. `drizzle-kit push` şemayı diff'leyip uygular;
+    # hızlıdır ama YIKICI değişikliği (sütun/tablo düşürme) onay sormadan
+    # yapar, o yüzden `--force` yalnızca burada, verisi atılabilir bir yerel
+    # veritabanında kabul edilebilir. ÜRETİM YOLU BU DEĞİLDİR:
+    # docker-compose.prod.yml aynı yerde `drizzle-kit migrate` çalıştırır ve
+    # drizzle/pg altındaki üretilmiş göçleri sırayla uygular. Kapatmak için
     # DB_AUTO_PUSH=0 verin; o zaman şemayı elle uygularsınız (./run.sh db:push).
     command: >
       sh -c "npm ci --no-audit --no-fund &&
@@ -51,6 +63,8 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     environment:
+      # GELİŞTİRME. Üretimde docker-compose.prod.yml bunu production yapar ve
+      # dev sunucusu yerine derlenmiş çıktıyı servis eder.
       NODE_ENV: development
       DATABASE_URL: postgres://demirkale:demirkale@postgres:5432/demirkale
       # Host'ta çalışan bir dev sunucusunun kilit dosyası bind-mount ile içeri
@@ -98,9 +112,16 @@ services:
   nginx:
     image: nginx:1.27-alpine
     ports: ["${WEB_PORT:-80}:80"]
+    environment:
+      # nginx imajının giriş betiği /etc/nginx/templates altındaki şablonlarda
+      # envsubst çalıştırır ve sonucu conf.d'ye yazar. Filtre YALNIZCA DOMAIN'i
+      # değiştirir; aksi halde $$host, $$remote_addr gibi nginx değişkenleri de
+      # yem olurdu. Düz dosyada değiştirilecek bir şey yok, TLS örtüsü aynı
+      # hedefi kendi şablonuyla ezer.
+      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
     volumes:
       - ./deploy/upgrade-map.conf:/etc/nginx/conf.d/00-upgrade-map.conf:ro
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
     depends_on:
       app: {condition: service_started}
     restart: unless-stopped

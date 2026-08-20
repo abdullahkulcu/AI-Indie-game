@@ -1,0 +1,29 @@
+# Demirkale — TLS örtüsü. Üretim örtüsünün ÜSTÜNE eklenir:
+#
+#   DOMAIN=demirkale.example.com docker compose \
+#     -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.tls.yml up -d
+#   (kısayol: DOMAIN=... ./run.sh prod:tls)
+#
+# Sertifikayı host'ta certbot alır; adımlar deploy/TLS.md içinde.
+#
+# Oturum çerezi güvenli bağlantıda `Secure` yazılır ve bunu X-Forwarded-Proto
+# belirler (server/account-auth.ts → isSecureRequest). deploy/nginx-tls.conf
+# bu başlığı `https` gönderir, yani TLS açıldığı anda çerez korumaya kavuşur.
+services:
+  nginx:
+    ports: ["${WEB_PORT:-80}:80", "${TLS_PORT:-443}:443"]
+    environment:
+      # nginx imajının giriş betiği /etc/nginx/templates altındaki şablonlarda
+      # envsubst çalıştırır. Filtre YALNIZCA DOMAIN'i değiştirir; aksi halde
+      # $host, $remote_addr gibi nginx değişkenleri de yem olurdu.
+      DOMAIN: ${DOMAIN:?TLS için DOMAIN gerekli, örn. DOMAIN=demirkale.example.com}
+      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
+    volumes:
+      # Aynı HEDEF yolu taban dosyadaki düz yapılandırmayı ezer (compose
+      # birleştirmede volume'ler hedef yola göre eşleşir).
+      - ./deploy/nginx-tls.conf:/etc/nginx/templates/default.conf.template:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      # 80 artık yalnızca 301 döndürüyor; wget yönlendirmeyi izlemesin diye
+      # sertifika doğrulaması olmadan 443'e bakılır.
+      test: ["CMD-SHELL", "wget -qO- --no-check-certificate https://127.0.0.1/ >/dev/null 2>&1 || exit 1"]

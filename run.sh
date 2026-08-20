@@ -54,9 +54,17 @@ wait_healthy(){
   die "$name zamanında hazır olmadı. ./run.sh logs ile bakın."
 }
 
+# Üretim örtüsü. Taban dosya GELİŞTİRME yığınıdır (dev sunucusu + drizzle push);
+# üretimde derlenmiş çıktı ve `drizzle-kit migrate` çalışır. TLS ayrı bir örtüdür
+# ve DOMAIN ister (bkz. deploy/TLS.md).
+PROD_FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
+TLS_FILES=("${PROD_FILES[@]}" -f docker-compose.tls.yml)
+
 cmd_up(){
   need docker; ensure_dev_vars
-  bold "Demirkale ayağa kaldırılıyor"
+  bold "Demirkale ayağa kaldırılıyor (GELİŞTİRME)"
+  warn "bu yığın dev sunucusu çalıştırır ve şemayı 'drizzle-kit push --force' ile uygular."
+  warn "canlı bir VM için: ./run.sh prod   (TLS ile: DOMAIN=... ./run.sh prod:tls)"
   docker compose up -d
   wait_healthy ai-indie-game-postgres-1 24
   info "postgres hazır"
@@ -66,6 +74,25 @@ cmd_up(){
   echo
   info "ilk kurulumda şemayı kurun:  ./run.sh db:push"
   info "logları izlemek için:        ./run.sh logs"
+}
+
+# Üretim yolu: derlenmiş çıktı + göçler. Şema `migrate` ile uygulandığı için
+# açılışta hiçbir yıkıcı diff çalışmaz.
+cmd_prod(){
+  need docker; ensure_dev_vars
+  bold "Demirkale ÜRETİM olarak ayağa kaldırılıyor"
+  info "derleme ilk açılışta birkaç dakika sürer; ./run.sh logs app ile izleyin"
+  docker compose "${PROD_FILES[@]}" up -d
+  docker compose "${PROD_FILES[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
+}
+
+cmd_prod_tls(){
+  need docker; ensure_dev_vars
+  [ -n "${DOMAIN:-}" ] || die "DOMAIN gerekli:  DOMAIN=demirkale.example.com ./run.sh prod:tls  (bkz. deploy/TLS.md)"
+  [ -d "/etc/letsencrypt/live/$DOMAIN" ] || warn "/etc/letsencrypt/live/$DOMAIN yok; önce sertifika alın (deploy/TLS.md)."
+  bold "Demirkale ÜRETİM + TLS olarak ayağa kaldırılıyor ($DOMAIN)"
+  docker compose "${TLS_FILES[@]}" up -d
+  docker compose "${TLS_FILES[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
 }
 
 cmd_down(){ need docker; docker compose down; }
@@ -80,7 +107,14 @@ cmd_logs(){ need docker; docker compose logs -f "${1:-}"; }
 cmd_ps(){ need docker; ensure_dev_vars; docker compose ps; }
 
 # Şema ve veri. Host'tan çalıştığı için 5433 portu kullanılır.
-cmd_db_push(){ need npx; bold "şema Postgres'e uygulanıyor"; DATABASE_URL="$PG_HOST_URL" npx drizzle-kit push; }
+# GELİŞTİRME: şemayı diff'leyip uygular. Hızlıdır ama yıkıcı değişikliği de
+# yapar ve neyin uygulandığını hiçbir yere yazmaz.
+cmd_db_push(){ need npx; bold "şema Postgres'e uygulanıyor (geliştirme)"; DATABASE_URL="$PG_HOST_URL" npx drizzle-kit push; }
+# ÜRETİM: drizzle/pg altındaki üretilmiş göçleri sırayla uygular ve uygulananı
+# kaydeder. Üretim konteyneri açılışta bunun aynısını çalıştırır.
+cmd_db_migrate_up(){ need npx; bold "göçler uygulanıyor"; DATABASE_URL="$PG_HOST_URL" npx drizzle-kit migrate; }
+# Şema değiştiğinde yeni göç dosyası üretir; üretime çıkmadan ÖNCE çalıştırılır.
+cmd_db_generate(){ need npx; bold "şema farkından göç üretiliyor"; npx drizzle-kit generate; }
 cmd_db_migrate(){ need npx; bold "D1 verisi Postgres'e taşınıyor"; DATABASE_URL="$PG_HOST_URL" npx tsx scripts/migrate-d1-to-postgres.ts; }
 cmd_psql(){ need docker; docker compose exec postgres psql -U demirkale -d demirkale; }
 
@@ -109,13 +143,17 @@ cmd_help(){
   cat <<'EOF'
 Demirkale çalıştırma komutları
 
-  ./run.sh                 docker yığınını başlat (postgres + app + cron)
+  ./run.sh                 GELİŞTİRME yığınını başlat (dev sunucusu + push)
+  ./run.sh prod            ÜRETİM yığınını başlat (build + start + migrate)
+  ./run.sh prod:tls        ÜRETİM + TLS (DOMAIN=... gerekir, bkz. deploy/TLS.md)
   ./run.sh down            durdur
   ./run.sh reset           durdur ve VERİYİ SİL (onay ister)
   ./run.sh logs [servis]   logları izle (app | cron | postgres)
   ./run.sh ps              servis durumu
 
-  ./run.sh db:push         şemayı Postgres'e uygula
+  ./run.sh db:push         şemayı Postgres'e uygula (GELİŞTİRME, diff tabanlı)
+  ./run.sh db:up           göçleri uygula (ÜRETİM yolu; drizzle/pg)
+  ./run.sh db:generate     şema farkından yeni göç dosyası üret
   ./run.sh db:migrate      eski D1 verisini Postgres'e taşı
   ./run.sh psql            veritabanı kabuğu
 
@@ -124,18 +162,26 @@ Demirkale çalıştırma komutları
   ./run.sh check           tsc + lint
   ./run.sh cron            gece vardiyasını hemen tetikle
 
-İlk kurulum:
+İlk kurulum (yerel):
   ./run.sh && ./run.sh db:push
+
+Yayın (VM):
+  ./run.sh prod                                  # http, TLS yok
+  DOMAIN=demirkale.example.com ./run.sh prod:tls # https (deploy/TLS.md)
 EOF
 }
 
 case "${1:-up}" in
   up|"")        cmd_up ;;
+  prod)         cmd_prod ;;
+  prod:tls)     cmd_prod_tls ;;
   down)         cmd_down ;;
   reset)        cmd_reset ;;
   logs)         cmd_logs "${2:-}" ;;
   ps)           cmd_ps ;;
   db:push)      cmd_db_push ;;
+  db:up)        cmd_db_migrate_up ;;
+  db:generate)  cmd_db_generate ;;
   db:migrate)   cmd_db_migrate ;;
   psql)         cmd_psql ;;
   dev)          cmd_dev ;;

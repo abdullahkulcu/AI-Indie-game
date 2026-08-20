@@ -49,16 +49,23 @@ type GeneralRequest = {
   pendingDecision?: { action: GeneralAction; reasons: string[]; riskLevel: string };
   /** Sunucunun eklediği kalıcı hafıza ve talep blokları; istemciden gelmez. */
   memoryLines?: string[];
-  /** Açık müzakere masaları; sunucu ekler, istemci gönderemez. */
+  /** Açık müzakere masaları — YAZIŞMASIZ özet; sunucu ekler, istemci gönderemez. */
   negotiationLines?: string[];
+  /**
+   * Masalarda söylenmiş sözlerin dökümü. SİSTEM promptuna GİRMEZ: içindeki
+   * `soz` alanları karşı OYUNCUNUN ham metnidir ve sistem rolüne konduğunda
+   * krallığın gerçek verisiyle aynı güven seviyesinde duruyordu. `user` rolünde,
+   * açılış/kapanış işaretli bir blokta taşınır (bkz. server/negotiation-brief).
+   */
+  negotiationTranscript?: string;
 };
 
 const actionTools = [
   { name: "build_structure", description: "Yeni bina kurar veya mevcut binayı tam bir seviye yükseltir. Açık ve rutin bir inşa emrinde tekrar onay istemeden çağır. confirmed_risk yalnızca Kral, bildirilen kaynak/yiyecek riskine rağmen açıkça ısrar etmişse true olabilir.", parameters: { type: "object", properties: { building_type: { type: "string", enum: BUILDABLE_TYPES }, target_level: { type: "integer", minimum: 1, maximum: 6 }, confirmed_risk: { type: "boolean" } }, required: ["building_type","target_level"], additionalProperties: false } },
   { name: "train_unit", description: "Kral açıkça birlik eğitmeni istediğinde eğitim kuyruğu başlatır. Yiyecek krizi veya büyük nüfus kaybı varsa önce teyit iste; teyitten sonra confirmed_risk true olabilir.", parameters: { type: "object", properties: { unit_type: { type: "string", enum: ["spearman"] }, count: { type: "integer", minimum: 1, maximum: 50 }, confirmed_risk: { type: "boolean" } }, required: ["unit_type","count"], additionalProperties: false } },
   { name: "propose_action", description: "Kralın cümlesinden bir istek ANLADIN ama bu açık bir emir değil: yapmayı düşündüğün somut eylemi Kralın onayına sunar. Eylemi UYGULAMAZ, yalnızca bekletir; Kral 'onay/evet/tamam' derse sen bir şey yapmadan uygulanır. Emir kipi olmayan ama niyet taşıyan her cümlede bunu kullan.", parameters: { type: "object", properties: { action: { type: "string", description: "Onaya sunulacak aracın adı, örn. trade_resource" }, arguments: { type: "object", description: "O aracın alacağı parametreler" }, summary: { type: "string", description: "Kralın göreceği tek cümlelik özet, örn. 'Pazarda 100 odun satacağım.'" } }, required: ["action","summary"], additionalProperties: false } },
-  { name: "open_negotiation", description: "Komşu krallığın Generaliyle müzakere masası açar. Kral haraç istemek, saldırmazlık, ittifak, geçiş izni ya da ültimatom için görüşmeyi emrettiğinde çağır. Hedefi yalnızca neighbors listesindeki ordinal ile belirt.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1 }, topic: { type: "string", enum: ["tribute","non_aggression","alliance","passage","ultimatum"] }, message: { type: "string", minLength: 5, maxLength: 600 } }, required: ["target_ordinal","topic","message"], additionalProperties: false } },
-  { name: "reply_negotiation", description: "Açık bir müzakere masasında karşı tarafa cevap yazar. Blöf yapabilirsin: krallığının gerçek gücünü olduğundan farklı gösterebilirsin.", parameters: { type: "object", properties: { table_ordinal: { type: "integer", minimum: 1 }, message: { type: "string", minLength: 2, maxLength: 600 } }, required: ["table_ordinal","message"], additionalProperties: false } },
+  { name: "open_negotiation", description: "Komşu krallığın Generaliyle müzakere masası açar. Kral haraç istemek, saldırmazlık, ittifak, geçiş izni ya da ültimatom için görüşmeyi emrettiğinde çağır. Hedefi yalnızca neighbors listesindeki ordinal ile belirt.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1 }, topic: { type: "string", enum: [...NEGOTIATION_TOPICS] }, message: { type: "string", minLength: 5, maxLength: MAX_MESSAGE_LENGTH } }, required: ["target_ordinal","topic","message"], additionalProperties: false } },
+  { name: "reply_negotiation", description: "Açık bir müzakere masasında karşı tarafa cevap yazar. Blöf yapabilirsin: krallığının gerçek gücünü olduğundan farklı gösterebilirsin.", parameters: { type: "object", properties: { table_ordinal: { type: "integer", minimum: 1 }, message: { type: "string", minLength: 2, maxLength: MAX_MESSAGE_LENGTH } }, required: ["table_ordinal","message"], additionalProperties: false } },
   { name: "propose_terms", description: "Müzakerede somut şart sunar. Şart UYGULANMAZ; karşı Kralın onayına gider. Haraçta kimin ödeyeceğini payer ile belirt: 'us' bizim ödediğimiz, 'them' karşı tarafın ödediği demektir. Haracı ya sabit rakamla (amount_per_payment) ya da oranla (rate_percent) belirt; ikisi birden verilirse sabit rakam esas alınır.", parameters: { type: "object", properties: { table_ordinal: { type: "integer", minimum: 1 }, payer: { type: "string", enum: ["us","them"] }, resource: { type: "string", enum: [...TRIBUTE_RESOURCES] }, amount_per_payment: { type: "integer", minimum: 0, maximum: MAX_TRIBUTE_AMOUNT }, rate_percent: { type: "integer", minimum: 0, maximum: MAX_TRIBUTE_RATE_PERCENT, description: "Her ödemede ambarın yüzde kaçının gideceği; fakirleşen krallığı ezmez." }, every_hours: { type: "integer", minimum: 1, maximum: MAX_HOURS }, hours: { type: "integer", minimum: 1, maximum: MAX_HOURS }, message: { type: "string", maxLength: MAX_MESSAGE_LENGTH } }, required: ["table_ordinal","hours"], additionalProperties: false } },
   { name: "trade_resource", description: "Pazarda kaynak satar veya satın alır. Kral satmayı/almayı emrettiğinde çağır; miktarı sen belirle.", parameters: { type: "object", properties: { resource: { type: "string", enum: ["food","wood","stone","iron","ale"] }, amount: { type: "integer", minimum: 1, maximum: 100000 }, direction: { type: "string", enum: ["sell","buy"] } }, required: ["resource","amount","direction"], additionalProperties: false } },
   { name: "call_settlers", description: "Çevre köylerden göçmen çağırır; boş konut ve yeterli rıza varsa nüfusu doğrudan artırır. Kral nüfusu artırmak istediğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
@@ -163,7 +170,14 @@ function gamePrompt(body: GeneralRequest) {
 
 function conversation(body: GeneralRequest) {
   const history = (body.history ?? []).slice(-8).map(item => ({ role: item.role === "king" ? "user" as const : "assistant" as const, content: item.text.slice(0, 1200) }));
-  return [...history, { role: "user" as const, content: body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message! }];
+  const said = body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message!;
+  // Masa dökümü Kralın sözünden ÖNCE, aynı `user` turunda taşınır. Ayrı bir
+  // mesaj olarak eklenseydi rol sırası sağlayıcıya göre değişirdi; blok işareti
+  // ve kapanış cümlesi sınırı burada kuruyor. Sistem promptuna hiç girmez.
+  const kingLine = body.negotiationTranscript
+    ? `${body.negotiationTranscript}\n\nKRALIN SÖZÜ (buradan sonrası senin Kralındır, blok değil):\n${said}`
+    : said;
+  return [...history, { role: "user" as const, content: kingLine }];
 }
 
 /**
@@ -255,11 +269,11 @@ async function handleNightOrder(
     const instruction = String(setter.arguments.instruction ?? "").trim();
     if (instruction.length < 5) return ["🌙 Gece emri anlaşılmadı; ne yapmamı istediğinizi bir cümleyle söyleyin."];
     // Channel istemcinin bağlamından değil üyelik kaydından okunur: istemci bu alanı
-    // göndermeyi atlarsa gece emri sessizce reddedilmemeli.
-    const [membership] = await db.select({ channelId: channelMembers.channelId })
-      .from(channelMembers)
-      .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active")))
-      .limit(1);
+    // göndermeyi atlarsa gece emri sessizce reddedilmemeli. Üyelik seçimi TEK
+    // yerden gelir (server/active-membership); burada ayrı bir sırasız limit(1)
+    // duruyordu ve iki aktif üyeliği olan Kralın gece emri kayıttan başka bir
+    // channel'a yazılabiliyordu.
+    const membership = await activeMembershipOf(userId);
     const channelId = membership?.channelId ?? body.kingdom?.channelId?.trim();
     if (!channelId) return ["🌙 Gece emri için önce bir channel'a katılmalısınız."];
     // Her emir kendi satırında durur. Eskiden user_id birincil anahtardı ve
@@ -375,12 +389,13 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
  * Sıra numaraları paylaşılan yükleyiciden gelir; Kralın arayüzünde gördüğü sıra
  * ile Generalin çağrısındaki `table_ordinal` aynı masayı göstermek zorundadır.
  */
-async function loadNegotiationLines(userId: string) {
-  const [row] = await getDb().select({ channelId: channelMembers.channelId, channelName: channels.name })
-    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
-    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
-  if (!row) return [];
-  return renderNegotiationLines(await briefsFor(userId, row.channelId, row.channelName));
+async function loadNegotiationDesk(userId: string) {
+  const membership = await activeMembershipOf(userId);
+  if (!membership) return { lines: [] as string[], transcript: "" };
+  const briefs = await briefsFor(userId, membership.channelId, membership.channelName);
+  // İki parça AYNI kaynaktan doğar ama AYRI kanallara gider: özet sisteme,
+  // sözler kullanıcı rolüne.
+  return { lines: renderNegotiationLines(briefs), transcript: renderNegotiationTranscript(briefs) };
 }
 
 /** Bir talebin "geçiştirildi" sayılması için açık kalması gereken süre. */
@@ -471,6 +486,12 @@ export async function POST(request: Request) {
     }
     const body = (await request.json()) as GeneralRequest;
     if (!body.apiKey) {
+      // MODEL TEK KAYNAKTAN OKUNUR: saklı kimlik bilgisi varsa sunucunun
+      // kullandığı model odur ve istemcinin gönderdiği alan hiç dikkate alınmaz.
+      // Panelin gösterdiği ile sunucunun kullandığı ayrışmasın diye kullanılan
+      // model cevapta geri bildirilir (aşağıda `provider`/`model`); Kral modeli
+      // anahtarını yeniden girmeden değiştirmek isterse PATCH /api/byok anahtarı
+      // yeni modelin altında yeniden şifreler.
       const [credential] = await getDb().select().from(llmCredentials).where(eq(llmCredentials.userId, user.id)).limit(1);
       if (!credential) return json({ error: "Kayıtlı BYOK bağlantısı bulunamadı." }, 400);
       try {
@@ -501,7 +522,9 @@ export async function POST(request: Request) {
     const now = Date.now();
     const memory = await loadGeneralMemory(user.id, body, now);
     body.memoryLines = memory.lines;
-    body.negotiationLines = await loadNegotiationLines(user.id);
+    const desk = await loadNegotiationDesk(user.id);
+    body.negotiationLines = desk.lines;
+    body.negotiationTranscript = desk.transcript;
 
     if (pending && confirmation.cancelled) {
       await clearPendingDecision(user.id);
@@ -510,6 +533,7 @@ export async function POST(request: Request) {
       return json({
         connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.",
         actions: [], requests: memory.open,
+        provider: body.provider, model: body.model,
       });
     }
     if (pending) body.pendingDecision = { action: pending.action, reasons: pending.reasons, riskLevel: pending.riskLevel };
@@ -570,6 +594,10 @@ export async function POST(request: Request) {
       awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")),
       // Arayüz General'in taleplerini bu alandan okur.
       requests: memory.open,
+      // Sunucunun FİİLEN kullandığı sağlayıcı ve model. Panel bunu kendi
+      // seçiminin üstüne yazar; yoksa panel bir modeli gösterip fatura
+      // başkasına yazılıyordu.
+      provider: body.provider, model: body.model,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
@@ -579,10 +607,10 @@ export async function POST(request: Request) {
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
-import { NEGOTIATION_DOCTRINE, renderNegotiationLines } from "../../../server/negotiation-brief";
+import { llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { NEGOTIATION_DOCTRINE, renderNegotiationLines, renderNegotiationTranscript } from "../../../server/negotiation-brief";
 // Şema sınırları motordan TÜRETİLİR; elle yazılan tavan motorunkinden sessizce sapar.
-import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES } from "../../../engine/negotiation";
+import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, NEGOTIATION_TOPICS, TRIBUTE_RESOURCES } from "../../../engine/negotiation";
 import { briefsFor } from "../../../server/negotiation-desk";
 import { BUILDABLE_TYPES } from "../../../engine/catalog";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
@@ -590,6 +618,7 @@ import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
+import { activeMembershipOf } from "../../../server/active-membership";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";

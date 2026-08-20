@@ -1,8 +1,8 @@
-import { and, desc, eq, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { projectPublicKingdom } from "../../../server/world-projection";
+import { intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,10 @@ async function resolveDueMissions(userId: string, channelId: string, channelName
     const succeeded = Boolean(snapshot) && crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 100 < mission.successChance;
     const detected = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 100 < mission.detectionChance;
     const status = succeeded ? "succeeded" as const : detected ? "detected" as const : "failed" as const;
-    await getDb().update(intelMissions).set({ status, report: succeeded && snapshot ? JSON.stringify(snapshot) : null, resolvedAt: sql`CURRENT_TIMESTAMP` }).where(and(eq(intelMissions.id, mission.id), eq(intelMissions.status, "pending")));
+    // Raporun NE İÇERDİĞİ tek yerde kararlaşır (server/world-projection.ts →
+    // intelReportOf). Eskiden anlık görüntünün tamamı yazılıyordu ve karşı
+    // krallığın AMBARI raporun içinde istemciye iniyordu.
+    await getDb().update(intelMissions).set({ status, report: succeeded && snapshot ? JSON.stringify(intelReportOf(snapshot)) : null, resolvedAt: sql`CURRENT_TIMESTAMP` }).where(and(eq(intelMissions.id, mission.id), eq(intelMissions.status, "pending")));
   }
 }
 
@@ -53,11 +56,12 @@ export async function GET(request: Request) {
   const layout = layoutChannel(channel.id, snapshots.map<MemberInput>(entry => ({ userId: entry.id, terrain: entry.terrain })));
   const home = layout.get(user.id) ?? { x: 0, z: 0, ring: 0, biome: "plain" as const };
 
+  const now = Date.now();
   const kingdoms = snapshots.flatMap(snapshot => {
     if (snapshot.id === user.id) return [];
     const mission = latest.get(snapshot.id), discovered = mission?.status === "succeeded";
-    let report: typeof snapshot | null = null;
-    if (discovered && mission?.report) try { report = JSON.parse(mission.report) as typeof snapshot; } catch { report = null; }
+    let report: IntelReport | null = null;
+    if (discovered && mission?.report) try { report = JSON.parse(mission.report) as IntelReport; } catch { report = null; }
     const placement = layout.get(snapshot.id) ?? { x: 0, z: 0, ring: 0, biome: snapshot.terrain };
     return [{
       id: snapshot.id,
@@ -69,6 +73,11 @@ export async function GET(request: Request) {
       discovered,
       mission: mission ? { status: mission.status, completesAt: mission.completesAt, successChance: mission.successChance } : null,
       report,
+      // RAPORUN YAŞI. Keşif kalıcı, rapor ise donmuş bir anlık görüntü: ajanın
+      // döndüğü an taşınır ki Kral altı gün önceki ordu sayısına taze veri gibi
+      // bakmasın. Raporun tamamen sönmesi bir denge kararıdır ve Krala bırakıldı.
+      reportAt: report && mission ? mission.completesAt : null,
+      reportStale: report && mission ? isStaleReport(mission.completesAt, now) : false,
     }];
   });
   return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length });

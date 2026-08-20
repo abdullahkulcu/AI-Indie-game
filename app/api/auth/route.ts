@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { users } from "../../../db/schema";
-import { createSession, currentUser, destroySession, hashPassword, inviteMatches, verifyPassword } from "../../../server/account-auth";
+import { createSession, currentUser, destroySession, hashPassword, inviteMatches, isSecureRequest, verifyPassword } from "../../../server/account-auth";
 import { RATE_LIMITS, clearRateLimit, clientIp, consumeRateLimit, rateLimitResponse } from "../../../server/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,14 @@ export async function POST(request: Request) {
   const db = getDb();
   const ip = clientIp(request);
   if (body.action === "register") {
-    const registerLimit = await consumeRateLimit(RATE_LIMITS.register, `ip:${ip}`);
+    // İKİ kova: IP ve e-posta. IP başlığı ters vekile bağlıdır ve yanlış
+    // yapılandırılırsa sahtelenebilir; e-posta kovası o durumda bile aynı
+    // adrese tekrar tekrar kayıt denemesini durdurur.
+    const [byIp, byEmail] = await Promise.all([
+      consumeRateLimit(RATE_LIMITS.register, `ip:${ip}`),
+      consumeRateLimit(RATE_LIMITS.register, `email:${email}`),
+    ]);
+    const registerLimit = byIp.allowed ? byEmail : byIp;
     if (!registerLimit.allowed) return rateLimitResponse(registerLimit, "Çok fazla kayıt denemesi. Lütfen sonra tekrar deneyin.");
     const displayName = body.displayName?.trim() ?? "";
     if (displayName.length < 2 || displayName.length > 40) return Response.json({ error: "Oyuncu adı 2–40 karakter olmalı." }, { status: 400, headers });
@@ -47,7 +54,7 @@ export async function POST(request: Request) {
     // Eski platform kaydını yeni hesaba taşıyan göç kaldırıldı: kaynak kimlik istemcinin
     // gönderdiği `oai-authenticated-user-*` başlığından geliyordu ve hedef kullanıcı kimliği
     // /api/world üzerinden herkese açık olduğu için başkasının krallığı klonlanabiliyordu.
-    const session = await createSession(id);
+    const session = await createSession(id, undefined, isSecureRequest(request));
     return Response.json({ user: { id, email, displayName, role, status: "active" } }, { status: 201, headers: { ...headers, "set-cookie": session.cookie } });
   }
   if (body.action === "login") {
@@ -66,7 +73,7 @@ export async function POST(request: Request) {
     if (user.status !== "active") return Response.json({ error: "Bu hesap yönetici tarafından pasife alındı." }, { status: 403, headers });
     await db.update(users).set({ lastLoginAt: sql`CURRENT_TIMESTAMP` }).where(eq(users.id, user.id));
     await Promise.all([clearRateLimit(RATE_LIMITS.login, `ip:${ip}`), clearRateLimit(RATE_LIMITS.login, `email:${email}`)]);
-    const session = await createSession(user.id);
+    const session = await createSession(user.id, undefined, isSecureRequest(request));
     return Response.json({ user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role, status: user.status } }, { headers: { ...headers, "set-cookie": session.cookie } });
   }
   return Response.json({ error: "Geçersiz işlem." }, { status: 400, headers });

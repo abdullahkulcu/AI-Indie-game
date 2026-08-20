@@ -13,7 +13,22 @@
  *     konuşabilir ama hiçbir şeyi bağlayamaz.
  */
 
-export type NegotiationTopic = "tribute" | "non_aggression" | "alliance" | "passage" | "ultimatum";
+/**
+ * Masaya oturulabilecek konuların TAM listesi — TEK KAYNAK.
+ *
+ * Uçtaki `TOPICS` dizisi ve Generalin araç şemasındaki enum elle yazılıyordu.
+ * Motora yeni bir konu eklendiğinde ikisi de sessizce geride kalır; General
+ * konuyu önerir, uç "Geçersiz müzakere konusu" der ve Kral sebebini göremez.
+ * Tip de bu diziden TÜRETİLİR ki liste ile tip hiçbir zaman ayrışamasın.
+ */
+export const NEGOTIATION_TOPICS = ["tribute", "non_aggression", "alliance", "passage", "ultimatum"] as const;
+
+export type NegotiationTopic = typeof NEGOTIATION_TOPICS[number];
+
+/** Verilen değer gerçekten bir müzakere konusu mu? Uçlar bunu sorar. */
+export function isNegotiationTopic(value: unknown): value is NegotiationTopic {
+  return (NEGOTIATION_TOPICS as readonly string[]).includes(String(value));
+}
 
 /**
  * Haraç TAŞIYAN konular. Ültimatom da haraç şartı taşır: "ödersin ya da

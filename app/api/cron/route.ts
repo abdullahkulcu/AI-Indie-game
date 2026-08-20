@@ -12,9 +12,12 @@ import {
   type Side, type Terms, type TributeSettlement,
 } from "../../../engine/negotiation";
 import { reputationChange } from "../../../engine/diplomacy";
-import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, type DeskTool } from "../../../server/negotiation-brief";
+import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta, type DeskTool } from "../../../server/negotiation-brief";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
+import { pruneExpiredSessions } from "../../../server/account-auth";
+import { noteToKing } from "../../../server/king-notice";
+import { pruneRateLimits } from "../../../server/rate-limit";
 import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
 
@@ -209,21 +212,6 @@ type DeskReport = { negotiationId: string; userId: string; spoke: boolean; detai
 /** Haraç turunun raporu; `error` doluysa tur düşmüştür ama cron ayaktadır. */
 type TributeRound = { deals: number; paid: number; missed: number; error: string | null };
 
-/** Generalin masada olan biteni Krala bıraktığı not; sabah defterde okunur. */
-async function noteToKing(userId: string, text: string, now: number) {
-  const db = getDb();
-  const [row] = await db.select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
-  const game = row ? parseStoredSave(row.gameState) : null;
-  if (!game) return;
-  // Kayıt TICK'LENMEZ: `lastTickAt` Kralın kendi istemcisinin izidir ve
-  // "masada mı?" sorusunun ölçütüdür. Burada ilerletilseydi General kendi
-  // notuyla Kralı masada göstermiş olurdu.
-  const next = { ...game, notices: [{ kind: "MÜZAKERE", text: text.slice(0, 240), at: now }, ...game.notices].slice(0, 20) };
-  await db.update(gameSaves)
-    .set({ gameState: JSON.stringify(next), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
-    .where(eq(gameSaves.userId, userId));
-}
-
 async function answerNegotiations(now: number): Promise<DeskReport[]> {
   const db = getDb();
   const rows = await db.select({ table: negotiations, channelName: channels.name })
@@ -285,6 +273,10 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
     const canPropose = canProposeTerms(table, side, false, now).ok;
     const own = await displayNameOf(userId, row.channelName);
     const brief = briefTable({ negotiation: table, messages, side, counterpart, own, ordinal: 1 });
+    // Masanın özeti ile masada söylenen sözler AYRI taşınır ve ikisi de Kralın
+    // oturumundaki General ile AYNI kaynaktan (server/negotiation-brief) gelir.
+    // Karşı oyuncunun ham metni hiçbir yolda sistem promptuna girmez; iki yol
+    // ayrı yazılsaydı biri sertleşir öbürü gevşerdi.
     const context = {
       bizim_krallik: {
         ad: game.kingdomName,
@@ -295,8 +287,9 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
         halkinRizasi: Math.round(game.popularity),
         doktrin: game.strategyNote ?? "",
       },
-      masa: brief,
+      masa: tableMeta(brief),
     };
+    const transcript = renderNegotiationTranscript([brief]);
 
     spent += 1;
     let call: GameAction | null = null;
@@ -305,7 +298,8 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
       call = await callProvider({
         provider: credential.provider, model: credential.model, apiKey,
         system: OFFLINE_DESK_PROMPT, tools: offlineDeskTools(canPropose),
-        user: `DURUM=${JSON.stringify(context)}`, maxTokens: 600,
+        user: transcript ? `DURUM=${JSON.stringify(context)}\n\n${transcript}` : `DURUM=${JSON.stringify(context)}`,
+        maxTokens: 600,
       });
     } catch (error) {
       reports.push({ negotiationId: table.id, userId, spoke: false, detail: `Sağlayıcı hatası: ${error instanceof Error ? error.message : "bilinmiyor"}`, tokensUsed: true });
@@ -361,7 +355,7 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
     const summary = terms
       ? `${counterpart} masasında şart sundum; imza Kralındır. ${kingNote}`
       : `${counterpart} masasına cevap yazdım. ${kingNote}`;
-    await noteToKing(userId, summary, now);
+    await noteToKing(userId, "MÜZAKERE", summary, now);
     reports.push({ negotiationId: table.id, userId, spoke: true, detail: summary.trim(), tokensUsed: true });
   }
 
@@ -556,6 +550,19 @@ export async function POST(request: Request) {
   }
 
   const now = Date.now();
+
+  // TEMİZLİK. `sessions` ve `rate_limits` yalnızca büyüyordu: her giriş bir
+  // oturum satırı ekliyor, hiçbir şey silmiyordu; `pruneRateLimits` ise yazılmış
+  // ama hiçbir yerden çağrılmamıştı. İkisi de tek indeksli, tek koşullu birer
+  // DELETE. Turun geri kalanını düşürmesinler diye sarılı: temizlik başarısız
+  // olsa bile gece vardiyası çalışır.
+  let swept = "temiz";
+  try {
+    await Promise.all([pruneExpiredSessions(now), pruneRateLimits()]);
+  } catch (error) {
+    swept = `temizlik düştü: ${error instanceof Error ? error.message : "bilinmiyor"}`;
+  }
+
   // Yalnızca Kralın onayladığı, aktif channel'daki emirler işlenir. Emri olmayan
   // hesap bu sorguya hiç girmez; o oyuncu için tek satır kod bile çalışmaz.
   const rows = await getDb().select({ order: standingOrders }).from(standingOrders)
@@ -581,6 +588,7 @@ export async function POST(request: Request) {
   return Response.json({
     ranAt: new Date(now).toISOString(),
     considered: rows.length,
+    swept,
     tributes,
     negotiations: { spoke: desks.filter(desk => desk.spoke).length, reports: desks },
     acted: reports.filter(report => report.acted).length,

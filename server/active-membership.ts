@@ -10,16 +10,21 @@ import { channelMembers, channels } from "../db/schema";
  * kayıt bir channel'a, müzakere başkasına gidebiliyordu. Üstelik channel'ın
  * kendi durumu hiç sorulmuyordu: kapatılmış bir sezonun üyeliği seçilebiliyordu.
  *
- * Aday kümesi `app/api/save/route.ts` içindeki `activeChannel` ile AYNI üç
- * koşuldan doğar (üyelik aktif + channel aktif + o kullanıcı); tek fark burada
- * sıranın da sabitlenmiş olmasıdır: en son katılınan üyelik kazanır, eşitlikte
- * channel kimliği belirler. Böylece aynı Kral iki ayrı istekte iki ayrı cevap
- * almaz.
+ * Aynı kusur kayıt yolunda da vardı (`app/api/save/route.ts` → `activeChannel`)
+ * ve iki yol ayrışırsa kayıt bir channel'a, müzakere başkasına gider. Artık her
+ * iki uç da BURADAN okur: üyelik aktif + channel aktif + o kullanıcı, sıra
+ * sabit — en son katılınan üyelik kazanır, eşitlikte channel kimliği belirler.
+ * Böylece aynı Kral iki ayrı istekte iki ayrı cevap almaz.
+ *
+ * `channelSpeed` de buradan gelir: kayıt doğrulaması büyüme tavanlarını channel
+ * temposuyla ölçüyor ve hızı başka bir sorgudan okusaydı iki sorgu farklı
+ * channel'ı seçebilirdi.
  */
 export async function activeMembershipOf(userId: string) {
   const [row] = await getDb().select({
     channelId: channelMembers.channelId,
     channelName: channels.name,
+    channelSpeed: channels.speed,
     acceptsNegotiation: channelMembers.acceptsNegotiation,
   })
     .from(channelMembers)

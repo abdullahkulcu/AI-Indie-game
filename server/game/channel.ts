@@ -1,3 +1,0 @@
-export function canJoinChannel(endsAt:Date,protectionDays:number,now=new Date()){return endsAt.getTime()-now.getTime()>protectionDays*86_400_000;}
-export function nextOuterRingPosition(occupiedRadius:number,index:number){const radius=occupiedRadius+1,points=Math.max(6,radius*6),angle=2*Math.PI*(index%points)/points;return{x:Math.round(Math.cos(angle)*radius),y:Math.round(Math.sin(angle)*radius)};}
-export function seasonWinner(activeKingdoms:Array<{id:string;allianceId:string|null}>){if(!activeKingdoms.length)return null;const groups=new Set(activeKingdoms.map(k=>k.allianceId??`kingdom:${k.id}`));return groups.size===1?[...groups][0]:null;}

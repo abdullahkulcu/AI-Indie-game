@@ -442,12 +442,15 @@ test("aktif üyelik tek ve belirli bir kuraldan okunur", () => {
   assert.match(routeSource, /activeMembershipOf\(user\.id\)/, "uç paylaşılan kuralı çağırmalı");
   assert.doesNotMatch(routeSource, /from\(channelMembers\)\.where\(and\(eq\(channelMembers\.userId/, "uçta ikinci bir üyelik sorgusu kalmamalı");
   assert.match(membershipSource, /\.orderBy\(desc\(channelMembers\.joinedAt\), asc\(channelMembers\.channelId\)\)/, "sıra belirli olmalı");
-  // Aday kümesi app/api/save/route.ts ile AYNI üç koşuldan doğmalı; ayrışırsa
-  // kayıt ve müzakere yine iki ayrı channel görür.
   for (const predicate of [/eq\(channelMembers\.userId, userId\)/, /eq\(channelMembers\.status, "active"\)/, /eq\(channels\.status, "active"\)/]) {
     assert.match(membershipSource, predicate, "üyelik kuralı eksik");
-    assert.match(saveRouteSource, predicate, "kayıt ucunun kuralı ayrışmış");
   }
+  // KAYIT UCU DA AYNI KURALI ÇAĞIRIR. Eskiden koşulları kendi içinde tekrar
+  // yazıyordu (sırasız `limit(1)`) ve iki uç ayrışabiliyordu: kayıt bir
+  // channel'a, müzakere başkasına giderdi. Artık kopya değil çağrı var, yani
+  // ayrışacak ikinci bir yazı yok.
+  assert.match(saveRouteSource, /activeMembershipOf\(user\.id\)/, "kayıt ucu paylaşılan kuralı çağırmalı");
+  assert.doesNotMatch(saveRouteSource, /from\(channelMembers\)/, "kayıt ucunda ikinci bir üyelik sorgusu kalmamalı");
 });
 
 test("bir masadan bir anlaşma çıkar: şema seviyesinde ağ", () => {

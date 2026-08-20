@@ -7,5 +7,11 @@ declare module "cloudflare:workers" {
     CRON_SECRET?: string;
     /** Postgres bağlantı dizesi; yerelde .dev.vars, yayında Worker secret. */
     DATABASE_URL?: string;
+    /**
+     * Gerçek istemci IP'sini taşıyan başlık (bkz. server/rate-limit.ts).
+     * Tanımsızsa `x-real-ip` kabul edilir — deploy/nginx.conf bunu $remote_addr
+     * ile ezer ve sahtelenebilir CF-Connecting-IP'yi siler.
+     */
+    CLIENT_IP_HEADER?: string;
   };
 }

@@ -1,0 +1,55 @@
+# Demirkale — ÜRETİM örtüsü.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   (kısayol: ./run.sh prod)
+#
+# Taban dosya geliştirme yığınıdır: dev sunucusu (HMR, derleme optimizasyonu
+# yok) ve şemayı `drizzle-kit push --force` ile uygulayan bir açılış komutu.
+# İkisi de canlı bir VM'de yanlıştır. Bu örtü üç şeyi değiştirir:
+#
+#  1. NODE_ENV=production ve `npm run build` + `npm start` — dev sunucusu değil.
+#  2. Şema `drizzle-kit migrate` ile uygulanır: drizzle/pg altındaki üretilmiş
+#     göçler sırayla, kaydedilerek işlenir. `push` şemayı diff'leyip YIKICI
+#     değişikliği onay sormadan uygular ve hangi adımın uygulandığını hiçbir
+#     yere yazmaz; üretimde geri dönüşü olmayan veri kaybı demektir.
+#  3. Kaynak ağacı SALT-OKUNUR bağlanır: çalışan konteyner kendi kaynağını
+#     değiştiremez.
+#
+# TLS için ayrıca -f docker-compose.tls.yml ekleyin (bkz. deploy/TLS.md).
+services:
+  app:
+    environment:
+      NODE_ENV: production
+      # Üretimde otomatik `push` KAPALIDIR; şemayı aşağıdaki `migrate` uygular.
+      DB_AUTO_PUSH: "0"
+    # `npm ci` NODE_ENV=production altında devDependencies'i atlar; vinext,
+    # vite ve drizzle-kit orada olduğu için derleme ve göç yapılamazdı.
+    # --include=dev bunu açıkça geri alır.
+    #
+    # `migrate` başarısız olursa açılış DURUR (|| yok): eksik şemayla ayağa
+    # kalkan bir sunucu "relation ... does not exist" ile 500 döner ve hatayı
+    # oyuncular bulur.
+    command: >
+      sh -c "npm ci --include=dev --no-audit --no-fund &&
+      npx drizzle-kit migrate &&
+      npm run build &&
+      npm start"
+    volumes:
+      - .:/app:ro
+      - node_modules:/app/node_modules
+      - vinext_cache:/app/.vinext
+      # Derleme çıktısı salt-okunur ağaca yazılamaz; kendi hacminde durur.
+      - dist:/app/dist
+    healthcheck:
+      # Derleme ilk açılışta uzun sürer; dev sunucusundan geç hazır olur.
+      start_period: 300s
+    restart: unless-stopped
+
+  postgres:
+    restart: unless-stopped
+
+  cron:
+    restart: unless-stopped
+
+volumes:
+  dist: {}
