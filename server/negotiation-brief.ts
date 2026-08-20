@@ -1,4 +1,8 @@
-import { LIMITS, otherSide, type Negotiation, type Side, type Terms } from "../engine/negotiation";
+import {
+  LIMITS, MAX_HOURS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT,
+  MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, otherSide,
+  type Negotiation, type Side, type Terms,
+} from "../engine/negotiation";
 
 /**
  * Müzakere masasının modele gösterilen yüzü.
@@ -45,7 +49,7 @@ export type TableBrief = {
 };
 
 /** Bir mesajın gövdesi promptta ne kadar yer kaplayabilir. */
-const MAX_QUOTE = 600;
+const MAX_QUOTE = MAX_MESSAGE_LENGTH;
 
 export function briefTable(input: {
   negotiation: Negotiation;
@@ -132,8 +136,8 @@ export function offlineDeskTools(canPropose: boolean): DeskTool[] {
     parameters: {
       type: "object",
       properties: {
-        message: { type: "string", minLength: 2, maxLength: 600, description: "Karşı Generalin okuyacağı mesaj." },
-        king_note: { type: "string", maxLength: 200, description: "Kralın sabah okuyacağı tek cümlelik not." },
+        message: { type: "string", minLength: 2, maxLength: MAX_MESSAGE_LENGTH, description: "Karşı Generalin okuyacağı mesaj." },
+        king_note: { type: "string", maxLength: MAX_KING_NOTE_LENGTH, description: "Kralın sabah okuyacağı tek cümlelik not." },
       },
       required: ["message", "king_note"],
       additionalProperties: false,
@@ -141,17 +145,20 @@ export function offlineDeskTools(canPropose: boolean): DeskTool[] {
   };
   const propose: DeskTool = {
     name: "negotiation_propose",
-    description: "Somut şart sunar. Şart UYGULANMAZ; karşı Kralın onayına gider. payer 'us' bizim ödediğimiz, 'them' karşı tarafın ödediği demektir.",
+    // Sınırlar engine/negotiation.ts'ten TÜRETİLİR; şemaya elle yazılan bir tavan
+    // motor tavanı değiştiğinde sessizce sapar ve model sınır dışı şart önerir.
+    description: "Somut şart sunar. Şart UYGULANMAZ; karşı Kralın onayına gider. payer 'us' bizim ödediğimiz, 'them' karşı tarafın ödediği demektir. Haracı ya sabit rakamla (amount_per_payment) ya da oranla (rate_percent) belirt.",
     parameters: {
       type: "object",
       properties: {
-        message: { type: "string", maxLength: 600, description: "Şartla birlikte yazılacak mesaj." },
-        king_note: { type: "string", maxLength: 200, description: "Kralın sabah okuyacağı tek cümlelik not." },
+        message: { type: "string", maxLength: MAX_MESSAGE_LENGTH, description: "Şartla birlikte yazılacak mesaj." },
+        king_note: { type: "string", maxLength: MAX_KING_NOTE_LENGTH, description: "Kralın sabah okuyacağı tek cümlelik not." },
         payer: { type: "string", enum: ["us", "them"], description: "Haracı hangi taraf öder." },
-        resource: { type: "string", enum: ["gold", "food", "stone", "wood", "iron", "ale"] },
-        amount_per_payment: { type: "integer", minimum: 0, maximum: 5000 },
-        every_hours: { type: "integer", minimum: 1, maximum: 72 },
-        hours: { type: "integer", minimum: 1, maximum: 72 },
+        resource: { type: "string", enum: [...TRIBUTE_RESOURCES] },
+        amount_per_payment: { type: "integer", minimum: 0, maximum: MAX_TRIBUTE_AMOUNT, description: "Her ödemede giden sabit miktar. Oran kullanacaksan bunu gönderme; ikisi birden verilirse sabit rakam esas alınır." },
+        rate_percent: { type: "integer", minimum: 0, maximum: MAX_TRIBUTE_RATE_PERCENT, description: "Her ödemede ambarın yüzde kaçının gideceği. Fakirleşen krallığı ezmez; ambar küçüldükçe ödeme de küçülür." },
+        every_hours: { type: "integer", minimum: 1, maximum: MAX_HOURS },
+        hours: { type: "integer", minimum: 1, maximum: MAX_HOURS },
       },
       required: ["message", "king_note", "hours"],
       additionalProperties: false,

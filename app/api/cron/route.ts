@@ -6,10 +6,12 @@ import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
 import { agreements, channels, gameSaves, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
-  LIMITS, MISSES_BEFORE_BREACH, canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide,
-  settleTribute, shouldGeneralAnswer, validateTerms, type Side, type Terms, type TributeSettlement,
+  LIMITS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MISSES_BEFORE_BREACH, TRIBUTE_TOPICS,
+  canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide, settleTribute,
+  shouldGeneralAnswer, tributeRateFromPercent, validateTerms,
+  type Side, type Terms, type TributeSettlement,
 } from "../../../engine/negotiation";
-import { reputationChange } from "../../../server/game/diplomacy";
+import { reputationChange } from "../../../engine/diplomacy";
 import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, type DeskTool } from "../../../server/negotiation-brief";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
@@ -204,6 +206,9 @@ const NEGOTIATION_REPLY_BUDGET = 4;
 
 type DeskReport = { negotiationId: string; userId: string; spoke: boolean; detail: string; tokensUsed: boolean };
 
+/** Haraç turunun raporu; `error` doluysa tur düşmüştür ama cron ayaktadır. */
+type TributeRound = { deals: number; paid: number; missed: number; error: string | null };
+
 /** Generalin masada olan biteni Krala bıraktığı not; sabah defterde okunur. */
 async function noteToKing(userId: string, text: string, now: number) {
   const db = getDb();
@@ -311,8 +316,8 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
       continue;
     }
 
-    const body = String(call.arguments.message ?? "").trim().slice(0, 600);
-    const kingNote = String(call.arguments.king_note ?? "").trim().slice(0, 200);
+    const body = String(call.arguments.message ?? "").trim().slice(0, MAX_MESSAGE_LENGTH);
+    const kingNote = String(call.arguments.king_note ?? "").trim().slice(0, MAX_KING_NOTE_LENGTH);
     if (!body) {
       reports.push({ negotiationId: table.id, userId, spoke: false, detail: "General boş mesaj döndürdü.", tokensUsed: true });
       continue;
@@ -326,6 +331,10 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
           payerSide: payerSideOf(call.arguments.payer, side),
           resource: String(call.arguments.resource ?? "gold") as Terms["resource"],
           tributeAmount: Math.floor(Number(call.arguments.amount_per_payment) || 0),
+          // Oranlı haraç: model yüzde gönderir, motor oranı saklar. Bu bağ
+          // kurulmadan önce tributeRate'i yazan tek yer clampTerms'ti ve hiçbir
+          // araç şeması oran sunmadığı için oranlı haraç hiç kurulamıyordu.
+          tributeRate: tributeRateFromPercent(call.arguments.rate_percent),
           everyHours: Math.floor(Number(call.arguments.every_hours) || 6),
           hours: Math.floor(Number(call.arguments.hours) || 24),
         }),
@@ -360,15 +369,36 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
 }
 
 /**
- * Onaylanmış haraç anlaşmalarını öder.
+ * Bildirimi ve itibar cezasını kaydeder; sürüm çakışırsa TAZE durumla tekrar
+ * dener.
  *
- * Ödeme ambardan çıkar ve karşı tarafın ambarına girer. Vadesi geçmiş ödemeler
- * duePayments ile birikimli sayılır: cron bir tur gecikirse ödeme atlanmaz.
- * Ambarda yoksa olan gider, borç birikmez — ve tek ödemede ambarın yarısından
- * fazlası hiçbir koşulda çıkmaz.
+ * Tek denemede yazılıyordu: Kralın tarayıcısı o aralıkta kaydettiyse yazma
+ * düşer, vade kaçmış sayılır ama bildirim ve itibar cezası uçardı — oyuncu
+ * neden cezalandırıldığını hiç öğrenmezdi. Yazılacak kayıt yoksa (silinmiş
+ * hesap) deneme tekrarlanmaz; yazacak bir şey yoktur.
  */
+const PENALTY_WRITE_ATTEMPTS = 3;
+
+async function applyTributeNotice(userId: string, text: string, penalty: number, now: number): Promise<boolean> {
+  const db = getDb();
+  for (let attempt = 0; attempt < PENALTY_WRITE_ATTEMPTS; attempt++) {
+    const [row] = await db.select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
+    const game = row ? parseStoredSave(row.gameState) : null;
+    if (!game) return true;
+    const written = await writeSaveIfUnchanged(userId, row!.revision, {
+      ...game,
+      reputation: Math.max(0, Math.min(100, game.reputation + penalty)),
+      notices: [{ kind: "HARAÇ", text, at: now }, ...game.notices].slice(0, 20),
+    });
+    if (written) return true;
+  }
+  return false;
+}
+
 /**
- * Vadeleri deftere yazar ve kaçırılanı cezalandırır.
+ * Vadeleri deftere yazar ve kaçırılanı cezalandırır. Vadeyi bu tur kapatabildiyse
+ * true döner; kapatamadıysa (çakışan tetikleme kazandı ya da ceza yazılamadı)
+ * false döner ve vade bir sonraki tura kalır.
  *
  * Eskiden ödenemeyen vade de "ödendi" sayılıyordu: ambarı boş olan taraf
  * bedelsiz sıyrılıyordu — ne bildirim, ne itibar kaybı, ne anlaşmanın bozulması.
@@ -378,17 +408,34 @@ async function recordTribute(
   due: number,
   settlement: TributeSettlement,
   now: number,
-) {
+): Promise<boolean> {
   const db = getDb();
+  // Vadeyi KOŞULLU kapatırız: sayaçlar okuduğumuz hâlde duruyorsa bizimdir.
+  // Gece vardiyasının saatlik dilimi nasıl kilitleniyorsa aynı desen — kilit
+  // veritabanının kendisindedir, dışarıdan bir servise (Redis) bağlı değildir,
+  // dolayısıyla tur tek nokta arızaya açılmaz. Çakışan iki tetikleme (docker
+  // cron + elle curl) kaynak transferini sürüm koruması sayesinde ikilemiyordu
+  // ama moved === 0 yolunda koruma yoktu: missedCount iki kez artıp anlaşmayı
+  // erken bozabiliyordu. Kaybeden tetikleme buradan sessizce döner.
+  const claim = (missed: number, status: "active" | "broken") => db.update(agreements)
+    .set({ paidCount: deal.paidCount + due, missedCount: missed, status })
+    .where(and(
+      eq(agreements.id, deal.id),
+      eq(agreements.paidCount, deal.paidCount),
+      eq(agreements.missedCount, deal.missedCount),
+      eq(agreements.status, "active"),
+    ))
+    .returning({ id: agreements.id });
+
   if (settlement.missed === 0) {
-    await db.update(agreements).set({ paidCount: deal.paidCount + due }).where(eq(agreements.id, deal.id));
-    return;
+    const claimed = await claim(deal.missedCount, "active");
+    return claimed.length > 0;
   }
+
   const missed = deal.missedCount + settlement.missed;
   const breached = missed >= MISSES_BEFORE_BREACH;
-  await db.update(agreements)
-    .set({ paidCount: deal.paidCount + due, missedCount: missed, status: breached ? "broken" : "active" })
-    .where(eq(agreements.id, deal.id));
+  const claimed = await claim(missed, breached ? "broken" : "active");
+  if (!claimed.length) return false;
 
   const notes: Array<[string, string, number]> = [
     [deal.payerId, breached
@@ -399,22 +446,52 @@ async function recordTribute(
       ? "Karşı taraf haracı ödemedi; anlaşma bozuldu. Sözünü tutmayanın itibarı düştü."
       : `Beklenen haraç gelmedi (${missed}/${MISSES_BEFORE_BREACH} vade kaçtı).`, 0],
   ];
+  let payerNotified = true;
   for (const [userId, text, penalty] of notes) {
-    const [row] = await db.select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
-    const game = row ? parseStoredSave(row.gameState) : null;
-    if (!game) continue;
-    await writeSaveIfUnchanged(userId, row!.revision, {
-      ...game,
-      reputation: Math.max(0, Math.min(100, game.reputation + penalty)),
-      notices: [{ kind: "HARAÇ", text, at: now }, ...game.notices].slice(0, 20),
-    });
+    const ok = await applyTributeNotice(userId, text, penalty, now);
+    if (!ok && userId === deal.payerId) payerNotified = false;
   }
+  if (!payerNotified) {
+    // Ceza SESSİZCE kaybolmaz. Bildirimi ve itibar düşüşünü üç denemede de
+    // yazamadıysak kaçırma sayacını GERİ ALIRIZ: bilmediği bir sebeple
+    // cezalanan oyuncu kalmaz, çünkü bildirim yazılmadan ceza sayılmaz.
+    //
+    // Vade sayacı yalnızca hiçbir kaynak taşınmadıysa geri alınır; kısmi ödeme
+    // yapıldıysa paidCount yerinde bırakılır, yoksa bir sonraki tur aynı vadeyi
+    // yeniden tahsil eder ve ödeyen iki kez ödemiş olur.
+    await db.update(agreements)
+      .set({
+        paidCount: settlement.moved > 0 ? deal.paidCount + due : deal.paidCount,
+        missedCount: deal.missedCount,
+        status: "active",
+      })
+      .where(and(
+        eq(agreements.id, deal.id),
+        eq(agreements.paidCount, deal.paidCount + due),
+        eq(agreements.missedCount, missed),
+      ));
+    return false;
+  }
+  return true;
 }
 
+/**
+ * Onaylanmış haraç anlaşmalarını öder.
+ *
+ * Ödeme ambardan çıkar ve karşı tarafın ambarına girer. Vadesi geçmiş ödemeler
+ * duePayments ile birikimli sayılır: cron bir tur gecikirse ödeme atlanmaz.
+ * Ambar yetmiyorsa ya da tavana takılıyorsa olan gider — borç birikmez, ama vade
+ * de kapanmaz; kaçırılmış sayılır. Tek ödemede ambarın yarısından fazlası hiçbir
+ * koşulda çıkmaz.
+ */
 async function settleTributes(now: number) {
   const db = getDb();
+  // Haraç taşıyan konular TEK YERDE yazar (engine/negotiation.ts → TRIBUTE_TOPICS)
+  // ve şartın geçerliliğini denetleyen validateTerms de oradan okur. Burada
+  // yalnızca "tribute" filtreleniyordu: ültimatom imzalanıyor, panelde aktif
+  // anlaşma görünüyor, ama tek bir kaynak bile akmıyordu.
   const deals = await db.select().from(agreements)
-    .where(and(eq(agreements.status, "active"), eq(agreements.topic, "tribute")));
+    .where(and(eq(agreements.status, "active"), inArray(agreements.topic, [...TRIBUTE_TOPICS])));
   let paid = 0, missedTotal = 0;
 
   for (const deal of deals) {
@@ -456,15 +533,19 @@ async function settleTributes(now: number) {
           }).catch(() => false);
           if (settled) paid += moved; else continue;
         }
-        await recordTribute(deal, due, settlement, now);
-        missedTotal += settlement.missed;
+        // Vadeyi yalnızca bu tur kapatabildiyse sayarız: çakışan ikinci
+        // tetikleme aynı kaçırmayı ikinci kez deftere yazmaz.
+        if (await recordTribute(deal, due, settlement, now)) missedTotal += settlement.missed;
       }
     }
     if (now >= deal.endsAt) {
-      await db.update(agreements).set({ status: "completed" }).where(eq(agreements.id, deal.id));
+      // Yalnızca hâlâ yürürlükteki anlaşma tamamlanmış sayılır; bu turda bozulan
+      // anlaşma "completed" damgası yiyip ihlali silemez.
+      await db.update(agreements).set({ status: "completed" })
+        .where(and(eq(agreements.id, deal.id), eq(agreements.status, "active")));
     }
   }
-  return { deals: deals.length, paid, missed: missedTotal };
+  return { deals: deals.length, paid, missed: missedTotal, error: null };
 }
 
 export async function POST(request: Request) {
@@ -481,7 +562,12 @@ export async function POST(request: Request) {
     .innerJoin(channels, eq(channels.id, standingOrders.channelId))
     .where(and(eq(standingOrders.status, "active"), eq(channels.status, "active")));
 
-  const tributes = await settleTributes(now);
+  // Haraç turu SARILI: tek bir hata (bozuk şart, düşen sorgu) bütün cron turunu
+  // düşürüyordu ve o saat hiç kimsenin gece vardiyası çalışmıyordu. Hata rapora
+  // yazılır, tur devam eder.
+  let tributes: TributeRound = { deals: 0, paid: 0, missed: 0, error: null };
+  try { tributes = await settleTributes(now); }
+  catch (error) { tributes = { deals: 0, paid: 0, missed: 0, error: `Haraç turu düştü: ${error instanceof Error ? error.message : "bilinmiyor"}` }; }
   // Kral çevrimdışıyken masada bekleyen cevap; imza atılmaz, yalnızca konuşulur.
   let desks: DeskReport[] = [];
   try { desks = await answerNegotiations(now); }

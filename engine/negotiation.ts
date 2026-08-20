@@ -15,6 +15,29 @@
 
 export type NegotiationTopic = "tribute" | "non_aggression" | "alliance" | "passage" | "ultimatum";
 
+/**
+ * Haraç TAŞIYAN konular. Ültimatom da haraç şartı taşır: "ödersin ya da
+ * yürürüz" bir haraç anlaşmasıdır, yalnızca dili serttir.
+ *
+ * Tek kaynak burasıdır. Aynı liste hem şartın geçerliliğini denetleyen
+ * validateTerms'te hem de vadeleri tahsil eden cron sorgusunda gerekiyor;
+ * ikisi ayrı ayrı yazıldığında sessizce saptı: ültimatom imzalanıyor, panelde
+ * aktif görünüyor, ama tek bir altın bile akmıyordu.
+ */
+export const TRIBUTE_TOPICS = ["tribute", "ultimatum"] as const;
+
+export type TributeTopic = typeof TRIBUTE_TOPICS[number];
+
+/** Bu konu haraç şartı taşır mı? Hem motor hem sunucu bunu sorar. */
+export function carriesTribute(topic: NegotiationTopic): topic is TributeTopic {
+  return (TRIBUTE_TOPICS as readonly NegotiationTopic[]).includes(topic);
+}
+
+/** Haracın alınabileceği kaynaklar. Araç şemalarındaki enum buradan türetilir. */
+export const TRIBUTE_RESOURCES = ["gold", "food", "stone", "wood", "iron", "ale"] as const;
+
+export type TributeResource = typeof TRIBUTE_RESOURCES[number];
+
 export type NegotiationStatus =
   | "open"          // konuşma sürüyor
   | "awaiting_king" // şart sunuldu, Kralın onayı bekleniyor
@@ -37,7 +60,7 @@ export type Terms = {
   tributeRate?: number;
   tributeAmount?: number;
   /** Haraç hangi kaynaktan alınır. */
-  resource?: "gold" | "food" | "stone" | "wood" | "iron" | "ale";
+  resource?: TributeResource;
   /** Haracı hangi taraf ÖDER. Yön yazılmazsa şart anlamsızdır. */
   payerSide?: Side;
   /** Anlaşmanın kaç saat süreceği. */
@@ -94,7 +117,27 @@ export const MAX_TRIBUTE_RATE = .5;
 /** Sabit haraçta tek ödeme tavanı; model uçuk bir rakam öneremesin. */
 export const MAX_TRIBUTE_AMOUNT = 5000;
 
-const MAX_HOURS = 72;
+/** Anlaşmanın ve ödeme aralığının saat tavanı. */
+export const MAX_HOURS = 72;
+
+/** Masaya yazılan bir mesajın azami uzunluğu. */
+export const MAX_MESSAGE_LENGTH = 600;
+
+/** Generalin Krala bıraktığı notun azami uzunluğu. */
+export const MAX_KING_NOTE_LENGTH = 200;
+
+/**
+ * Oranın araç şemasında yüzde olarak istenmesinin sebebi: model 0.15 gibi bir
+ * kesri şaşırtıcı sıklıkta 15 diye gönderiyor. Yüzde tam sayısı hem model için
+ * doğal hem de tavanı MAX_TRIBUTE_RATE'ten türetilebilir.
+ */
+export const MAX_TRIBUTE_RATE_PERCENT = Math.round(MAX_TRIBUTE_RATE * 100);
+
+/** Araç çağrısındaki yüzdeyi Terms.tributeRate oranına çevirir. */
+export function tributeRateFromPercent(percent: unknown): number {
+  const value = Math.round(Number(percent) || 0);
+  return Math.max(0, Math.min(MAX_TRIBUTE_RATE_PERCENT, value)) / 100;
+}
 
 export function otherSide(side: Side): Side {
   return side === "initiator" ? "target" : "initiator";
@@ -124,15 +167,17 @@ export function clampTerms(terms: Terms): Terms {
 /** Şart konusuyla tutarlı mı? Tutarsız şart Krala hiç sunulmaz. */
 export function validateTerms(terms: Terms): { ok: true; terms: Terms } | { ok: false; reason: string } {
   const next = clampTerms(terms);
-  if (next.topic === "tribute" || next.topic === "ultimatum") {
+  // Hangi konunun haraç taşıdığı TRIBUTE_TOPICS'te yazar; cron da vadeleri o
+  // listeye göre tahsil eder. İki dal birbirinin tamamlayıcısıdır: liste
+  // değişirse ikisi birlikte değişir.
+  if (carriesTribute(next.topic)) {
     if (!next.tributeRate && !next.tributeAmount) {
       return { ok: false, reason: "Haraç şartında ya sabit miktar ya da oran belirtilmeli." };
     }
     if (next.payerSide !== "initiator" && next.payerSide !== "target") {
       return { ok: false, reason: "Haracı hangi tarafın ödeyeceği belirtilmeli." };
     }
-  }
-  if (next.topic === "non_aggression" || next.topic === "alliance" || next.topic === "passage") {
+  } else {
     // Bu konularda haraç anlamsız; sessizce sıfırlanır ki Kral yanlış şart onaylamasın.
     next.tributeRate = 0;
     next.tributeAmount = 0;
@@ -256,19 +301,31 @@ export function canOpen(input: {
 }
 
 /**
- * Bir ödemede fiilen giden miktar.
+ * Bir ödemede ambardan FİİLEN çıkan miktar.
  *
- * Sabit rakam konuşulduysa o esastır ("saatte 60 altın"), ama ambarda o kadar
- * yoksa olan gider — borç birikmez. Sabit yoksa oran uygulanır. Her hâlükârda
- * tek ödemede ambarın yarısından fazlası gitmez; aksi halde tek bir anlaşma
- * krallığı bir gecede boşaltır.
+ * Sabit rakam konuşulduysa o esastır ("saatte 60 altın"). Ambar yetmiyorsa ya
+ * da tavana takılıyorsa olan gider — eksik kalan borç olarak birikmez, o vade
+ * kaçırılmış sayılır (settleTribute onu ayrıca sayar).
+ *
+ * Tavan bilinçlidir: tek ödemede ambarın yarısından fazlası çıkmaz, yoksa
+ * gecikmiş bir cron turu birikmiş vadeleri arka arkaya kapatırken krallığı bir
+ * gecede sıfırlar. Tavana takılan ödeme ARTIK BOŞA DÜŞMÜYOR: eskiden beklenen
+ * tutar tavanı geçtiği anda hiç ödeme yapılmıyor, ambarı dolu Kral hem parasını
+ * tutuyor hem "ödemedi" damgası yiyordu.
  */
 export function tributePayment(stock: number, terms: Pick<Terms, "tributeRate" | "tributeAmount">) {
   const ceiling = Math.floor(Math.max(0, stock) * MAX_TRIBUTE_RATE);
-  const wanted = terms.tributeAmount && terms.tributeAmount > 0
-    ? Math.floor(terms.tributeAmount)
-    : Math.floor(Math.max(0, stock) * Math.max(0, Math.min(MAX_TRIBUTE_RATE, terms.tributeRate ?? 0)));
-  return Math.max(0, Math.min(wanted, ceiling));
+  return Math.max(0, Math.min(tributeExpected(stock, terms), ceiling));
+}
+
+/**
+ * Bir vadede BEKLENEN tutar: sabit rakam varsa o, yoksa orandan çıkan miktar.
+ * Oranda beklenen zaten ambarla küçüldüğü için tavanı hiç zorlamaz; eksik ödeme
+ * yalnızca sabit rakamda söz konusudur.
+ */
+export function tributeExpected(stock: number, terms: Pick<Terms, "tributeRate" | "tributeAmount">) {
+  if (terms.tributeAmount && terms.tributeAmount > 0) return Math.floor(terms.tributeAmount);
+  return Math.floor(Math.max(0, stock) * Math.max(0, Math.min(MAX_TRIBUTE_RATE, terms.tributeRate ?? 0)));
 }
 
 /**
@@ -297,18 +354,27 @@ export type TributeSettlement = {
 /**
  * Bir turda kapatılan vadeleri hesaplar.
  *
- * Eskiden ödenemeyen vade de "ödendi" sayılıyordu: ambarı boş olan taraf hiçbir
- * bedel ödemeden anlaşmadan sıyrılıyordu — ne itibar kaybı, ne bildirim, ne
- * anlaşmanın bozulması. Artık kaçırılan vade ayrı sayılır.
+ * İki kural birlikte durur:
+ *  1. Ödenemeyen vade "ödendi" SAYILMAZ. Eskiden sayılıyordu ve ambarı boş olan
+ *     taraf hiçbir bedel ödemeden anlaşmadan sıyrılıyordu.
+ *  2. Eksik ödeme de olsa ambardan ÇIKAR. Eskiden çıkmıyordu: beklenen tutar
+ *     ambarın yarısını geçtiği anda ödeme sıfırlanıyor, ödeyen hem kaynağını
+ *     tutuyor hem vadeyi kaçırmış sayılıyordu — cezası olan ama bedeli olmayan
+ *     bir kaçırma. Artık kaçıran taraf her hâlükârda ödeyebildiğini öder;
+ *     "ödemedim ve elimde kaldı" diye bir sonuç yok.
+ *
+ * Vade yalnızca beklenen tutarın TAMAMI taşındığında kapanır; aksi halde
+ * kaçırılmış sayılır ve MISSES_BEFORE_BREACH'te anlaşma bozulur.
  */
 export function settleTribute(stock: number, due: number, terms: Pick<Terms, "tributeRate" | "tributeAmount">): TributeSettlement {
   let left = Math.max(0, stock), moved = 0, paid = 0, missed = 0;
   for (let i = 0; i < due; i++) {
+    const expected = tributeExpected(left, terms);
     const amount = tributePayment(left, terms);
-    // Beklenen tutar: sabit rakam varsa o, yoksa orandan çıkan miktar.
-    const expected = terms.tributeAmount && terms.tributeAmount > 0 ? Math.floor(terms.tributeAmount) : amount;
-    if (amount > 0 && amount >= expected) { left -= amount; moved += amount; paid++; }
-    else { missed++; }
+    left -= amount;
+    moved += amount;
+    if (amount > 0 && amount >= expected) paid++;
+    else missed++;
   }
   return { moved, paid, missed };
 }
