@@ -38,24 +38,27 @@ CREATE TABLE "negotiations" (
 	"last_turn_at" bigint NOT NULL
 );
 --> statement-breakpoint
-/* 
-    Unfortunately in current drizzle-kit version we can't automatically get name for primary key.
-    We are working on making it available!
+/*
+  standing_orders birincil anahtarı user_id'den id'ye taşınır.
 
-    Meanwhile you can:
-        1. Check pk name in your database, by running
-            SELECT constraint_name FROM information_schema.table_constraints
-            WHERE table_schema = 'public'
-                AND table_name = 'standing_orders'
-                AND constraint_type = 'PRIMARY KEY';
-        2. Uncomment code below and paste pk name manually
-        
-    Hope to release this update as soon as possible
+  drizzle-kit eski anahtarın adını bulamadığı için bu bloğu YORUM olarak
+  bırakmıştı ve dosya "multiple primary keys are not allowed" ile düşüyordu.
+  `push --force` çalıştığı sürece görünmedi; üretim `migrate`'e geçince
+  açılışı tamamen engelliyordu.
+
+  Sıra önemli: sütun önce NULL kabul ederek eklenir, mevcut satırlara değer
+  yazılır, sonra NOT NULL ve birincil anahtar konur. Doğrudan
+  `ADD COLUMN ... PRIMARY KEY NOT NULL` dolu bir tabloda da düşerdi.
+  Mevcut satırlarda user_id benzersizdi (eski anahtar oydu), bu yüzden
+  id olarak onu kullanmak çakışma üretmez. Kral başına birden çok kalıcı
+  emir artık mümkün olduğu için user_id benzersiz kalmaz.
 */
-
--- ALTER TABLE "standing_orders" DROP CONSTRAINT "<constraint_name>";--> statement-breakpoint
+ALTER TABLE "standing_orders" DROP CONSTRAINT "standing_orders_pkey";--> statement-breakpoint
 ALTER TABLE "channel_members" ADD COLUMN "accepts_negotiation" boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE "standing_orders" ADD COLUMN "id" text PRIMARY KEY NOT NULL;--> statement-breakpoint
+ALTER TABLE "standing_orders" ADD COLUMN "id" text;--> statement-breakpoint
+UPDATE "standing_orders" SET "id" = "user_id" WHERE "id" IS NULL;--> statement-breakpoint
+ALTER TABLE "standing_orders" ALTER COLUMN "id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "standing_orders" ADD CONSTRAINT "standing_orders_pkey" PRIMARY KEY ("id");--> statement-breakpoint
 ALTER TABLE "agreements" ADD CONSTRAINT "agreements_channel_id_channels_id_fk" FOREIGN KEY ("channel_id") REFERENCES "public"."channels"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agreements" ADD CONSTRAINT "agreements_payer_id_users_id_fk" FOREIGN KEY ("payer_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agreements" ADD CONSTRAINT "agreements_payee_id_users_id_fk" FOREIGN KEY ("payee_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

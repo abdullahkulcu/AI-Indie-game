@@ -1,5 +1,6 @@
 import { catalog } from "../engine/catalog";
 import { orderGoldBounds } from "../engine/market";
+import { grossRates, tick } from "../engine/tick";
 import { BUILDING_TYPES } from "../server/save-validation";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -341,4 +342,25 @@ test("sunucunun türettiği itibar istemcinin bildirdiğini ezer", () => {
   const result = validateGameSave(startingSave({ reputation: 100 }), laterSave(previous, 60_000));
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.game.reputation, 50);
+});
+
+test("Değirmen kurmuş kayıt, Değirmen'e etki verildikten sonra da kabul edilir", () => {
+  // Geriye dönük uyum: hâlihazırda Değirmen kurmuş Kralların kaydı, binanın
+  // artık gerçekten yiyecek üretmesi yüzünden reddedilmemeli. Tavan da aynı
+  // motordan çıktığı için kendiliğinden yükselir.
+  const milled = [
+    { type: "keep", name: "Kale", category: "Yönetim", level: 2 },
+    { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", level: 2 },
+    { type: "mill", name: "Değirmen", category: "Ekonomi", level: 2 },
+  ];
+  const previous = validateGameSave(startingSave({ lastTickAt: NOW - 3_600_000, buildings: milled }), firstSave);
+  assert.equal(previous.ok, true);
+  if (!previous.ok) return;
+  const produced = tick(previous.game as never, NOW);
+  const result = validateGameSave({ ...produced, notices: [] }, {
+    previous: previous.game, previousUpdatedAt: NOW - 3_600_000, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW,
+  });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  // Etki gerçekten var: tarla Sv.2 + Değirmen Sv.2 = 36 × 1,5 = 54 yiyecek/sa brüt.
+  assert.equal(Math.round(grossRates(previous.game as never).food), 54);
 });

@@ -22,6 +22,13 @@
       "when": 1787250419534,
       "tag": "0002_boring_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787262009735,
+      "tag": "0003_sturdy_bulldozer",
+      "breakpoints": true
     }
   ]
 }

@@ -151,3 +151,21 @@ test("talep metni acil olanı işaretler", () => {
 test("talep yoksa metin boş kalır", () => {
   assert.equal(renderRequests([]), "");
 });
+
+test("Değirmen yiyecek talebini yalnızca tarlası olan krallıkta karşılar", () => {
+  // Değirmen tarlanın ürününü öğütür, kendi başına buğday ekmez. Tarlası
+  // olmayan Krala Değirmen önermek onu boş bir masrafa sokardı.
+  const starving = {
+    resources: { gold: 1000, food: 60, stone: 0, wood: 0, iron: 0, ale: 0 },
+    hourlyRates: { gold: 3, food: -10, stone: 0, wood: 0, iron: 0, ale: 0 },
+  };
+  const mill = [{ name: "build_structure", arguments: { building_type: "mill" } }];
+  const withoutFarm = deriveRequests(healthy(starving));
+  assert.deepEqual(requestsSatisfiedBy(withoutFarm, mill), []);
+
+  const withFarm = deriveRequests(healthy({
+    ...starving,
+    buildings: [{ type: "keep", name: "Kale", level: 1 }, { type: "wheat_farm", name: "Buğday Tarlası", level: 2 }],
+  }));
+  assert.ok(requestsSatisfiedBy(withFarm, mill).includes("food_production"));
+});

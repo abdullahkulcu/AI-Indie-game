@@ -98,7 +98,16 @@ export function deriveRequests(signals: RequestSignals): DerivedRequest[] {
       kind: "food_production",
       severity: hours <= 12 ? "urgent" : "normal",
       text: `Ambar eriyor: yiyecek ${hours} saat sonra bitiyor. Bir Buğday Tarlası ya da Elma Bahçesi emri bekliyorum.`,
-      satisfiedBy: { actions: ["build_structure"], buildingTypes: ["wheat_farm", "apple_orchard", "mill"] },
+      // Değirmen yalnızca TARLASI OLANA yiyecek getirir: tarlanın ürününü
+      // öğütür, kendi başına buğday ekmez (bkz. engine/catalog.ts,
+      // millMultiplier). Tarlası olmayana Değirmen önermek, aç Kralı boş bir
+      // masrafa sokardı; o yüzden liste duruma göre kurulur.
+      satisfiedBy: {
+        actions: ["build_structure"],
+        buildingTypes: has(signals, "wheat_farm", "Buğday Tarlası")
+          ? ["wheat_farm", "apple_orchard", "mill"]
+          : ["wheat_farm", "apple_orchard"],
+      },
     });
   }
 

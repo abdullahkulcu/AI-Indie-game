@@ -113,6 +113,9 @@ cmd_db_push(){ need npx; bold "şema Postgres'e uygulanıyor (geliştirme)"; DAT
 # ÜRETİM: drizzle/pg altındaki üretilmiş göçleri sırayla uygular ve uygulananı
 # kaydeder. Üretim konteyneri açılışta bunun aynısını çalıştırır.
 cmd_db_migrate_up(){ need npx; bold "göçler uygulanıyor"; DATABASE_URL="$PG_HOST_URL" npx drizzle-kit migrate; }
+# `push` ile kurulmuş ESKİ veritabanını göç defterine işler. Olmadan üretim yolu
+# (drizzle-kit migrate) o veritabanında 0000'dan başlamak isteyip düşer.
+cmd_db_baseline(){ need npx; bold "göç defteri damgalanıyor (yalnızca eski veritabanı)"; DATABASE_URL="$PG_HOST_URL" npx tsx scripts/baseline-migrations.ts; }
 # Şema değiştiğinde yeni göç dosyası üretir; üretime çıkmadan ÖNCE çalıştırılır.
 cmd_db_generate(){ need npx; bold "şema farkından göç üretiliyor"; npx drizzle-kit generate; }
 cmd_db_migrate(){ need npx; bold "D1 verisi Postgres'e taşınıyor"; DATABASE_URL="$PG_HOST_URL" npx tsx scripts/migrate-d1-to-postgres.ts; }
@@ -153,6 +156,10 @@ Demirkale çalıştırma komutları
 
   ./run.sh db:push         şemayı Postgres'e uygula (GELİŞTİRME, diff tabanlı)
   ./run.sh db:up           göçleri uygula (ÜRETİM yolu; drizzle/pg)
+  ./run.sh db:baseline     push ile kurulmuş ESKİ veritabanını göç defterine işle
+                           SIRA ÖNEMLİ: önce db:push (şemayı güncelle), sonra
+                           db:baseline, sonra db:up. Tek seferlik; sıfırdan
+                           kurulan veritabanında hiç gerekmez.
   ./run.sh db:generate     şema farkından yeni göç dosyası üret
   ./run.sh db:migrate      eski D1 verisini Postgres'e taşı
   ./run.sh psql            veritabanı kabuğu
@@ -181,6 +188,7 @@ case "${1:-up}" in
   ps)           cmd_ps ;;
   db:push)      cmd_db_push ;;
   db:up)        cmd_db_migrate_up ;;
+  db:baseline)  cmd_db_baseline ;;
   db:generate)  cmd_db_generate ;;
   db:migrate)   cmd_db_migrate ;;
   psql)         cmd_psql ;;

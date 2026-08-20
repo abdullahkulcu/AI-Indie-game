@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -108,10 +108,25 @@ export const sharedMines = pgTable("shared_mines", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("idx_shared_mines_channel").on(table.channelId)]);
 
+/**
+ * Madende çalışan krallıklar.
+ *
+ * Cevher artık oyuncunun kaydına GERÇEKTEN yazılıyor (bkz. app/api/mine/route.ts).
+ * Üç alan bunun içindir:
+ *  - `pendingOre`: çıkarılmış ama henüz kayda geçmemiş cevher. KESİRLİ tutulur;
+ *    tam sayıya yuvarlansaydı 10 saniyede bir yoklanan madende üretim hep 0'a
+ *    inerdi (5 işçi × 4 cevher/sa × 10 sn = 0,011 cevher).
+ *  - `lastDeliveryAt`: son teslimat anı. Her teslimat kaydın sürümünü artırdığı
+ *    için aralıklı yapılır; yoksa Kralın açık sekmesi sürekli 409 yerdi.
+ *  - `deliveredOre`: bugüne kadar teslim edilen toplam; panelde gösterilir.
+ */
 export const sharedMineWorkers = pgTable("shared_mine_workers", {
   mineId: text("mine_id").notNull().references(() => sharedMines.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   workers: integer("workers").notNull().default(5),
+  pendingOre: doublePrecision("pending_ore").notNull().default(0),
+  deliveredOre: integer("delivered_ore").notNull().default(0),
+  lastDeliveryAt: bigint("last_delivery_at", { mode: "number" }).notNull().default(0),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
 
