@@ -59,7 +59,13 @@ const HASTEN = { goldPerMinute: 6, minCost: 60, minSeconds: 120, crew: "bir usta
  */
 export const FESTIVAL = { cost: { gold: 120, food: 150 }, mood: 12 } as const;
 
-const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 };
+/**
+ * Göçmen çağrısı. Dışa açıktır çünkü `peopleJoined` defteri `tick()` DIŞINDA
+ * yalnızca buradan sıçrar; sunucu doğrulaması istemcinin bildirdiği defteri
+ * kendi simülasyonuna karşı ölçerken bu payı tanımak zorunda
+ * (bkz. server/save-validation.ts, serverDerived). FESTIVAL ile aynı gerekçe.
+ */
+export const SETTLERS = { cost: { gold: 220, food: 320 }, minRoom: 8, minMood: 45, share: .25, cooldownMs: 12 * 3_600_000 } as const;
 
 /**
  * Pazar: kaynağı altına, altını kaynağa çevirir. Karşı taraf HALKIN KENDİSİDİR

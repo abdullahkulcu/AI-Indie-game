@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { FESTIVAL, LOYALTY_STEP, MAX_ACTIONS_PER_TURN, marketDuration } from "../engine/actions";
+import { FESTIVAL, LOYALTY_STEP, MAX_ACTIONS_PER_TURN, SETTLERS, marketDuration } from "../engine/actions";
 import { BUILDABLE_TYPES, MAX_BUILDING_LEVEL } from "../engine/catalog";
 import { PROTECTION_DAYS, STARTING_BUILDINGS, STARTING_POPULATION, STARTING_REPUTATION, startingResources } from "../engine/founding";
-import { orderCost, orderGoldBounds, orderPayout } from "../engine/market";
+import { commonsOf, isTraded, orderCost, orderGoldBounds, orderPayout } from "../engine/market";
 import { POLICY_LIMITS, clampPolicy } from "../engine/policy";
 import { RATION_LIMITS, clampRation } from "../engine/populace";
 import { WATCH_LIMITS, clampWatch, resolveRaids } from "../engine/raids";
@@ -203,6 +203,12 @@ export const gameSaveSchema = z.object({
   soldierPay: finite(CAPS.ration).optional(),
   soldierUnrest: finite(100).optional(),
   mineWorkers: finite(CAPS.population).optional(),
+  /**
+   * Göç defteri. Buradaki üst sınır yalnızca tip taşmasına karşıdır; asıl
+   * denetim `serverDerived` içindedir: `peopleLeft` ve `migrationDrift`
+   * tamamen sunucunun (`simulated`), `peopleJoined` ise simülasyon + tanınmış
+   * `call_settlers` payıdır. Şemada dar bir sınır eski kayıtları reddederdi.
+   */
   peopleJoined: finite(1e9).optional(),
   peopleLeft: finite(1e9).optional(),
   migrationDrift: z.number().finite().optional(),
@@ -228,9 +234,10 @@ export const gameSaveSchema = z.object({
    * yoktur; motor o zaman halkı normal stoğunda kabul eder, yani fiyat taban
    * fiyattır ve kimsenin kaydı bu alan yüzünden reddedilmez.
    *
-   * Şişirilmesi kaynak yaratmaz, yalnızca fiyatı oynatır ve fiyatın kendisi
-   * taban/tavan arasına kilitlidir (bkz. engine/market.ts). Elde edilecek
-   * altın ayrıca `checkAgainstSimulation` ve `checkGrowth` ile sınırlıdır.
+   * İSTEMCİNİN BİLDİRDİĞİ DEĞER OKUNMAZ: alan `serverDerived` içinde sunucunun
+   * kendi `tick()`'inden yeniden yazılır (bkz. `derivedCommons`). Şemada
+   * kalması geriye dönük uyum içindir — eski kayıtlar bu alanla gelir ve
+   * `.strict()` şema bilmediği alanı reddeder.
    */
   commons: z.object(
     Object.fromEntries(TRADED_RESOURCE_KEYS.map(key => [key, finite(CAPS.resource)])) as Record<
@@ -464,6 +471,52 @@ function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, chan
 }
 
 /**
+ * HALKIN DEFTERİ SUNUCUNUN — istemcinin bildirdiği `commons` HİÇ OKUNMAZ.
+ *
+ * `orderGoldBounds` bilerek halkın canlı stoğundan bağımsız kuruldu: kabul
+ * aralığı emrin ne zaman verildiğine göre kaymasın diye. Ama fiili getiriyi
+ * `fillOrder` hesaplıyor ve o tamamen `commons`'a bağlı. `commons` sunucu
+ * türevi olmadığı sürece istemci kendi stoğunu sıfır bildirip fiyatı kıtlık
+ * tavanına çekiyor, aynı emirden 2 kattan fazla altın alıyor ve üç denetimin
+ * (checkMarketOrders / checkGrowth / checkAgainstSimulation) hiçbiri bunu
+ * görmüyordu — çünkü hepsi aralığın İÇİNDE kalıyor. Aynı yalan geçim
+ * endeksini de oynatıp `popularity` payını şişiriyordu (engine/market.ts,
+ * livingCostMood).
+ *
+ * Esas alınan `simulated.commons`, yani sunucunun kendi `tick()`'i. Buna tek
+ * eklenen, BU pencerede açılan pazar emirlerinin defterde açtığı deliktir:
+ * anlaşma emir verilirken yapılır (engine/actions.ts), halkın stoğu o an
+ * hareket eder ve fiyat kayması böyle doğar. Bu pay tanınmasa Kral her
+ * kaydında kaymayı sıfırlar, aynı fiyattan arka arkaya emir dizerdi. Emrin
+ * kendisi zaten `checkMarketOrders`'tan geçmiş, miktarı ve kimliği
+ * kilitlenmiştir; istemcinin bildirdiği stok sayısı yine hiç okunmaz.
+ *
+ * `advanceCommons` kapalı çözümlü ve adım-bağımsız (bkz. tests/market.test.ts),
+ * yani istemcinin saniyelik adımlarıyla sunucunun tek adımı aynı yere gelir:
+ * bu sertleştirme meşru hiçbir kaydı bozmaz.
+ */
+function derivedCommons(simulated: Game, fresh: readonly StoredOrder[]): GameSave["commons"] {
+  const stock = { ...commonsOf(simulated) };
+  for (const order of fresh) {
+    if (!isTraded(order.resource)) continue;
+    const moved = stock[order.resource] + (order.direction === "sell" ? order.amount : -order.amount);
+    // Tavan, kaydın şemasıyla aynı: türetilen değer sonradan okunamaz olmasın.
+    stock[order.resource] = Math.max(0, Math.min(CAPS.resource, moved));
+  }
+  return stock;
+}
+
+/**
+ * `peopleJoined` defterine tanınan pay: `call_settlers`.
+ *
+ * Emir 12 saatlik beklemeye bağlı olduğu için bir kayıt aralığında en çok bir
+ * kez uygulanabilir; getirdiği sayı da `min(boş konut, max(minRoom, nüfus ×
+ * share))` ile sınırlıdır (engine/actions.ts). Pay bu üst sınırdır.
+ */
+const settlerAllowance = (previous: GameSave) =>
+  Math.max(SETTLERS.minRoom, Math.ceil(previous.population * SETTLERS.share));
+
+/**
  * SUNUCUNUN TÜRETTİĞİ ALANLAR — istemcinin bildirdiği değer YOK SAYILIR.
  *
  * `checkAgainstSimulation` yalnızca kaynak ve nüfus karşılaştırıyordu; itibar,
@@ -474,13 +527,18 @@ function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, chan
  * Kayıt REDDEDİLMEZ, alan ÜZERİNE YAZILIR: oyuncu ilerlemesini kaybetmesin
  * diye. Alanlar üç sınıfa ayrılır:
  *
- *  1. Tamamen sunucunun: `reputation` (yalnızca app/api/cron yazar) ve
- *     `soldierUnrest` (yalnızca `tick()` türetir) — doğrudan simülasyondan.
+ *  1. Tamamen sunucunun: `reputation` (yalnızca app/api/cron yazar),
+ *     `soldierUnrest`, `peopleLeft` ve `migrationDrift` (yalnızca `tick()`
+ *     türetir) — doğrudan simülasyondan. `commons` da buraya girer; halkın
+ *     defterini istemci hiç bildirmez, yalnızca verdiği pazar emri hareket
+ *     ettirir (aşağıda `derivedCommons`).
  *  2. Simülasyon + tanınmış pay: `popularity`. `tick()` dışında YALNIZCA
  *     şenlik sıçratır (engine/actions.ts, FESTIVAL.mood) ve bir General
  *     turunda en çok MAX_ACTIONS_PER_TURN şenlik yapılabilir; pay budur.
  *     `loyalty` da öyle: uygulanan emirle yükselir, tavanı saatlik hızdır ve
  *     tek turun payı (MAX_ACTIONS_PER_TURN × LOYALTY_STEP.success) korunur.
+ *     `peopleJoined` de öyle: `tick()` dışında yalnızca `call_settlers`
+ *     artırır ve gelen sayı `SETTLERS` ile sınırlıdır.
  *  3. Kralın meşru ayarları: `taxRate`, istihkaklar, `watchRatio`. Bunlar
  *     emirlerle değişir; körlemesine ezilmez, yalnızca MOTORUN KENDİ
  *     kıskaçlarından geçirilir (clampPolicy/clampRation/clampWatch).
@@ -493,8 +551,25 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
   const optional = (value: number | undefined, clamp: (input: number) => number) =>
     value === undefined ? undefined : clamp(value);
   const loyaltyAllowance = Math.max(LOYALTY_STEP.success * MAX_ACTIONS_PER_TURN, GROWTH.loyaltyPerHour * hours);
+  // Göç defteri. İlk kayıtta kanonik başlangıç boştur: kuruluşta kimse gelmiş
+  // ya da gitmiş değildir (engine/founding.ts alanı hiç yazmaz), dolayısıyla
+  // "kuruluşta 900 milyon kişi göç etti" diyen bir kayıt tohumlanamaz.
+  const migration = simulated && previous
+    ? {
+        peopleLeft: simulated.peopleLeft,
+        migrationDrift: simulated.migrationDrift,
+        peopleJoined: Math.min(
+          game.peopleJoined ?? simulated.peopleJoined ?? 0,
+          (simulated.peopleJoined ?? 0) + settlerAllowance(previous),
+        ),
+      }
+    : { peopleLeft: undefined, migrationDrift: undefined, peopleJoined: undefined };
   return {
     ...game,
+    ...migration,
+    // Halkın defteri: yalan bildirilen `commons` fiyatı oynatıp hem geçim
+    // endeksini (rıza) hem pazar getirisini şişiriyordu.
+    commons: simulated && previous ? derivedCommons(simulated, freshOrders(game, previous)) : undefined,
     reputation: simulated ? simulated.reputation : STARTING_REPUTATION,
     popularity: simulated
       ? Math.min(game.popularity, simulated.popularity + FESTIVAL.mood * MAX_ACTIONS_PER_TURN)

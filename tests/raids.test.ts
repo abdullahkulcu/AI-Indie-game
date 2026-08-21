@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { suppression } from "../engine/populace";
+import { moodTarget, suppression } from "../engine/populace";
 import {
   DEFAULT_WATCH_RATIO, defenseOf, offWatchStrength, raidCatalog, raidInWindow,
   RAID_WINDOW_HOURS, resolveRaids, watchRatioOf, windowStart,
@@ -177,6 +177,74 @@ test("akın deftere AKIN bildirimi düşürür ve ne kaybedildiğini yazar", () 
   assert.equal(raidNotices.length, 1, "Kral akından haberdar edilmeli");
   assert.match(raidNotices[0].text, /yağmalandı|çalındı|asker öldü|püskürttü/, "bildirim kaybı rakamıyla anlatmalı");
   assert.match(raidNotices[0].text, new RegExp(planned.label), "hangi akının geldiği yazmalı");
+});
+
+/**
+ * AKIN TRAVMASI YALNIZCA GERÇEK YAĞMADA — düzeltmenin kanıtı.
+ *
+ * `resolveRaids` püskürtülen akını da `lastRaidAt`e yazıyordu; `tick` oradan
+ * `moodTarget`'ın `hoursSinceRaid` girdisini kuruyor ve 14 puanlık RAID_TRAUMA
+ * cezası kayıpsız savunulan akında da işliyordu. Nöbeti tam tutmanın rıza
+ * tarafında hiçbir karşılığı yoktu.
+ */
+function fortified() {
+  return newGame({
+    units: { spearman: 40 }, watchRatio: 100,
+    buildings: [...newGame().buildings, { type: "wall", name: "Sur", category: "Askerî", level: 3 }],
+  });
+}
+
+test("püskürtülen akın travma saati yazmaz", () => {
+  const guarded = fortified();
+  const { planned } = firstRaidWindow(guarded);
+  const outcome = resolveRaids(guarded, planned.at - 1, planned.at + 1, guarded.resources);
+  assert.equal(outcome.repelled, 1, "iyi savunulan kale bu akını püskürtmeli");
+  assert.equal(outcome.suffered, 0);
+  assert.equal(outcome.lastRaidAt, null, "kayıpsız savunulan akın travma saati yazmamalı");
+
+  const before = tick(guarded, planned.at - 1);
+  const after = tick(before, planned.at + 1);
+  assert.equal(after.lastRaidAt, before.lastRaidAt, "püskürtülen akın lastRaidAt'i değiştirmemeli");
+  assert.equal(after.lastRaidAt, undefined, "hiç yağmalanmamış krallıkta alan boş kalmalı");
+  // Bildirim ve sayaç değişmedi: Kral akından haberdar, yalnızca halkı yaralı değil.
+  assert.ok(after.notices.some(notice => notice.kind === "AKIN"), "püskürtülen akın deftere yine yazılmalı");
+  assert.equal(after.raidsRepelled, 1);
+});
+
+test("püskürtülen akın 14 puanlık rıza cezasını tetiklemez", () => {
+  const guarded = fortified();
+  const { planned } = firstRaidWindow(guarded);
+  const before = tick(guarded, planned.at - 1);
+
+  // Cezanın büyüklüğü: aynı girdiyle yalnızca hoursSinceRaid değişiyor.
+  const inputs = {
+    servedFood: 100, servedAle: 0, taxRate: before.taxRate, population: before.population,
+    capacity: before.capacity, buildings: before.buildings, livingMood: 0,
+  };
+  assert.equal(Math.round(moodTarget({ ...inputs, hoursSinceRaid: null }) - moodTarget({ ...inputs, hoursSinceRaid: 0 })), 14);
+
+  // Akını püskürten krallık ile "sanki yağmalanmış" krallık: rıza ayrışmalı.
+  const spared = tick(before, planned.at + 3_600_000);
+  const traumatised = tick({ ...before, lastRaidAt: planned.at }, planned.at + 3_600_000);
+  assert.ok(spared.popularity > traumatised.popularity,
+    `püskürten kale cezayı yememeli: ${spared.popularity.toFixed(2)} > ${traumatised.popularity.toFixed(2)}`);
+});
+
+test("gerçekten yağmalanan akın travmayı hâlâ tetikler", () => {
+  const open = newGame({ units: { spearman: 0 }, watchRatio: 0 });
+  const { planned } = firstRaidWindow(open);
+  const outcome = resolveRaids(open, planned.at - 1, planned.at + 1, open.resources);
+  assert.equal(outcome.suffered, 1, "nöbetsiz kale yarılmalı");
+  assert.equal(outcome.lastRaidAt, planned.at, "yağma travma saatini yazmalı");
+
+  const before = tick(open, planned.at - 1);
+  const after = tick(before, planned.at + 1);
+  assert.equal(after.lastRaidAt, planned.at);
+  // Ceza gerçekten işliyor: bir saat sonra rıza, yağmasız yolun altında.
+  const sacked = tick(after, planned.at + 3_600_000);
+  const untouched = tick({ ...after, lastRaidAt: undefined }, planned.at + 3_600_000);
+  assert.ok(sacked.popularity < untouched.popularity,
+    `yağmalanan halk cezayı yemeli: ${sacked.popularity.toFixed(2)} < ${untouched.popularity.toFixed(2)}`);
 });
 
 test("akın sayaçları birikir", () => {

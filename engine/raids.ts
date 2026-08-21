@@ -206,7 +206,18 @@ export type RaidResolution = {
   moodLoss: number;
   repelled: number;
   suffered: number;
-  /** Son akının zamanı; hiç akın olmadıysa null. */
+  /**
+   * Son GERÇEKLEŞEN yağmanın zamanı; püskürtülen akın buraya yazılmaz.
+   *
+   * Bu alan `tick()` içinde `lastRaidAt`e, oradan da `moodTarget`'ın
+   * `hoursSinceRaid` girdisine gider ve RAID_TRAUMA cezasını (14 puan) açar.
+   * Püskürtülen akın da yazıldığı sürece kayıpsız savunulan her akın halkı
+   * travmatize ediyordu: nöbeti tam tutan, Sur yükselten Kral cezayı yine
+   * yiyor, savunmaya yatırım yapmanın rıza tarafında hiçbir karşılığı
+   * olmuyordu. Ceza artık yalnızca `suffered` akınlara (savunması yarılmış,
+   * `repelled: false`) bağlıdır. Bildirim ve sayaçlar değişmedi: püskürtülen
+   * akın deftere yine yazılır, `raidsRepelled` yine artar.
+   */
   lastRaidAt: number | null;
 };
 
@@ -266,6 +277,8 @@ export function resolveRaids(
   }
 
   if (!events.length) return EMPTY;
+  // Travma yalnızca yağmadan doğar (bkz. RaidResolution.lastRaidAt).
+  const suffered = events.filter(event => !event.repelled);
   return {
     events,
     soldiersLost: events.reduce((total, event) => total + event.soldiersLost, 0),
@@ -273,8 +286,8 @@ export function resolveRaids(
     goldStolen: events.reduce((total, event) => total + event.goldStolen, 0),
     moodLoss: events.reduce((total, event) => total + event.moodLoss, 0),
     repelled: events.filter(event => event.repelled).length,
-    suffered: events.filter(event => !event.repelled).length,
-    lastRaidAt: events[events.length - 1].at,
+    suffered: suffered.length,
+    lastRaidAt: suffered.length ? suffered[suffered.length - 1].at : null,
   };
 }
 

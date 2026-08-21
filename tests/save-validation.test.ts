@@ -1,5 +1,6 @@
+import { applyActions, SETTLERS } from "../engine/actions";
 import { catalog } from "../engine/catalog";
-import { orderGoldBounds } from "../engine/market";
+import { commonsReference, fillOrder, orderGoldBounds } from "../engine/market";
 import { grossRates, tick } from "../engine/tick";
 import { BUILDING_TYPES } from "../server/save-validation";
 import assert from "node:assert/strict";
@@ -342,6 +343,141 @@ test("sunucunun türettiği itibar istemcinin bildirdiğini ezer", () => {
   const result = validateGameSave(startingSave({ reputation: 100 }), laterSave(previous, 60_000));
   assert.equal(result.ok, true);
   assert.equal(result.ok && result.game.reputation, 50);
+});
+
+/**
+ * HALKIN DEFTERİ SUNUCUNUN — `commons` sunucu türevi olduğunun kanıtı.
+ *
+ * `orderGoldBounds` halkın canlı stoğundan bağımsız (bilerek), yani kabul
+ * aralığı geniş. Fiili getiriyi ise `fillOrder` hesaplıyor ve o tamamen
+ * `commons`'a bağlı: istemci kendi stoğunu sıfır bildirip fiyatı kıtlık
+ * tavanına çekiyor, aynı emirden iki kattan fazla altın alıyordu ve üç
+ * denetimin hiçbiri bunu görmüyordu — hepsi aralığın İÇİNDE kalıyor.
+ */
+test("halkın defterini sıfır bildiren kayıt istediği fiyatı elde edemez", () => {
+  const previous = afterFirstSave();
+  const starved = { food: 0, wood: 0, stone: 0, iron: 0, ale: 0 };
+  const result = validateGameSave(startingSave({ commons: starved }), laterSave(previous, 60_000));
+  // Kayıt REDDEDİLMEZ, alan ÜZERİNE YAZILIR: oyuncu ilerlemesini kaybetmesin.
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+
+  const reference = commonsReference(result.game.population);
+  assert.deepEqual(result.game.commons, reference, "sunucu kendi defterini yazmalı");
+
+  // Yalan kabul edilseydi odun kıtlık tavanından fiyatlanacaktı.
+  const lie = fillOrder("wood", 1_000, starved.wood, reference.wood, "sell");
+  const truth = fillOrder("wood", 1_000, result.game.commons!.wood, reference.wood, "sell");
+  assert.ok(lie.gold > truth.gold * 2,
+    `yalan defter iki kattan fazla getirmeli ki ölçüm anlamlı olsun: ${lie.gold} / ${truth.gold}`);
+  assert.equal(truth.gold, fillOrder("wood", 1_000, reference.wood, reference.wood, "sell").gold);
+});
+
+test("meşru pazar emrinin fiyat kayması sunucunun defterinde de durur", () => {
+  // Anlaşma emir verilirken yapılır: halkın stoğu o an hareket eder ve fiyat
+  // kayması böyle doğar (engine/actions.ts). Bu pay tanınmasa Kral her kaydında
+  // kaymayı sıfırlar, aynı fiyattan arka arkaya emir dizerdi.
+  const previous = afterFirstSave();
+  const bounds = orderGoldBounds("iron", 100, "sell");
+  const next = startingSave({
+    marketOrders: [{
+      id: "s-iron-100", resource: "iron", amount: 100, direction: "sell",
+      gold: Math.floor((bounds.min + bounds.max) / 2), placedAt: NOW, completesAt: NOW + 30 * 60_000,
+    }],
+    resources: { ...STARTING_STATE.resources, iron: 0 },
+    // İstemcinin bildirdiği defter yine okunmaz; emir hareketi sunucu ekler.
+    commons: { food: 0, wood: 0, stone: 0, iron: 999_999, ale: 0 },
+  });
+  const result = validateGameSave(next, laterSave(previous, 60_000));
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  const reference = commonsReference(result.game.population);
+  assert.equal(result.game.commons!.iron, reference.iron + 100, "satılan mal halkın eline geçmeli");
+  assert.equal(result.game.commons!.wood, reference.wood, "emirsiz kalem yerinde durmalı");
+});
+
+/**
+ * GÖÇ DEFTERİ — `peopleLeft`/`migrationDrift` sunucunun, `peopleJoined` paylı.
+ *
+ * Alanlar yalnızca `finite(1e9)` ile duruyordu: `peopleLeft: 900000000` yazan
+ * kayıt olduğu gibi kabul ediliyor, bir sonraki kaydın simülasyonu da o sayının
+ * üstüne kuruluyordu.
+ */
+test("uydurma göç defteri sunucunun kendi defteriyle ezilir", () => {
+  const previous = validateGameSave(startingSave({ lastTickAt: NOW - 3_600_000 }), firstSave);
+  if (!previous.ok) throw new Error("kurulum başarısız");
+  const simulated = tick(previous.game as never, NOW);
+  const result = validateGameSave(
+    startingSave({ peopleLeft: 900_000_000, migrationDrift: -900_000_000, peopleJoined: 900_000_000 }),
+    { previous: previous.game, previousUpdatedAt: NOW - 3_600_000, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW },
+  );
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  assert.equal(result.game.peopleLeft, simulated.peopleLeft, "göç edenleri yalnızca sunucu yazar");
+  assert.equal(result.game.migrationDrift, simulated.migrationDrift);
+  // `peopleJoined` 2. sınıf: yalnızca tanınmış `call_settlers` payı kadar üste çıkabilir.
+  const allowance = Math.max(SETTLERS.minRoom, Math.ceil(previous.game.population * SETTLERS.share));
+  assert.equal(result.game.peopleJoined, (simulated.peopleJoined ?? 0) + allowance);
+  assert.ok((result.game.peopleJoined ?? 0) < 100, `900 milyon pay kadar kırpılmalı: ${result.game.peopleJoined}`);
+});
+
+test("kuruluşta uydurma göç defteri tohumlanamaz", () => {
+  // İlk kayıtta karşılaştırılacak simülasyon yok; kanonik başlangıç boş defterdir.
+  const result = validateGameSave(startingSave({ peopleLeft: 900_000_000, peopleJoined: 900_000_000 }), firstSave);
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.game.peopleLeft, undefined);
+  assert.equal(result.ok && result.game.peopleJoined, undefined);
+  assert.equal(result.ok && result.game.commons, undefined);
+});
+
+test("göçmen çağıran kaydın defteri silinmez", () => {
+  // `call_settlers` `peopleJoined`'ı istemci tarafında MEŞRU olarak artırır;
+  // pay tanınmasa emrin defterdeki izi her kayıtta siliniyordu.
+  const settled = startingSave({
+    population: 300, capacity: 310, popularity: 80,
+    buildings: [
+      { type: "keep", name: "Kale", category: "Yönetim", level: 1 },
+      { type: "town_square", name: "Meydan", category: "Yönetim", level: 2 },
+      { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", level: 1 },
+    ],
+    resources: { ...STARTING_STATE.resources, gold: 1_000, food: 1_000 },
+  });
+  const called = applyActions(settled as never, [{ name: "call_settlers", arguments: {} }], NOW);
+  assert.match(called.results[0], /^✓/, called.results[0]);
+  const arrivals = called.game.peopleJoined ?? 0;
+  assert.ok(arrivals > 0, "çağrı deftere yazmalı");
+
+  const result = validateGameSave({ ...called.game, notices: [] }, laterSave(settled as never, 60_000));
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  assert.equal(result.ok && result.game.peopleJoined, arrivals, "gelen göçmenler defterde kalmalı");
+});
+
+test("mevcut kayıtların makul göç defteri reddedilmez ve korunur", () => {
+  // Geriye dönük uyum: hâlihazırda oynanan bir krallığın kaydı sertleştirmeden
+  // sonra da geçmeli ve defteri sunucunun kendi sayısıyla aynı kalmalı.
+  const previous = validateGameSave(startingSave({ lastTickAt: NOW - 6 * 3_600_000 }), firstSave);
+  if (!previous.ok) throw new Error("kurulum başarısız");
+  const played = tick(previous.game as never, NOW);
+  const result = validateGameSave({ ...played, notices: [] }, {
+    previous: previous.game, previousUpdatedAt: NOW - 6 * 3_600_000, channelSpeed: 1, channelName: "Standart Sezon I", now: NOW,
+  });
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (!result.ok) return;
+  assert.equal(result.game.peopleLeft, played.peopleLeft);
+  assert.equal(result.game.peopleJoined, played.peopleJoined);
+  assert.equal(result.game.migrationDrift, played.migrationDrift);
+  assert.deepEqual(result.game.commons, played.commons);
+});
+
+test("göç ve halk defteri alanları hiç yokken de kayıt kabul edilir", () => {
+  const previous = afterFirstSave();
+  const save = startingSave() as Record<string, unknown>;
+  delete save.commons;
+  delete save.peopleLeft;
+  delete save.peopleJoined;
+  delete save.migrationDrift;
+  const result = validateGameSave(save, laterSave(previous, 60_000));
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
 });
 
 test("Değirmen kurmuş kayıt, Değirmen'e etki verildikten sonra da kabul edilir", () => {

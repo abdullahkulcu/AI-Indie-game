@@ -229,6 +229,33 @@ test("göç deftere geçer: sessiz erime olmaz", () => {
   assert.match(after.notices[0].text, /terk etti/);
 });
 
+test("göç defteri kayıt aralığında adım boyutuna bağlı değil", () => {
+  // `peopleLeft` ve `migrationDrift` artık tamamen sunucunun türettiği alanlar
+  // (server/save-validation.ts): sunucu tek adımda, istemci saniyelik adımlarla
+  // ilerliyor. İstemcinin kayıt aralığı 5 saniyedir; bu aralıklarda iki yolun
+  // defteri BİREBİR aynı olmalı, yoksa meşru oyuncunun defteri her kayıtta kayar.
+  const scenarios: Array<[string, Game]> = [
+    ["çöken krallık", newGame({ popularity: 3, population: 300, capacity: 300 })],
+    ["büyüyen krallık", newGame({
+      popularity: 80, population: 100, capacity: 400,
+      buildings: [
+        { type: "keep", name: "Kale", category: "Yönetim", level: 1 },
+        { type: "town_square", name: "Meydan", category: "Yönetim", level: 3 },
+        { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", level: 1 },
+      ],
+    })],
+  ];
+  for (const [label, game] of scenarios) {
+    for (const window of [5_000, 60_000, 300_000]) {
+      const single = tick(game, T0 + window);
+      let stepped = game;
+      for (let at = T0 + 1_000; at <= T0 + window; at += 1_000) stepped = tick(stepped, at);
+      assert.equal(stepped.peopleLeft, single.peopleLeft, `${label}, ${window / 1000}s: göç edenler sapmamalı`);
+      assert.equal(stepped.peopleJoined, single.peopleJoined, `${label}, ${window / 1000}s: gelenler sapmamalı`);
+    }
+  }
+});
+
 test("Pazar olmadan hiçbir şey satılamaz", () => {
   const { results } = applyActions(newGame(), [{ name: "trade_resource", arguments: { resource: "wood", amount: 100, direction: "sell" } }], T0);
   assert.match(results[0], /Pazarımız yok/);
