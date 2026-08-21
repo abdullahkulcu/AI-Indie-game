@@ -78,6 +78,37 @@
 .raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
 .raid-log p.quiet{color:#8a7854;font-style:italic}
 
+/* ---- Halkın Sesi (Halk sekmesi) ----
+   Halkın ve kışlanın Kraldan açık talepleri. Görsel dil parşömen + kızıl-kahve;
+   acil talep kızıla, garnizonun sesi koyu kahveye çalar. */
+.populace-voice{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px}
+.voice-row{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:baseline;padding:8px 0;border-top:1px solid #e0cfa6}
+.voice-row:first-of-type{border-top:0}
+.voice-row>span{font-size:.58rem;letter-spacing:.14em;color:#7a6540}
+.voice-row.garrison>span{color:#6d3325}
+.voice-row b{display:block;font-size:.76rem;color:#4a3a20;line-height:1.5;font-weight:600}
+.voice-row small{display:block;margin-top:3px;font-size:.64rem;color:#8a7854}
+.voice-row.urgent b{color:#8f3512}
+.voice-row em{font-style:normal;font-size:.58rem;letter-spacing:.12em;color:#8f3512}
+.mood-explain-note{margin:8px 0 0;font-size:.66rem;line-height:1.5;color:#7a6540}
+
+/* ---- Garnizon Durumu (Ordu sekmesi) ---- */
+.garrison-block{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-top:10px}
+.garrison-block.demanding{border-left:3px solid #c9873c}
+.garrison-block.deserting{border-left:3px solid #b26a1f;background:#f6e6c4}
+.garrison-block.mutinous{border-left:3px solid #8f3512;background:#f6dfd3}
+.garrison-block>small{display:block;margin-top:5px;font-size:.68rem;line-height:1.45;color:#7a6540}
+.garrison-gauge{height:6px;background:#dbc9a2;margin-top:7px}
+.garrison-gauge i{display:block;height:100%;background:linear-gradient(90deg,#8a6a12,#a83527)}
+.garrison-vetoes{display:grid;gap:4px;margin-top:8px}
+.garrison-vetoes>div{display:flex;justify-content:space-between;align-items:baseline;padding:5px 8px;background:#e9dcb8;border:1px solid #dbc9a2}
+.garrison-vetoes b{font-size:.72rem;font-weight:600;color:#4a3a20}
+.garrison-vetoes span{font-size:.58rem;letter-spacing:.12em;color:#3f6b22}
+.garrison-vetoes .refused{background:#f2ddd2;border-color:#d8b3a2}
+.garrison-vetoes .refused span{color:#8f3512}
+.garrison-warning{margin:8px 0 0;font-size:.68rem;line-height:1.5;color:#8f3512}
+.garrison-warning.quiet{color:#7a6540}
+
 /* ---- General'in talepleri ---- */
 .general-requests{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-bottom:12px}
 .requests-head{display:block;font-size:.6rem;letter-spacing:.16em;color:#7a6540;margin-bottom:7px}

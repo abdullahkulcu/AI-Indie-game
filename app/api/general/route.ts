@@ -15,8 +15,9 @@ type GeneralRequest = {
     keepLevel?: number;
     population?: number;
     popularity?: number;
+    taxRate?: number;
     resources?: Record<string, number>;
-    buildings?: Array<{ name: string; level: number }>;
+    buildings?: Array<{ type?: string; name: string; level: number }>;
     units?: Record<string, number>;
     channelSpeed?: number;
     channelId?: string;
@@ -34,6 +35,10 @@ type GeneralRequest = {
       mood: string; moodScore: number; productionMultiplier: number;
       foodRation: number; aleRation: number; soldierPay: number;
       army: number; soldierUnrest: number; dailyFoodNeed: number;
+      /** Halkın sesi bu üç alanı okur; kâğıt üstündeki oran değil fiilen dağıtılan. */
+      servedFood?: number; livingCost?: number; capacity?: number;
+      /** Garnizonun reddettiği emirler; eşikler motordan gelir, panel de aynı listeyi gösterir. */
+      garrison?: { label: string; note: string; vetoes: string[] };
     };
     defense?: {
       /** Nöbetteki asker oranı (%) ve fiilen nöbet tutan asker sayısı. */
@@ -130,6 +135,8 @@ function gamePrompt(body: GeneralRequest) {
     "Bira ve eğlence yapıları (Park, Tiyatro, Evlilik Dairesi) morali yükseltir ama AÇ HALKA ETKİSİ ÇOK AZDIR; önce karnını doyur, sonra eğlendir.",
     "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
     "İstihkak ve maaş oranlarını Kral sorduğunda ya da açıkça emrettiğinde ayarla. Kralın haberi olmadan halkı aç bırakma.",
+    "Halkın üzerinde emir süreci YOKTUR: dilekçe, ceza, bastırma ya da 'elebaşını astır' diye bir araç yok. Halkın sesi ancak yönetimle (istihkak, vergi, fiyat, konut, şenlik) susar. Halka emir verebileceğini ima etme.",
+    "Garnizon bazı emirleri REDDEDER ve Kralın teyidi bunu aşmaz: huzursuzluk 30'a çıkınca yeni asker eğitimi, 60'a çıkınca nöbet YÜKSELTME, 85'e çıkınca asker maaşını değiştirme emri de geri çevrilir. 85 üstünde Kral gerçekten çıkışsız kalabilir; bunu ona açıkça söyle ve maaşı o noktaya varmadan toparlamasını öner. Nöbeti İNDİRME emri her zaman kabul edilir.",
     "Dağlardan rastgele zamanlarda akın gelir: Kurt Sürüsü askeri öldürüp erzak kaçırır, Haydutlar hazineyi soyar, Dağ Akıncıları hepsini birden yapar. Dağ arazisinde akın daha sık ve daha ağırdır; koruma süresi boyunca hiç akın olmaz.",
     "Akını yalnızca NÖBETTEKİ asker, Sur seviyesi ve arazinin savunma avantajı karşılar. Savunma akının şiddetini aşarsa akın kayıpsız püskürtülür; aşamazsa yarılan pay kadar asker ölür, yiyecek ve altın yağmalanır, halkın rızası düşer. Maaşsız kalıp huzursuzlaşan asker iyi savunmaz.",
     "Nöbet oranı gerçek bir seçimdir: nöbete verdiğin asker akını karşılar ama halkın huzursuzluğunu bastırmaya daha az kalır, yani üretim ve iş bırakma riski artar. Az askerle iki işi birden yapamazsın; Krala bu bedeli açıkça söyle. Oranı set_watch_ratio ile ayarla, savunma gücünü KRALLIK_DURUMU içindeki defense alanından oku ve rakam uydurma.",
@@ -370,6 +377,34 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
 }
 
 /**
+ * HALKIN SESİ. Kralın zaten başlattığı turun promptuna bedava bir blok olarak
+ * biner: EK MODEL ÇAĞRISI YOKTUR. Kral konuşmazsa blok hiç yazılmaz.
+ *
+ * Channel hızı istemciden değil sunucudan okunur; süre şartı oyun saatiyle
+ * işlediği için istemci hızı şişirip halkın sesini anında açtırabilirdi.
+ */
+async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: number) {
+  const populace = body.kingdom?.populace;
+  if (!populace) return { lines: [] as string[], open: [] as OpenDemand[] };
+  const [row] = await getDb().select({ speed: channels.speed })
+    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
+    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
+  const { open } = await syncPopulaceDemands(userId, {
+    servedFood: Number(populace.servedFood ?? populace.foodRation) || 0,
+    livingCost: Number(populace.livingCost ?? 1) || 1,
+    taxRate: Number(body.kingdom?.taxRate ?? 0) || 0,
+    popularity: Number(populace.moodScore) || 0,
+    population: Number(body.kingdom?.population) || 0,
+    capacity: Number(populace.capacity) || 0,
+    soldierUnrest: Number(populace.soldierUnrest) || 0,
+    army: Number(populace.army) || 0,
+    buildings: body.kingdom?.buildings ?? [],
+    channelSpeed: row?.speed ?? (Number(body.kingdom?.channelSpeed) || 1),
+  }, now);
+  return { lines: renderPopulaceVoice(open, now), open };
+}
+
+/**
  * Açık müzakere masalarını sistem promptuna taşır.
  *
  * Sıra numaraları paylaşılan yükleyiciden gelir; Kralın arayüzünde gördüğü sıra
@@ -500,7 +535,10 @@ export async function POST(request: Request) {
     // `requests` alanı dolu gitsin diye modelden önce yüklenir.
     const now = Date.now();
     const memory = await loadGeneralMemory(user.id, body, now);
-    body.memoryLines = memory.lines;
+    // Halkın sesi Generalin taleplerinin YANINDA durur, yerine geçmez: biri
+    // komutanın kendi isteği, öbürü halkın ve kışlanın sesi.
+    const voice = await loadPopulaceVoice(user.id, body, now);
+    body.memoryLines = [...memory.lines, ...voice.lines];
     body.negotiationLines = await loadNegotiationLines(user.id);
 
     if (pending && confirmation.cancelled) {
@@ -509,7 +547,7 @@ export async function POST(request: Request) {
       await appendToLedger(user.id, ["heeded"], now);
       return json({
         connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.",
-        actions: [], requests: memory.open,
+        actions: [], requests: memory.open, populaceDemands: voice.open,
       });
     }
     if (pending) body.pendingDecision = { action: pending.action, reasons: pending.reasons, riskLevel: pending.riskLevel };
@@ -570,6 +608,8 @@ export async function POST(request: Request) {
       awaitingConfirmation: allNotes.some(note => note.startsWith("⏸")),
       // Arayüz General'in taleplerini bu alandan okur.
       requests: memory.open,
+      // HALK sekmesindeki "Halkın Sesi" bloğu bu alandan okur.
+      populaceDemands: voice.open,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
@@ -586,6 +626,7 @@ import { BUILDABLE_TYPES } from "../../../engine/catalog";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
 import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
+import { type OpenDemand, renderPopulaceVoice, syncPopulaceDemands } from "../../../server/populace-voice";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { decryptByok } from "../../../server/byok-crypto";

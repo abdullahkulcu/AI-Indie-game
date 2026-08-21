@@ -129,6 +129,23 @@ export function rates(g: Game): Res {
 }
 
 /**
+ * Bir saatte FİİLEN dağıtılabilen istihkak (%). Kâğıt üstündeki oran değil:
+ * boş bir ambarla %200 istihkak ilan etmek halkın karnını doyurmaz.
+ *
+ * `tick` bunu kendi içinde hesaplıyordu; halkın sesi (engine/populace-voice.ts)
+ * da aynı sayıyı okumak zorunda olduğu için dışarı verildi. Kural iki yerde
+ * ayrı yazılsaydı panel bir eşik, motor başka bir eşik görürdü.
+ */
+export function servedRations(g: Game, hours = 1) {
+  const gross = grossRates(g), demand = hourlyDemand(g), rations = rationsOf(g);
+  return {
+    food: rations.food * satisfaction(demand.food * hours, g.resources.food + gross.food * hours),
+    ale: rations.ale * satisfaction(demand.ale * hours, g.resources.ale + gross.ale * hours),
+    pay: rations.soldierPay * satisfaction(demand.gold * hours, g.resources.gold + gross.gold * hours),
+  };
+}
+
+/**
  * Kaynak üretimi, kuyruk tamamlanması ve nüfus/popülerliği `now` anına kadar
  * ilerletir. Saf fonksiyon: aynı girdi hep aynı çıktıyı verir, böylece istemci
  * ve sunucu aynı sonucu hesaplar.
@@ -140,7 +157,7 @@ export function tick(g: Game, now: number): Game {
   const hours = Math.min(24, (now - g.lastTickAt) / 3_600_000 * g.speed);
   if (hours <= 0) return g;
 
-  const gross = grossRates(g), demand = hourlyDemand(g), army = armySize(g.units ?? {});
+  const army = armySize(g.units ?? {});
   const rt = rates(g); let resources = { ...g.resources };
   resourceLabels.forEach(([key]) => { resources[key] = Math.max(0, resources[key] + rt[key] * hours); });
 
@@ -186,11 +203,7 @@ export function tick(g: Game, now: number): Game {
   // İstihkak fiilen ne kadar dağıtılabildi? Stok yetmezse kâğıt üstündeki oran
   // değil, dağıtılabilen oran mutluluğu belirler.
   const rations = rationsOf(g);
-  const served = {
-    food: rations.food * satisfaction(demand.food * hours, g.resources.food + gross.food * hours),
-    ale: rations.ale * satisfaction(demand.ale * hours, g.resources.ale + gross.ale * hours),
-    pay: rations.soldierPay * satisfaction(demand.gold * hours, g.resources.gold + gross.gold * hours),
-  };
+  const served = servedRations(g, hours);
 
   // --- Halkın defteri -----------------------------------------------------
   // Krallığın İKİNCİ defteri: halkın kendi stoğu. Fiyat buradan doğar ve

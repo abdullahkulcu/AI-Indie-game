@@ -1,6 +1,7 @@
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
+import { garrisonRefusal } from "./populace-voice";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, materialScaleOf, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
@@ -110,6 +111,12 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
   for (const action of actions.slice(0, MAX_ACTIONS_PER_TURN)) {
     overridden = action.arguments.confirmed_risk === true;
     const confirmed = overridden;
+    // GARNİZON VETOSU. Halkın direnişi pasiftir (emir gecikir), askerin aktif:
+    // emir HİÇ uygulanmaz ve Kralın teyidi bunu AŞMAZ — `confirmed` burada hiç
+    // sorulmaz, çünkü veto Kralın cesaretiyle değil kışlanın rızasıyla kalkar.
+    // Eşikler tek dosyadadır (engine/populace-voice.ts → GARRISON_VETOES).
+    const garrison = (order: Parameters<typeof garrisonRefusal>[0]) =>
+      garrisonRefusal(order, next.soldierUnrest ?? 0, armySize(next.units ?? {}));
 
     if (action.name === "build_structure") {
       if (next.queue) { blocked(`İnşa emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
@@ -174,6 +181,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     }
 
     if (action.name === "train_unit") {
+      const veto = garrison("train_unit");
+      if (veto) { blocked(veto); continue; }
       if (next.queue) { blocked(`Eğitim emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
       if (!next.buildings.some(b => b.type === "barracks")) { blocked("Eğitim engellendi: önce Kışla kurulmalı."); continue; }
       const unit = String(action.arguments.unit_type ?? ""), count = Math.floor(Number(action.arguments.count));
@@ -307,6 +316,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         success(`Bira istihkakı %${percent} olarak mühürlendi.`);
         continue;
       }
+      const payVeto = garrison("set_soldier_pay");
+      if (payVeto) { blocked(payVeto); continue; }
       if (percent < 60 && !confirmed) { blocked(`Asker maaşını %${percent}'e indirmek firara ve isyana yol açar; açık teyit bekliyorum.`); continue; }
       next = { ...next, soldierPay: percent, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
       success(`Asker maaşı %${percent} olarak mühürlendi.`);
@@ -318,6 +329,11 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       if (!Number.isFinite(requested) || requested < 0 || requested > 100) { blocked("Nöbet oranı %0 ile %100 arasında olmalı."); continue; }
       const percent = clampWatch(requested);
       if (percent === watchRatioOf(next)) { blocked(`Nöbet zaten %${percent}; emir kotası harcanmadı.`); continue; }
+      // Yalnızca YÜKSELTME reddedilir; indirme her zaman kabul edilir.
+      if (percent > watchRatioOf(next)) {
+        const watchVeto = garrison("raise_watch");
+        if (watchVeto) { blocked(watchVeto); continue; }
+      }
       if (next.quota < 1) { blocked("Nöbet emri uygulanmadı: emir kotası tükendi."); continue; }
       // İki uç da risklidir: düşük nöbet kaleyi akına açar, yüksek nöbet halkı
       // zapt edecek kuvvet bırakmaz. İkisi de Kralın açık teyidini bekler.

@@ -7,7 +7,8 @@ import AccountGate, { type Account } from "./AccountGate";
 import { applyActions, marketState } from "@/engine/actions";
 import { fillOrder, livingCostMood, type TradeKey } from "@/engine/market";
 import { catalog, resourceLabels, terrainCatalog } from "@/engine/catalog";
-import { affordable, buildOptions, keep, materialScaleOf, rates, tick } from "@/engine/tick";
+import { affordable, buildOptions, keep, materialScaleOf, rates, servedRations, tick } from "@/engine/tick";
+import { garrisonMood, garrisonVetoes } from "@/engine/populace-voice";
 import { generalNameFor } from "@/engine/general-name";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
@@ -19,6 +20,9 @@ type Building=EngineBuilding;
 type Tab="meclis"|"binalar"|"halk"|"ordu"|"defter"|"diyar"; type Setup="welcome"|"channel"|"kingdom"|"general";
 type GeneralAction=GameAction;
 type GeneralRequest={id:string;kind:string;text:string;severity:"normal"|"urgent";since:number};
+// Halkın sesi sunucudan gelir: süre şartının defteri (koşul kaç oyun saatidir
+// sürüyor) sunucudadır, çünkü Kral kendi halkının talebini silememeli.
+type PopulaceDemand={kind:string;voice:"commons"|"garrison";text:string;severity:"normal"|"urgent";since:number};
 type Channel={id:string;name:string;detail:string;speed:number;remaining:string;players?:number;maxPlayers?:number;durationDays?:number};
 type IntelReport={id:string;name:string;ruler:string;terrain:string;keepLevel:number;population:number;buildingCount:number;army:number;resources:Record<string,number>};
 type WorldKingdom={id:string;name:string|null;terrain:string;position:{x:number;z:number};ring:number;discovered:boolean;mission:{status:"pending"|"succeeded"|"failed"|"detected";completesAt:number;successChance:number}|null;report:IntelReport|null};
@@ -41,7 +45,7 @@ const left=(at:number,now:number)=>{const s=Math.max(0,Math.ceil((at-now)/1000))
 
 export default function KingdomGame(){
  const[ready,setReady]=useState(false),[account,setAccount]=useState<Account|null|undefined>(undefined),[setup,setSetup]=useState<Setup>("welcome"),[availableChannels,setAvailableChannels]=useState<Channel[]>(fallbackChannels),[selected,setSelected]=useState<Channel>(fallbackChannels[2]);const[name,setName]=useState(""),[ruler,setRuler]=useState(""),[terrain,setTerrain]=useState<TerrainId>("plain"),[provider,setProvider]=useState<keyof typeof modelOptions>("openai"),[model,setModel]=useState("gpt-5.6-terra"),[apiKey,setApiKey]=useState("");
- const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
+ const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<Array<{who:string;text:string}>>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[populaceDemands,setPopulaceDemands]=useState<PopulaceDemand[]>([]),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null);
  const lastCloudSave=useRef(0),saving=useRef(false),revision=useRef<number|null>(null),worldRefresh=useRef<(()=>void)|null>(null),negotiationRefresh=useRef<(()=>void)|null>(null),lastEnvoySeen=useRef<number|null>(null),chatEnd=useRef<HTMLDivElement|null>(null);
  // Yeni mesaj gelince sohbet dibe kaysın; uzun konuşmada son söz görünmez kalıyordu.
  useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:"smooth",block:"end"})},[chat,connecting]);
@@ -119,14 +123,19 @@ export default function KingdomGame(){
   const gMood=moodState(g.popularity,suppression(armySize(g.units),g.population,g.soldierUnrest??0));
   const nufus={mevcut:Math.round(g.population),kapasite:g.capacity,bosKonut:Math.floor(g.capacity-g.population),gunlukDegisim:Math.round(populationChange(gMood,g.population,g.capacity,g.buildings,24)),kurulustanBeriYerlesen:Math.round(g.peopleJoined??0),kurulustanBeriGocEden:Math.round(g.peopleLeft??0),madende:Math.round(g.mineWorkers??0),silahAltinda:armySize(g.units),halkinDurumu:gMood.label};
   const pazar=marketState(g,Date.now());
-  return{name:g.kingdomName,ruler:g.rulerName,generalName:generalNameFor(g.kingdomName,g.foundedAt),pazar:{seviye:pazar.level,gunlukHacim:pazar.limit,kalanHacim:pazar.left,satisFiyatlari:pazar.price,alisCarpani:pazar.spread},terrain:terrainCatalog[g.terrain]??terrainCatalog.plain,keepLevel:level,population:g.population,nufus,popularity:g.popularity,loyalty:g.loyalty,quota:g.quota,strategyNote:g.strategyNote??"Ekonomiyi dengede tut ve halkı aç bırakma.",resources:g.resources,hourlyRates:rates(g),buildings:g.buildings.map(b=>({name:b.name,level:b.level})),units:g.units,channelSpeed:g.speed,channelId:g.channelId??availableChannels.find(channel=>channel.name===g.channel)?.id,activeConstruction:g.queue?{name:g.queue.name,secondsRemaining:Math.max(0,Math.ceil((g.queue.completesAt-Date.now())/1000))}:null,buildTimes,
+  return{name:g.kingdomName,ruler:g.rulerName,generalName:generalNameFor(g.kingdomName,g.foundedAt),pazar:{seviye:pazar.level,gunlukHacim:pazar.limit,kalanHacim:pazar.left,satisFiyatlari:pazar.price,alisCarpani:pazar.spread},terrain:terrainCatalog[g.terrain]??terrainCatalog.plain,keepLevel:level,population:g.population,nufus,popularity:g.popularity,loyalty:g.loyalty,quota:g.quota,strategyNote:g.strategyNote??"Ekonomiyi dengede tut ve halkı aç bırakma.",taxRate:g.taxRate,resources:g.resources,hourlyRates:rates(g),buildings:g.buildings.map(b=>({type:b.type,name:b.name,level:b.level})),units:g.units,channelSpeed:g.speed,channelId:g.channelId??availableChannels.find(channel=>channel.name===g.channel)?.id,activeConstruction:g.queue?{name:g.queue.name,secondsRemaining:Math.max(0,Math.ceil((g.queue.completesAt-Date.now())/1000))}:null,buildTimes,
    // Maden, komşular ve nöbet durumu olmadan General bu alanlarda körlemesine karar verir.
    mine:sharedMine?{workers:sharedMine.participants.find(p=>p.self)?.workers??0,totalWorkers:sharedMine.mine.totalWorkers,oreRemaining:sharedMine.mine.oreRemaining}:null,
    neighbors:otherKingdoms.map((kingdom,index)=>({ordinal:index+1,name:kingdom.discovered&&kingdom.name?kingdom.name:"Bilinmeyen Sancak",discovered:kingdom.discovered,scouting:kingdom.mission?.status==="pending"})),
    counterIntelligence:{active:worldDefense.active,minutesRemaining:worldDefense.activeUntil?Math.max(0,Math.ceil((worldDefense.activeUntil-Date.now())/60_000)):0},
    protectionHoursLeft:Math.max(0,(g.protectionEndsAt-Date.now())/3_600_000),
    populace:(()=>{const r=rationsOf(g),army=armySize(g.units),state=moodState(g.popularity,suppression(army,g.population,g.soldierUnrest??0));
-    return{mood:state.label,moodScore:Math.round(g.popularity),productionMultiplier:state.production,foodRation:r.food,aleRation:r.ale,soldierPay:r.soldierPay,army,soldierUnrest:Math.round(g.soldierUnrest??0),dailyFoodNeed:Math.round(g.population*NEED.food*24)}})(),
+    // Halkın sesi (engine/populace-voice.ts) fiilen dağıtılan istihkakı ve geçim
+    // endeksini okur; ikisi de motordan gelir, burada yeniden hesaplanmaz.
+    const served=servedRations(g),garrison=garrisonMood(g.soldierUnrest??0,army);
+    return{mood:state.label,moodScore:Math.round(g.popularity),productionMultiplier:state.production,foodRation:r.food,aleRation:r.ale,soldierPay:r.soldierPay,army,soldierUnrest:Math.round(g.soldierUnrest??0),dailyFoodNeed:Math.round(g.population*NEED.food*24),
+     servedFood:Math.round(served.food),livingCost:pazar.livingCost,capacity:g.capacity,
+     garrison:{label:garrison.label,note:garrison.note,vetoes:garrisonVetoes(g.soldierUnrest??0,army)}}})(),
    defense:(()=>{const d=defenseOf(g);
     return{watchRatio:d.watch,watchers:d.watchers,wallLevel:d.wall,power:Math.round(d.power*10)/10,terrainDefense:terrainCatalog[g.terrain]?.defense??1,
      raidsRepelled:g.raidsRepelled??0,raidsSuffered:g.raidsSuffered??0,
@@ -162,7 +171,7 @@ async function openNegotiation(){
  }
 
  async function mineAction(action:"join"|"leave"){if(!game?.channelId||worldBusy)return;const minersToSend=Math.max(1,Math.min(sharedMine?.personalCap??3,Math.round(game.population*.1)));setWorldBusy(true);try{const response=await fetch("/api/mine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,channelId:game.channelId,workers:minersToSend})});const data=await response.json() as {error?:string;workers?:number};if(!response.ok)throw new Error(data.error||"Maden emri uygulanamadı.");setGame(current=>current?{...current,mineWorkers:data.workers??0}:current);setToast(action==="join"?`Ortak madene ${data.workers??minersToSend} işçi gönderildi; o eller tarladan eksildi.`:"İşçiler ortak madenden çekildi, tarlaya döndüler.");const mineResponse=await fetch(`/api/mine?channelId=${encodeURIComponent(game.channelId)}`,{cache:"no-store"});if(mineResponse.ok)setSharedMine(await mineResponse.json() as SharedMine)}catch(error){setToast(error instanceof Error?error.message:"Maden emri uygulanamadı.")}finally{setWorldBusy(false)}}
- async function askGeneral(mode:"test"|"chat",text?:string){const history=chat.slice(-8).map(item=>({role:item.who===(game?.rulerName||ruler.trim())?"king":"general",text:item.text}));const response=await fetch("/api/general",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({provider,model,...(apiKey?{apiKey}:{}),mode,message:text,history,kingdom:kingdomContext(game)})});const data=await response.json() as {text?:string;actions?:GeneralAction[];error?:string;requests?:GeneralRequest[]};if(!response.ok)throw new Error(data.error||"General bağlantısı başarısız oldu.");setGeneralRequests(data.requests??[]);return{text:data.text||"General bağlantısı doğrulandı.",actions:data.actions??[]}}
+ async function askGeneral(mode:"test"|"chat",text?:string){const history=chat.slice(-8).map(item=>({role:item.who===(game?.rulerName||ruler.trim())?"king":"general",text:item.text}));const response=await fetch("/api/general",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({provider,model,...(apiKey?{apiKey}:{}),mode,message:text,history,kingdom:kingdomContext(game)})});const data=await response.json() as {text?:string;actions?:GeneralAction[];error?:string;requests?:GeneralRequest[];populaceDemands?:PopulaceDemand[]};if(!response.ok)throw new Error(data.error||"General bağlantısı başarısız oldu.");setGeneralRequests(data.requests??[]);setPopulaceDemands(data.populaceDemands??[]);return{text:data.text||"General bağlantısı doğrulandı.",actions:data.actions??[]}}
  async function persistByok(){const response=await fetch("/api/byok",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({provider,model,apiKey})});const data=await response.json() as {error?:string};if(!response.ok)throw new Error(data.error||"BYOK bağlantısı kaydedilemedi.");setStoredByok(true);setReplaceByok(false);setApiKey("")}
  async function connectAndFound(){if(!apiKey.trim())return setGeneralError("API anahtarını girmelisiniz.");setConnecting(true);setGeneralError("");try{const intro=await askGeneral("test");await persistByok();found(true,intro.text)}catch(error){setGeneralError(error instanceof Error?error.message:"Bağlantı kurulamadı.")}finally{setConnecting(false)}}
  async function reconnectGeneral(){if(!game||(!apiKey.trim()&&!storedByok))return setGeneralError("API anahtarını girmelisiniz.");setConnecting(true);setGeneralError("");try{const intro=await askGeneral("test");if(apiKey.trim())await persistByok();setGame({...game,provider,model,generalConnected:true});setChat(x=>[...x,{who:generalName,text:intro.text}]);setShowConnect(false);setToast("General bağlantısı hesaba şifreli olarak kaydedildi.")}catch(error){setGeneralError(error instanceof Error?error.message:"Bağlantı kurulamadı.")}finally{setConnecting(false)}}
@@ -372,6 +381,21 @@ async function openNegotiation(){
    <div className="section-head"><span>HALKIN DURUMU · RAPOR</span><b className={`mood ${mood.id}`}>{mood.label}</b></div>
    <div className="general-only-note"><b>Ferman senin, uygulama Generalin</b><span>Vergi ve istihkakları doğrudan çevirirsin; General uygulamaz ama her değişiklikte görüşünü söyler. Asker maaşı ve yapılar emirle yürür.</span></div>
 
+   {/* HALKIN SESİ — var olan bir cezanın okunması, yeni bir ceza değil.
+       Talepler sunucudan gelir (süre şartının defteri orada); Kral General'le
+       konuştukça tazelenir. Halka emir verilmez: kapatmanın tek yolu yönetimdir. */}
+   <div className="populace-voice">
+    <div className="section-head"><span>HALKIN SESİ</span><b>{populaceDemands.length?`${populaceDemands.length} açık talep`:"Sessiz"}</b></div>
+    {populaceDemands.length
+      ? <>{populaceDemands.map(demand=><article key={demand.kind} className={`voice-row ${demand.severity} ${demand.voice}`}>
+          <span>{demand.voice==="garrison"?"KIŞLA":"HALK"}</span>
+          <div><b>{demand.text}</b><small>{(()=>{const hours=Math.floor((now-demand.since)/3_600_000);return hours<1?"Az önce dile geldi.":hours<24?`${hours} saattir bekliyorlar.`:`${Math.floor(hours/24)} gündür bekliyorlar.`})()}</small></div>
+          {demand.severity==="urgent"&&<em>ACİL</em>}
+        </article>)}
+        <p className="mood-explain-note">Bu talepler bir dilekçe süreci değil: ceza ya da bastırma aracı yoktur. Kapanmalarının tek yolu istihkak, vergi, fiyat, konut ve şenlik kararlarıdır.</p></>
+      : <p className="mood-explain-note">Halkın Kraldan açık bir isteği yok. Talep ancak bir eşik saatlerce aşılı kalırsa açılır; anlık dalgalanma masaya gelmez.</p>}
+   </div>
+
    <div className="mood-explain">
     <div><span>Üretim çarpanı</span><b>×{mood.production.toFixed(2)}</b></div>
     <div><span>Nüfus</span><b>{Math.round(game.population)} / {game.capacity}</b></div>
@@ -457,7 +481,25 @@ async function openNegotiation(){
  {tab==="ordu"&&<div className="army-panel"><div className="section-head"><span>GARNİZON · RAPOR</span><b>{game.units.spearman??0} asker</b></div><div className="general-only-note"><b>Orduyu General yönetir</b><span>Kaç asker istediğini veya savunma hedefini söyle. General nüfus ve yiyecek riski varsa itiraz eder.</span></div><div className="empty-army"><span>⚔</span><h3>{game.buildings.some(b=>b.type==="barracks")?"Kışla Generalin emrini bekliyor":"Henüz Kışlanız yok"}</h3><p>{game.buildings.some(b=>b.type==="barracks")?"Mızrakçı başına: 8 altın · 10 yiyecek · 1 demir":"Kışla kurulması için General'e stratejik gerekçeni ilet."}</p></div><div className="unit-row"><span>Mızrakçı</span><b>{game.units.spearman??0}</b><small>Savunma 16 · Hız 6</small></div>
   {(()=>{const d=defenseOf(game),watch=watchRatioOf(game),raids=game.notices.filter(n=>n.kind==="AKIN").slice(0,3);
    const step=(delta:number)=>Math.max(0,Math.min(100,watch+delta));
-   return <><div className="watch-block">
+   // GARNİZON DURUMU. Eşikler tek dosyadadır (engine/populace-voice.ts); panel,
+   // motor ve Generalin promptu aynı listeyi okur, kopya yoktur.
+   const unrestNow=game.soldierUnrest??0,garrison=garrisonMood(unrestNow,d.army),vetoes=garrisonVetoes(unrestNow,d.army);
+   const vetoLabel:Record<string,string>={train_unit:"Yeni asker eğitimi",raise_watch:"Nöbeti YÜKSELTME",set_soldier_pay:"Asker maaşını değiştirme"};
+   return <><div className={`garrison-block ${garrison.id}`}>
+    <div className="section-head"><span>GARNİZON DURUMU</span><b>{garrison.label}</b></div>
+    <div className="garrison-gauge"><i style={{width:`${Math.min(100,Math.round(unrestNow))}%`}}/></div>
+    <small>Huzursuzluk {Math.round(unrestNow)} · {garrison.note}</small>
+    {d.army>0&&<div className="garrison-vetoes">
+     {(["train_unit","raise_watch","set_soldier_pay"] as const).map(order=>
+      <div key={order} className={vetoes.includes(order)?"refused":"allowed"}>
+       <b>{vetoLabel[order]}</b><span>{vetoes.includes(order)?"REDDEDİLİR":"yürür"}</span>
+      </div>)}
+    </div>}
+    {vetoes.includes("set_soldier_pay")
+      ? <p className="garrison-warning">Ordu isyan hâlinde: maaş defterine de el sürmüyorlar. Bu kilidin dışarıdan bir çıkışı yok — huzursuzluk kendiliğinden düşene kadar kışla emir almaz.</p>
+      : <p className="garrison-warning quiet">Askerin vetosu Kralın teyidiyle aşılmaz; kışla ancak maaşı düzelirse ikna olur. Nöbeti İNDİRME emri her koşulda kabul edilir.</p>}
+   </div>
+   <div className="watch-block">
     <div className="watch-head"><b>Nöbet oranı</b><strong>%{watch}</strong></div>
     <div className="ration-bar"><i style={{width:`${watch}%`}}/></div>
     <small>{d.watchers} asker nöbette · savunma gücü {Math.round(d.power)}{d.wall?` · Sur Sv.${d.wall}`:" · Sur yok"}</small>

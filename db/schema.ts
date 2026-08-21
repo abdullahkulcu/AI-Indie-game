@@ -176,6 +176,30 @@ export const generalRequests = pgTable("general_requests", {
   raisedAt: bigint("raised_at", { mode: "number" }).notNull(),
 }, (table) => [primaryKey({ columns: [table.userId, table.kind] })]);
 
+/**
+ * HALKIN SESİ — halkın ve garnizonun Kral'dan açık talepleri.
+ *
+ * `general_requests` tablosunun birebir kardeşi ve aynı sebeple ayrı tabloda:
+ * oyun kaydı istemcide hesaplanıyor, Kral kendi halkının taleplerini
+ * silebilseydi mekaniğin anlamı kalmazdı. Yazma yetkisi yalnızca sunucudadır.
+ *
+ * İki zaman damgası ayrı tutulur:
+ *   · `seenAt`  — koşul ilk görüldüğü an. Süre şartı buradan sayılır, yani
+ *                 anlık dalgalanma talep açmaz.
+ *   · `openedAt`— talep fiilen açıldığı an; "kaç gündür istiyoruz" bundan okunur.
+ * Koşul düzelince satır silinir ve süre baştan sayılır.
+ */
+export const populaceDemands = pgTable("populace_demands", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  voice: text("voice", { enum: ["commons", "garrison"] }).notNull().default("commons"),
+  text: text("text").notNull(),
+  severity: text("severity", { enum: ["normal", "urgent"] }).notNull().default("normal"),
+  seenAt: bigint("seen_at", { mode: "number" }).notNull(),
+  openedAt: bigint("opened_at", { mode: "number" }),
+  lastNoticeAt: bigint("last_notice_at", { mode: "number" }),
+}, (table) => [primaryKey({ columns: [table.userId, table.kind] })]);
+
 // Sabit pencereli hız sınırı sayaçları; tek upsert deyimiyle atomik artar.
 export const rateLimits = pgTable("rate_limits", {
   bucket: text("bucket").primaryKey(),
