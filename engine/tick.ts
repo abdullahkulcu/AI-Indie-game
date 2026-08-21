@@ -1,7 +1,7 @@
 export { materialScaleOf } from "./catalog";
 import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
-import { armySize, approachMood, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { armySize, approachMood, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import { applySpoilage, storageCaps } from "./storage";
 import type { Game, Key, Res } from "./types";
@@ -212,12 +212,13 @@ export function tick(g: Game, now: number): Game {
   const commonsNow = commonsOf(g);
   const commonsRef = commonsReference(g.population);
 
-  const target = moodTarget({
+  const moodInput = {
     servedFood: served.food, servedAle: served.ale, taxRate: g.taxRate,
     population: g.population, capacity, buildings,
     hoursSinceRaid: g.lastRaidAt ? (now - g.lastRaidAt) / 3_600_000 : null,
     livingMood: livingCostMood(livingCost(commonsNow, commonsRef)),
-  });
+  };
+  const target = moodTarget(moodInput);
   // Yağmalanan krallıkta halkın rızası da düşer.
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
 
@@ -278,7 +279,17 @@ export function tick(g: Game, now: number): Game {
   if (drift <= -LEDGER_STEP) {
     const gone = Math.floor(-drift);
     left += gone; drift += gone;
-    notices = [{ kind: "GÖÇ", text: `${gone} kişi krallığı terk etti; geriye ${Math.round(settled)} kişi kaldı.`, at: now }, ...notices].slice(0, 20);
+    // Göçün SEBEBİ: yeni hesap yok, rıza hedefinin zaten ürettiği eksi
+    // kalemlerin en ağırı gerekçe olarak yazılır. Kral neyi düzelteceğini
+    // bilmeden nüfusunun eridiğini görüyordu.
+    const grievance = heaviestGrievance(moodInput);
+    notices = [{
+      kind: "GÖÇ",
+      text: grievance
+        ? `${gone} kişi krallığı terk etti; ${grievance.label} gerekçe gösterdiler. Geriye ${Math.round(settled)} kişi kaldı.`
+        : `${gone} kişi krallığı terk etti; geriye ${Math.round(settled)} kişi kaldı.`,
+      at: now,
+    }, ...notices].slice(0, 20);
   } else if (drift >= LEDGER_STEP) {
     const came = Math.floor(drift);
     joined += came; drift -= came;

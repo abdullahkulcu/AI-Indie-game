@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { NEED, hourlyDemand, moodState, moodTarget, rationsOf, soldierUnrestAfter, suppression , populationChange } from "../engine/populace";
+import { NEED, heaviestGrievance, hourlyDemand, moodParts, moodState, moodTarget, rationsOf, soldierUnrestAfter, suppression , populationChange } from "../engine/populace";
 import { grossRates, rates, tick } from "../engine/tick";
 import type { Game } from "../engine/types";
 
@@ -191,4 +191,59 @@ test("evlilik dairesi ve meydan büyümeyi hızlandırır, kaybı etkilemez", ()
   const halls = [{ type: "marriage_hall", level: 2 }, { type: "town_square", level: 1 }];
   assert.ok(populationChange(content, 100, 300, halls, 1) > populationChange(content, 100, 300, [], 1));
   assert.equal(populationChange(revolt, 100, 300, halls, 1), populationChange(revolt, 100, 300, [], 1));
+});
+
+// --- Göçün sebebi ---------------------------------------------------------
+
+/** Rıza hedefinin nötr girdisi: hiçbir kalem eksi değil. */
+const neutralMood = () => ({
+  servedFood: 100, servedAle: 0, taxRate: 15,
+  population: 100, capacity: 300, buildings: [] as Array<{ type: string; level: number }>,
+  hoursSinceRaid: null as number | null, livingMood: 0,
+});
+
+test("kalemlere ayırma rıza hedefini değiştirmez", () => {
+  // moodParts toplama sırasını korumak zorunda; kıl payı sapma eski kayıtların
+  // rızasını kaydırırdı.
+  const cases = [
+    neutralMood(),
+    { ...neutralMood(), servedFood: 55, taxRate: 34, livingMood: -9, hoursSinceRaid: 2, population: 290 },
+    { ...neutralMood(), servedFood: 180, servedAle: 140, buildings: [{ type: "theater", level: 2 }, { type: "park", level: 4 }] },
+  ];
+  for (const input of cases) {
+    const parts = moodParts(input);
+    const sum = 50 + parts.food + parts.ale + parts.tax + parts.living
+      + parts.amenities.reduce((total, value) => total + value, 0) + parts.raid + parts.crowding;
+    assert.equal(moodTarget(input), Math.max(0, Math.min(100, sum)));
+  }
+});
+
+test("hiçbir kalem eksi değilse gerekçe uydurulmaz", () => {
+  assert.equal(heaviestGrievance(neutralMood()), null);
+});
+
+test("en ağır kalem gerekçe olarak seçilir", () => {
+  // Yarım istihkak (−55'e yakın) vergiden (−17,1) ve akından (−14) ağırdır.
+  assert.equal(heaviestGrievance({ ...neutralMood(), servedFood: 50, taxRate: 34, hoursSinceRaid: 0 })?.key, "food");
+  // İstihkak tamken en ağır kalem vergidir.
+  assert.equal(heaviestGrievance({ ...neutralMood(), taxRate: 45 })?.key, "tax");
+  // Pahalı ekmek verginin önüne geçebilir.
+  assert.equal(heaviestGrievance({ ...neutralMood(), taxRate: 20, livingMood: -12 })?.key, "living");
+  // Kapasitenin tavanına dayanan krallıkta kalabalıklık öne çıkar.
+  assert.equal(heaviestGrievance({ ...neutralMood(), population: 300, capacity: 300 })?.key, "crowding");
+  // Taze akın başka hiçbir kalem eksi değilken gerekçedir.
+  assert.equal(heaviestGrievance({ ...neutralMood(), hoursSinceRaid: 0 })?.key, "raid");
+});
+
+test("GÖÇ bildirimi gerekçeyi tek cümlede taşır", () => {
+  // Aç, kalabalık ve isyan hâlindeki krallık: nüfus erir ve defterde sebep yazılı olur.
+  const game = newGame({
+    population: 300, capacity: 300, popularity: 5, foodRation: 0,
+    resources: { gold: 5000, food: 0, stone: 1000, wood: 1000, iron: 500, ale: 0 },
+  });
+  const after = tick(game, T0 + 6 * 3_600_000);
+  const notice = after.notices.find(item => item.kind === "GÖÇ");
+  assert.ok(notice, "göç bildirimi yazılmalı");
+  assert.match(notice.text, /gerekçe gösterdiler/);
+  assert.match(notice.text, /ambarın yarım payını|konutların kalabalığını|pazarda pahalanan ekmeği|verginin ağırlığını/);
 });
