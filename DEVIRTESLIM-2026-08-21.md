@@ -1,10 +1,40 @@
 # Devir-Teslim — 2026-08-21 (limit nedeniyle durduruldu)
 
 Bu belge, kullanıcının "limitimin sonuna geldim, her şeyi durdur" talebi üzerine
-oturumun tam olduğu noktada bırakıldı. Bir sonraki oturum bu belgeyi okuyup
-kaldığı yerden devam etmeli. **Hiçbir commit/push yapılmadı** — tüm değişiklikler
-`claude/game-md-review-oacjpd` branch'inde `git add` ile stage edilmiş durumda,
-ama commit edilmedi.
+oturumun tam olduğu noktada bırakıldı. **GÜNCELLEME:** stop-hook commit/push
+şart koştuğu için, çözülmüş merge SONRADAN commit'lendi ve push'landı —
+`claude/game-md-review-oacjpd` dalında `c14aa38` commit'i olarak GitHub'da
+duruyor. Yani bir sonraki oturumun yapması gereken artık "merge'i tamamla"
+değil, aşağıdaki **tek bilinen hatayı düzelt ve doğrula** işi.
+
+## TÜM AÇIK/YARIM SÜREÇLERİN DÖKÜMÜ (bu bölüm bir sonraki oturuma "hiçbir şey
+## unutulmadı" güvencesi vermek için 2026-08-21'de ikinci kez teyit edildi)
+
+Aşağıdaki liste `git log`, `git branch -a`, `git worktree list`,
+`npx tsc --noEmit` ve çalışan ajan kontrolü (`ListAgents` → "No reachable
+agents") ile TEK TEK doğrulandı:
+
+| Süreç | Durum | Kanıt |
+|---|---|---|
+| Akıllı halk Faz 0-5, 7-9 | ✅ TAMAM, commit'te (`c14aa38`) | `git log` |
+| Akıllı halk Faz 6 (göçün çok krallığa dağılması) | 🔴 BACKLOG, hiç başlanmadı | worktree agent bilinçli olarak burada durduruldu |
+| `server/save-validation.ts` merge (en kritik) | ✅ TAMAM | Faz 0 korumaları + yeni SERVER_DERIVED alanları birlikte |
+| Değirmen (mill) + ortak maden düzeltmesi | ✅ TAMAM, önceden merge edilmiş | commit `7f9cce9`, bu oturumdan ÖNCE tamamlanmış |
+| "Kuruluşta bina dikemiyorum" (kaynak/channel hızı) sorunu | ✅ TAMAM, önceden merge edilmiş | commit `4809f95` — "Başlangıç kaynaklarını channel hızıyla ölçekle" |
+| `fix/p0-server-validation` dalının main'e alınması | ✅ TAMAM | `git merge-base --is-ancestor` → "YES fully merged" |
+| `tests/agitation.test.ts` bozuk import | 🔴 HATA, hâlâ mevcut | `npx tsc --noEmit` tekrar çalıştırıldı, AYNI hata çıktı (bkz. aşağı) |
+| `npm test` / `npm run lint` | ⚪ HİÇ ÇALIŞTIRILMADI | tsc hatası düzelmeden anlamlı olmaz |
+| Çalışan arka plan ajanı | ✅ YOK | `ListAgents` → "No reachable agents" |
+| İki plan artifact'ı (Akıllı Halk planı, Genel Durum/Backlog) | 🟡 GÜNCELLENMEDİ | Faz durumlarını yansıtmıyor, linkler aşağıda |
+| Docker "fetch failed" hata teşhisi | 🟡 YARIM KALDI | doğrulama komutu kullanıcıya hiç verilmedi, aşağıda detay |
+| İki eski worktree dizini diskte duruyor (`a21d818da1e3a8909`, `a5eca097e7e31ac7c`) | 🟢 ZARARSIZ ama temizlik gerekir | ikisi de zaten commit tarihine karışmış, sadece `git worktree remove` ile temizlenebilir |
+| `origin/claude/kingdom-game-mvp-vkw39a` uzak dalı | ⚪ İLGİSİZ, eski | 2026-08-16 tarihli, main'in atası DEĞİL — ilk MVP denemesi, terk edilmiş, güvenle silinebilir |
+| `origin/claude/mvp-multiplayer-strategy-game-bvnn9i` uzak dalı | ⚪ İLGİSİZ, eski | main'in atası, zaten tarihe karışmış, aktif iş değil |
+
+Sonuç: **Tek gerçek açık iş kalemi** `tests/agitation.test.ts`'teki bozuk
+import + ardından test/lint doğrulaması. Faz 6 ise bilinçli backlog (yeni
+görev, hata değil). Diğer her şey ya tamam ya da düşük öncelikli/bilgi
+amaçlı.
 
 ## Bağlam
 
@@ -88,6 +118,10 @@ ediyordur — dosyayı açıp bak).
 
 ## Sıradaki oturumun yapması gerekenler (sırasıyla)
 
+> NOT: Merge zaten commit'lendi ve push'landı (`c14aa38`,
+> `claude/game-md-review-oacjpd`). Aşağıdaki adımlar bir DÜZELTME COMMIT'İ
+> için, merge'i tamamlamak için DEĞİL.
+
 1. `tests/agitation.test.ts` içindeki `../server/game/diplomacy` import'unu
    `../engine/diplomacy` olarak düzelt (satır 16 civarı).
 2. `npx tsc --noEmit` tekrar çalıştır, temiz geçtiğini doğrula.
@@ -98,13 +132,17 @@ ediyordur — dosyayı açıp bak).
 4. `npm run lint` çalıştır (eslint), `engine/` saflığı kuralının (Math.random/
    Date.now yasağı) yeni dosyalarda (`engine/agitation.ts`, `engine/faction.ts`,
    `engine/populace-voice.ts`) ihlal edilmediğini doğrula.
-5. Her şey temizse: `git commit` (merge commit, iki ebeveynli — `git status`
-   zaten merge state'inde, `MERGE_HEAD` var mı kontrol et; yoksa normal commit
-   at) → `git push -u origin claude/game-md-review-oacjpd`.
+5. Her şey temizse: küçük bir düzeltme commit'i at (`git commit` — bu artık
+   normal bir commit, merge değil, MERGE_HEAD zaten temizlendi) →
+   `git push origin claude/game-md-review-oacjpd`.
 6. Kullanıcıya "toplam dosya" / konsolide durum raporunu ver: Faz 0-5,7-9
    tamamlandı, Faz 6 (göçün çok krallığa dağılması) backlog'da kaldı.
 7. İki plan artifact'ını güncelle (aşağıdaki linkler) — Faz durumlarını
    yansıtacak şekilde.
+8. (Düşük öncelik, temizlik) `git worktree remove` ile
+   `.claude/worktrees/agent-a21d818da1e3a8909` ve
+   `.claude/worktrees/agent-a5eca097e7e31ac7c` dizinlerini temizle — ikisi de
+   zaten tam olarak commit geçmişine karıştı, üzerlerinde iş kalmadı.
 
 ## Referans artifact'lar (bu oturumda güncellenmedi)
 
