@@ -49,6 +49,12 @@ export const channelMembers = pgTable("channel_members", {
   status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
   /** Kral müzakereye kapalıysa kimse masa açamaz; kendi BYOK kredisini korur. */
   acceptsNegotiation: boolean("accepts_negotiation").notNull().default(true),
+  /**
+   * Kral dış keseye ve haydut yönlendirmesine kapalıysa hiçbir komşu ona
+   * propaganda gönderemez. `acceptsNegotiation`'ın ikizi: taciz aracına
+   * dönüşmesine karşı ilk savunma hattı.
+   */
+  acceptsAgitation: boolean("accepts_agitation").notNull().default(true),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   primaryKey({ columns: [table.userId, table.channelId] }),
@@ -199,6 +205,39 @@ export const populaceDemands = pgTable("populace_demands", {
   openedAt: bigint("opened_at", { mode: "number" }),
   lastNoticeAt: bigint("last_notice_at", { mode: "number" }),
 }, (table) => [primaryKey({ columns: [table.userId, table.kind] })]);
+
+/**
+ * DIŞ PROPAGANDA görev satırı — kese ve haydut yönlendirmesi.
+ *
+ * `intel_missions` tablosuna EKLENMEDİ, çünkü semantiği başka: ajan bilgi
+ * getirir ve zarla başarır/başarısız olur; kese gerçek para harcar, etkisi
+ * kesindir ve yalnızca ifşası iki kademelidir.
+ *
+ * `pair_window` çift bekleme kuralını VERİTABANI SEVİYESİNDE tutar: aynı çifte
+ * aynı pencerede ikinci satır yazılamaz (kısmi UNIQUE index). Uygulama katmanı
+ * yarışırsa ikinci istek veritabanından reddedilir, sayaç ezilmez.
+ */
+export const agitations = pgTable("agitations", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  sourceUserId: text("source_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetUserId: text("target_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: ["gold_commons", "gold_garrison", "goods_glut", "raid_lure"] }).notNull(),
+  status: text("status", { enum: ["pending", "settled", "exposed"] }).notNull().default("pending"),
+  /** Ödenen bedel; defter için tutulur, etkiyi belirlemez (fiyat sabittir). */
+  cost: integer("cost").notNull(),
+  costResource: text("cost_resource").notNull().default("gold"),
+  sentAt: bigint("sent_at", { mode: "number" }).notNull(),
+  completesAt: bigint("completes_at", { mode: "number" }).notNull(),
+  /** Çift bekleme penceresinin indeksi (bkz. engine/agitation.ts). */
+  pairWindow: bigint("pair_window", { mode: "number" }).notNull(),
+  settledAt: bigint("settled_at", { mode: "number" }),
+}, (table) => [
+  uniqueIndex("idx_agitations_pair_window").on(table.sourceUserId, table.targetUserId, table.pairWindow),
+  index("idx_agitations_pending").on(table.status, table.completesAt),
+  index("idx_agitations_source").on(table.sourceUserId, table.sentAt),
+  index("idx_agitations_target").on(table.targetUserId, table.sentAt),
+]);
 
 // Sabit pencereli hız sınırı sayaçları; tek upsert deyimiyle atomik artar.
 export const rateLimits = pgTable("rate_limits", {

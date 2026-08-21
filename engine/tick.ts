@@ -1,5 +1,6 @@
 export { materialScaleOf } from "./catalog";
 import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
+import { agitationEffect, feltUnrest } from "./agitation";
 import { advanceFaction, factionNotice, factionPressureOf } from "./faction";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
@@ -115,7 +116,15 @@ export function rates(g: Game): Res {
   const demand = hourlyDemand(g);
   const army = armySize(g.units ?? {});
   // Nöbetteki asker halkı zapt etmeye daha az kalır; nöbetin üretim bedeli budur.
-  const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0, factionPressureOf(g)));
+  // Kesenin payı `rates` içinde de sayılır; aksi hâlde panel ve motor iki ayrı
+  // üretim çarpanı gösterirdi. Damga tabanlı olduğu için `lastTickAt` anındaki
+  // hâl okunur, yani `rates` saf ve zamandan bağımsız kalır.
+  const purse = agitationEffect(g, g.lastTickAt);
+  const state = moodState(g.popularity, suppression(
+    offWatchStrength(army, watchRatioOf(g)), g.population,
+    Math.min(100, (g.soldierUnrest ?? 0) + purse.bribe),
+    Math.min(100, factionPressureOf(g) + purse.pressure),
+  ));
   const net = { ...gross };
   for (const [key] of resourceLabels) net[key] = gross[key] * state.production;
   // Bakım: odun ve taşın tek sürekli gideri. Bunlar olmadan net = brüt idi ve
@@ -227,12 +236,18 @@ export function tick(g: Game, now: number): Game {
   // İç hizip: sürücü (rıza) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur,
   // böylece kapalı çözüm adımlara bölününce aynı sonucu verir.
   const factionPressure = advanceFaction(factionPressureOf(g), g.popularity, hours);
-  const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, soldierUnrest, factionPressure));
+  // Yabancı kesenin payı taşıyıcı alanların İÇİNDE kalır, `factionPressure` ve
+  // `soldierUnrest` alanlarına yazılmaz; burada yalnızca hissedilen toplam
+  // kullanılır. Aksi hâlde kese kalıcılaşır ve sönümü anlamını yitirir.
+  const purse = agitationEffect(g, now);
+  const feltFaction = Math.min(100, factionPressure + purse.pressure);
+  const felt = army > 0 ? Math.min(100, soldierUnrest + purse.bribe) : 0;
+  const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, felt, feltFaction));
 
   // Nüfus halkın büyüklüğüne oranla değişir; kapasite büyümeyi frenler.
   const growth = populationChange(state, g.population, capacity, buildings, hours);
 
-  notices = populaceNotices(g, { state, soldierUnrest, previousUnrest: g.soldierUnrest ?? 0, served }, notices, now);
+  notices = populaceNotices(g, { state, soldierUnrest: felt, previousUnrest: feltUnrest(g, g.lastTickAt), served }, notices, now);
 
   // Hizip eşik geçişleri deftere düşer. Kral bunu güçle bastıramaz: bildirim de
   // ona bir "bastır" düğmesi değil, rızayı yükseltmesi gerektiğini söyler.
@@ -240,9 +255,10 @@ export function tick(g: Game, now: number): Game {
   if (factionLine) notices = [{ kind: "HİZİP", text: factionLine, at: now }, ...notices].slice(0, 20);
 
   let mutinyLoss = 0;
-  if (soldierUnrest >= SOLDIER_THRESHOLDS.desertion && army > 0) {
-    // Firar: maaşsız kalan askerlerin bir kısmı dağılır.
-    mutinyLoss = Math.min(army, Math.ceil(army * (soldierUnrest >= SOLDIER_THRESHOLDS.mutiny ? .12 : .05) * hours));
+  if (felt >= SOLDIER_THRESHOLDS.desertion && army > 0) {
+    // Firar: maaşsız kalan (ya da yabancının kesesiyle kışkırtılan) askerlerin
+    // bir kısmı dağılır.
+    mutinyLoss = Math.min(army, Math.ceil(army * (felt >= SOLDIER_THRESHOLDS.mutiny ? .12 : .05) * hours));
     if (mutinyLoss > 0) units = shrinkArmy(units, mutinyLoss);
   }
 
@@ -363,7 +379,12 @@ function populaceNotices(
   at: number,
 ) {
   const added: Game["notices"] = [];
-  const previousState = moodState(previous.popularity, suppression(offWatchStrength(armySize(previous.units ?? {}), watchRatioOf(previous)), previous.population, previous.soldierUnrest ?? 0, factionPressureOf(previous)));
+  const previousPurse = agitationEffect(previous, previous.lastTickAt);
+  const previousState = moodState(previous.popularity, suppression(
+    offWatchStrength(armySize(previous.units ?? {}), watchRatioOf(previous)), previous.population,
+    Math.min(100, (previous.soldierUnrest ?? 0) + previousPurse.bribe),
+    Math.min(100, factionPressureOf(previous) + previousPurse.pressure),
+  ));
   if (previousState.id !== now.state.id) {
     const text = now.state.id === "revolt" ? "Halk isyan etti; tezgâhlar durdu ve şehirden kaçış başladı."
       : now.state.id === "strike" ? "Halk iş bıraktı; üretim ağır biçimde düştü."

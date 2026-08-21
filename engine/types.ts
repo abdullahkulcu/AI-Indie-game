@@ -125,6 +125,16 @@ export type Game = {
    * `tick()`'i esas alınır (bkz. server/save-validation.ts → SERVER_DERIVED).
    */
   factionPressure?: number;
+  /**
+   * DIŞ KESE taşıyıcıları (bkz. engine/agitation.ts). Değerler `agitationAt`
+   * ANINDAKİ değerdir; sönüm okuma anında kapalı çözümle hesaplanır. Üçü de
+   * SUNUCU-TÜREVİDİR: istemci bunları ne yazabilir ne silebilir.
+   */
+  agitationPressure?: number;
+  agitationBribe?: number;
+  agitationAt?: number;
+  /** Yakalanan kesenin hedefe verdiği kalkanın bitiş anı. */
+  agitationShieldUntil?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

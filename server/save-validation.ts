@@ -190,6 +190,14 @@ export const gameSaveSchema = z.object({
    * yalnızca `.strict()` kaydın sunucunun kendi yazdığı alanı reddetmemesi için.
    */
   factionPressure: finite(100).optional(),
+  /**
+   * Dış kese taşıyıcıları. Hepsi `.optional()` ve hepsi SERVER_DERIVED: bunları
+   * yazan tek yer cron'dur, istemcinin bildirdiği değer yok sayılır.
+   */
+  agitationPressure: finite(100).optional(),
+  agitationBribe: finite(100).optional(),
+  agitationAt: timestamp.optional(),
+  agitationShieldUntil: timestamp.optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
@@ -320,7 +328,15 @@ function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, chan
  * değerler `previous`ta durduğu ve `tick` onlara dokunmadığı için, dokunulmayan
  * bir alan doğal olarak olduğu gibi taşınır.
  */
-export const SERVER_DERIVED = ["factionPressure"] as const;
+export const SERVER_DERIVED = [
+  "factionPressure",
+  // Dış kese: yazan tek yer cron. `tick` bunlara dokunmadığı için `simulated`
+  // değeri `previous`takiyle aynıdır — yani istemcinin yazdığı her şey silinir.
+  "agitationPressure",
+  "agitationBribe",
+  "agitationAt",
+  "agitationShieldUntil",
+] as const;
 
 export function applyServerDerived(game: GameSave, simulated: GameSave | null): GameSave {
   const patched: Record<string, unknown> = { ...game };

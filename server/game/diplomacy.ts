@@ -1,3 +1,6 @@
-export function reputationChange(event:"kept_promise"|"fair_trade"|"defended_vassal"|"abandoned_vassal"|"broke_ceasefire"|"betrayal"|"rental_recall_under_siege"){return({kept_promise:2,fair_trade:1,defended_vassal:4,abandoned_vassal:-8,broke_ceasefire:-12,betrayal:-20,rental_recall_under_siege:-6})[event];}
+// `caught_agitating`: kesesi ya da haydut yönlendirmesi karşı-istihbarata
+// yakalanan Kralın itibar cezası. İmzalı barışı olan taraf için ayrıca
+// `betrayal` uygulanır ve anlaşma bozulur; ikisi ayrı olaydır.
+export function reputationChange(event:"kept_promise"|"fair_trade"|"defended_vassal"|"abandoned_vassal"|"broke_ceasefire"|"betrayal"|"rental_recall_under_siege"|"caught_agitating"){return({kept_promise:2,fair_trade:1,defended_vassal:4,abandoned_vassal:-8,broke_ceasefire:-12,betrayal:-20,rental_recall_under_siege:-6,caught_agitating:-10})[event];}
 export function proposalAcceptance(base:number,reputation:number,relationship:number){return Math.max(.05,Math.min(.95,base+(reputation-50)/125+relationship/200));}
 export function tributeAmount(resources:Record<string,number>,rate:number,resource="gold"){return Math.max(0,Math.floor((resources[resource]??0)*Math.min(.5,Math.max(0,rate))));}

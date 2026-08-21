@@ -1,3 +1,4 @@
+import { feltUnrest } from "./agitation";
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
@@ -7,7 +8,7 @@ import { affordable, costFor, debit, keep, materialScaleOf, rates, tick } from "
 import type { Game, GameAction, Key, Res } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
-export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms"];
+export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms", "send_purse"];
 
 export type ApplyResult = {
   game: Game;
@@ -115,8 +116,10 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     // emir HİÇ uygulanmaz ve Kralın teyidi bunu AŞMAZ — `confirmed` burada hiç
     // sorulmaz, çünkü veto Kralın cesaretiyle değil kışlanın rızasıyla kalkar.
     // Eşikler tek dosyadadır (engine/populace-voice.ts → GARRISON_VETOES).
+    // Huzursuzluğun HİSSEDİLEN değeri okunur: yabancının kesesi de vetoyu
+    // tetikleyebilir (bkz. engine/agitation.ts → feltUnrest).
     const garrison = (order: Parameters<typeof garrisonRefusal>[0]) =>
-      garrisonRefusal(order, next.soldierUnrest ?? 0, armySize(next.units ?? {}));
+      garrisonRefusal(order, feltUnrest(next, now), armySize(next.units ?? {}));
 
     if (action.name === "build_structure") {
       if (next.queue) { blocked(`İnşa emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
