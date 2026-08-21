@@ -1,3 +1,4 @@
+import { factionDrag } from "./faction";
 import type { Game } from "./types";
 
 /**
@@ -225,12 +226,14 @@ const STATES: Array<{ min: number } & MoodState> = [
  * kalmaya devam eder ama iş bırakma eşiği yükselir. Maaşı ödenmeyen asker
  * bastırmaz; silahlı isyan sivil isyandan ağırdır.
  */
-export function suppression(army: number, population: number, soldierUnrest: number) {
+export function suppression(army: number, population: number, soldierUnrest: number, factionPressure = 0) {
   if (population <= 0 || army <= 0) return 0;
   const ratio = army / population;
   const raw = Math.min(14, ratio * 100 * 0.9);
   const reliability = Math.max(0, 1 - soldierUnrest / 60);
-  return raw * reliability;
+  // Örgütlü hizip zapt gücünü kırar: kalabalık artık kimin adamı olduğunu
+  // bilmiyordur. Varsayılan 0 olduğu için eski çağrılar aynı sonucu verir.
+  return raw * reliability * factionDrag(factionPressure);
 }
 
 export function moodState(popularity: number, suppressionBonus: number): MoodState {

@@ -1,5 +1,6 @@
 export { materialScaleOf } from "./catalog";
 import { MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, resourceLabels, terrainCatalog } from "./catalog";
+import { advanceFaction, factionNotice, factionPressureOf } from "./faction";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood } from "./market";
 import { armySize, approachMood, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
@@ -114,7 +115,7 @@ export function rates(g: Game): Res {
   const demand = hourlyDemand(g);
   const army = armySize(g.units ?? {});
   // Nöbetteki asker halkı zapt etmeye daha az kalır; nöbetin üretim bedeli budur.
-  const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0));
+  const state = moodState(g.popularity, suppression(offWatchStrength(army, watchRatioOf(g)), g.population, g.soldierUnrest ?? 0, factionPressureOf(g)));
   const net = { ...gross };
   for (const [key] of resourceLabels) net[key] = gross[key] * state.production;
   // Bakım: odun ve taşın tek sürekli gideri. Bunlar olmadan net = brüt idi ve
@@ -223,12 +224,20 @@ export function tick(g: Game, now: number): Game {
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
 
   const soldierUnrest = army > 0 ? soldierUnrestAfter(g.soldierUnrest ?? 0, served.pay, hours) : 0;
-  const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, soldierUnrest));
+  // İç hizip: sürücü (rıza) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur,
+  // böylece kapalı çözüm adımlara bölününce aynı sonucu verir.
+  const factionPressure = advanceFaction(factionPressureOf(g), g.popularity, hours);
+  const state = moodState(popularity, suppression(offWatchStrength(army, watch), g.population, soldierUnrest, factionPressure));
 
   // Nüfus halkın büyüklüğüne oranla değişir; kapasite büyümeyi frenler.
   const growth = populationChange(state, g.population, capacity, buildings, hours);
 
   notices = populaceNotices(g, { state, soldierUnrest, previousUnrest: g.soldierUnrest ?? 0, served }, notices, now);
+
+  // Hizip eşik geçişleri deftere düşer. Kral bunu güçle bastıramaz: bildirim de
+  // ona bir "bastır" düğmesi değil, rızayı yükseltmesi gerektiğini söyler.
+  const factionLine = factionNotice(factionPressureOf(g), factionPressure, g.kingdomName, g.foundedAt);
+  if (factionLine) notices = [{ kind: "HİZİP", text: factionLine, at: now }, ...notices].slice(0, 20);
 
   let mutinyLoss = 0;
   if (soldierUnrest >= SOLDIER_THRESHOLDS.desertion && army > 0) {
@@ -312,6 +321,7 @@ export function tick(g: Game, now: number): Game {
     resources,
     popularity,
     soldierUnrest,
+    factionPressure,
     foodRation: rations.food,
     aleRation: rations.ale,
     soldierPay: rations.soldierPay,
@@ -353,7 +363,7 @@ function populaceNotices(
   at: number,
 ) {
   const added: Game["notices"] = [];
-  const previousState = moodState(previous.popularity, suppression(offWatchStrength(armySize(previous.units ?? {}), watchRatioOf(previous)), previous.population, previous.soldierUnrest ?? 0));
+  const previousState = moodState(previous.popularity, suppression(offWatchStrength(armySize(previous.units ?? {}), watchRatioOf(previous)), previous.population, previous.soldierUnrest ?? 0, factionPressureOf(previous)));
   if (previousState.id !== now.state.id) {
     const text = now.state.id === "revolt" ? "Halk isyan etti; tezgâhlar durdu ve şehirden kaçış başladı."
       : now.state.id === "strike" ? "Halk iş bıraktı; üretim ağır biçimde düştü."

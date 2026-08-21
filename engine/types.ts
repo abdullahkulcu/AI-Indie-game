@@ -117,6 +117,14 @@ export type Game = {
   marketOrders?: MarketOrder[];
   /** Son depo taşması bildirimi; defteri saniyede bir uyarıyla doldurmamak için. */
   lastSpoilNoticeAt?: number;
+  /**
+   * İç hizip baskısı (0-100). Rıza uzun süre düşük kalınca birikir, düzelince
+   * erir; askerin zapt gücünü zayıflatır (bkz. engine/faction.ts).
+   *
+   * SUNUCU-TÜREVİDİR: istemcinin bildirdiği değer yok sayılır, sunucunun kendi
+   * `tick()`'i esas alınır (bkz. server/save-validation.ts → SERVER_DERIVED).
+   */
+  factionPressure?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

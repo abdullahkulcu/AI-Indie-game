@@ -92,6 +92,17 @@
 .voice-row em{font-style:normal;font-size:.58rem;letter-spacing:.12em;color:#8f3512}
 .mood-explain-note{margin:8px 0 0;font-size:.66rem;line-height:1.5;color:#7a6540}
 
+/* ---- İç hizip (Halk sekmesi) ---- */
+.faction-block{background:#f2e7cb;border:1px solid #cbb488;border-left:3px solid #b08b2c;padding:10px 12px}
+.faction-block.organized{border-left-color:#b26a1f;background:#f6e6c4}
+.faction-block.defiant{border-left-color:#7d2018;background:#f6dfd3}
+.faction-gauge{height:6px;background:#dbc9a2;margin-top:7px}
+.faction-gauge i{display:block;height:100%;background:linear-gradient(90deg,#b08b2c,#7d2018)}
+.faction-block>small{display:block;margin-top:5px;font-size:.68rem;line-height:1.45;color:#7a6540}
+.faction-leader{margin:7px 0 0;font-size:.72rem;color:#6d3325}
+.faction-leader b{font-weight:700}
+.faction-warning{margin:7px 0 0;font-size:.66rem;line-height:1.5;color:#8a5a1c}
+
 /* ---- Garnizon Durumu (Ordu sekmesi) ---- */
 .garrison-block{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-top:10px}
 .garrison-block.demanding{border-left:3px solid #c9873c}

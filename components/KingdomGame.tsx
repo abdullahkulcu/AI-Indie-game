@@ -9,6 +9,7 @@ import { fillOrder, livingCostMood, type TradeKey } from "@/engine/market";
 import { catalog, resourceLabels, terrainCatalog } from "@/engine/catalog";
 import { affordable, buildOptions, keep, materialScaleOf, rates, servedRations, tick } from "@/engine/tick";
 import { garrisonMood, garrisonVetoes } from "@/engine/populace-voice";
+import { factionLeaderName, factionPressureOf, factionState, FACTION_THRESHOLDS } from "@/engine/faction";
 import { generalNameFor } from "@/engine/general-name";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
@@ -110,7 +111,7 @@ export default function KingdomGame(){
  const generalName=game?generalNameFor(game.kingdomName,game.foundedAt):"General";
  const lv=game?keep(game):1,rt=useMemo(()=>game?rates(game):null,[game]);
  // Halkin durumu: uretim carpani ve is birakma esigi buradan okunur.
- const mood=useMemo(()=>game?moodState(game.popularity,suppression(armySize(game.units),game.population,game.soldierUnrest??0)):{id:"uneasy" as const,label:"—",production:1,populationRate:0,populationPerHour:0},[game]);
+ const mood=useMemo(()=>game?moodState(game.popularity,suppression(armySize(game.units),game.population,game.soldierUnrest??0,factionPressureOf(game))):{id:"uneasy" as const,label:"—",production:1,populationRate:0,populationPerHour:0},[game]);
  function found(connected:boolean,introduction?:string){const t=Date.now(),terrainInfo=terrainCatalog[terrain];const g:Game={version:2,kingdomName:name.trim(),rulerName:ruler.trim(),channel:selected.name,channelId:selected.id,speed:selected.speed,terrain,foundedAt:t,lastTickAt:t,protectionEndsAt:t+4*86_400_000,resources:{gold:1000,food:500,stone:300,wood:300,iron:100,ale:0},population:100,capacity:150,popularity:50,reputation:50,loyalty:75,taxRate:15,quota:2,quotaAt:t,buildings:[{type:"keep",name:"Kale",category:"Yönetim",level:1},{type:"wheat_farm",name:"Buğday Tarlası",category:"Ekonomi",level:1},{type:"lumberjack",name:"Oduncu Kulübesi",category:"Ekonomi",level:1}],units:{spearman:0},foodRation:100,aleRation:0,soldierPay:100,soldierUnrest:0,queue:null,notices:[{kind:"ARAZİ",text:`${terrainInfo.label} parseli tahsis edildi: ${terrainInfo.bonus}.`,at:t},{kind:"KURULUŞ",text:"Krallığınız dış çeperdeki boş parsele kuruldu. Dört günlük korumanız başladı.",at:t}],provider:connected?provider:null,model:connected?model:null,generalConnected:connected,strategyNote:"Ekonomiyi dengede tut, halkı aç bırakma ve koruma bitene kadar savunmayı hazırla."};// Katılım beklenmeden gönderiliyordu: başarısız olduğunda krallık kuruluyor
     // ama üyelik yazılmıyor, sonra dünya ve maden istekleri 403 alıp harita boş
     // kalıyordu. Artık sonucu bekliyoruz ve başarısızlık açıkça söyleniyor.
@@ -120,7 +121,7 @@ export default function KingdomGame(){
         setWorldError(data.error||"Channel katılımı kaydedilemedi; komşular ve ortak saha görünmeyecek.");setToast(data.error||"Channel katılımı kaydedilemedi.")}
       else setServerChannelId(selected.id)}catch{setWorldError("Channel katılımı kaydedilemedi; komşular ve ortak saha görünmeyecek.")}})();setGame(g);setChat([{who:connected?generalName:"Saray Kâtibi",text:connected?(introduction||"Bağlantı doğrulandı. İlk hedefinizi ve yönetim doktrinimizi belirleyin."):"General henüz sessiz. Üretim ve kuyruklar çalışır; yeni yönetim kararları için BYOK General'i bağlamalısınız."}]);if(!localStorage.getItem("demirkale.tutorial.done"))setTutorialStep(0)}
  function kingdomContext(g:Game|null){if(!g)return{name:name.trim(),ruler:ruler.trim(),terrain:terrainCatalog[terrain],keepLevel:1,population:100,popularity:50,loyalty:75,quota:2,strategyNote:"Henüz belirlenmedi",resources:{gold:1000,food:500,stone:300,wood:300,iron:100,ale:0},hourlyRates:{gold:3.3,food:14.5,stone:0,wood:22,iron:0,ale:0},buildings:[{name:"Kale",level:1},{name:"Buğday Tarlası",level:1},{name:"Oduncu Kulübesi",level:1}],units:{spearman:0},channelSpeed:selected.speed,channelId:selected.id,activeConstruction:null};const level=keep(g),buildTimes=buildOptions(g);
-  const gMood=moodState(g.popularity,suppression(armySize(g.units),g.population,g.soldierUnrest??0));
+  const gMood=moodState(g.popularity,suppression(armySize(g.units),g.population,g.soldierUnrest??0,factionPressureOf(g)));
   const nufus={mevcut:Math.round(g.population),kapasite:g.capacity,bosKonut:Math.floor(g.capacity-g.population),gunlukDegisim:Math.round(populationChange(gMood,g.population,g.capacity,g.buildings,24)),kurulustanBeriYerlesen:Math.round(g.peopleJoined??0),kurulustanBeriGocEden:Math.round(g.peopleLeft??0),madende:Math.round(g.mineWorkers??0),silahAltinda:armySize(g.units),halkinDurumu:gMood.label};
   const pazar=marketState(g,Date.now());
   return{name:g.kingdomName,ruler:g.rulerName,generalName:generalNameFor(g.kingdomName,g.foundedAt),pazar:{seviye:pazar.level,gunlukHacim:pazar.limit,kalanHacim:pazar.left,satisFiyatlari:pazar.price,alisCarpani:pazar.spread},terrain:terrainCatalog[g.terrain]??terrainCatalog.plain,keepLevel:level,population:g.population,nufus,popularity:g.popularity,loyalty:g.loyalty,quota:g.quota,strategyNote:g.strategyNote??"Ekonomiyi dengede tut ve halkı aç bırakma.",taxRate:g.taxRate,resources:g.resources,hourlyRates:rates(g),buildings:g.buildings.map(b=>({type:b.type,name:b.name,level:b.level})),units:g.units,channelSpeed:g.speed,channelId:g.channelId??availableChannels.find(channel=>channel.name===g.channel)?.id,activeConstruction:g.queue?{name:g.queue.name,secondsRemaining:Math.max(0,Math.ceil((g.queue.completesAt-Date.now())/1000))}:null,buildTimes,
@@ -129,13 +130,17 @@ export default function KingdomGame(){
    neighbors:otherKingdoms.map((kingdom,index)=>({ordinal:index+1,name:kingdom.discovered&&kingdom.name?kingdom.name:"Bilinmeyen Sancak",discovered:kingdom.discovered,scouting:kingdom.mission?.status==="pending"})),
    counterIntelligence:{active:worldDefense.active,minutesRemaining:worldDefense.activeUntil?Math.max(0,Math.ceil((worldDefense.activeUntil-Date.now())/60_000)):0},
    protectionHoursLeft:Math.max(0,(g.protectionEndsAt-Date.now())/3_600_000),
-   populace:(()=>{const r=rationsOf(g),army=armySize(g.units),state=moodState(g.popularity,suppression(army,g.population,g.soldierUnrest??0));
+   populace:(()=>{const r=rationsOf(g),army=armySize(g.units),state=moodState(g.popularity,suppression(army,g.population,g.soldierUnrest??0,factionPressureOf(g)));
     // Halkın sesi (engine/populace-voice.ts) fiilen dağıtılan istihkakı ve geçim
     // endeksini okur; ikisi de motordan gelir, burada yeniden hesaplanmaz.
     const served=servedRations(g),garrison=garrisonMood(g.soldierUnrest??0,army);
     return{mood:state.label,moodScore:Math.round(g.popularity),productionMultiplier:state.production,foodRation:r.food,aleRation:r.ale,soldierPay:r.soldierPay,army,soldierUnrest:Math.round(g.soldierUnrest??0),dailyFoodNeed:Math.round(g.population*NEED.food*24),
      servedFood:Math.round(served.food),livingCost:pazar.livingCost,capacity:g.capacity,
-     garrison:{label:garrison.label,note:garrison.note,vetoes:garrisonVetoes(g.soldierUnrest??0,army)}}})(),
+     garrison:{label:garrison.label,note:garrison.note,vetoes:garrisonVetoes(g.soldierUnrest??0,army)},
+     // Hizip: General bunu görmeden "askerle bastır" gibi olmayan bir yol öneriyordu.
+     hizip:(()=>{const pressure=factionPressureOf(g),state=factionState(pressure);
+      return{baski:Math.round(pressure),durum:state.label,
+       elebasi:pressure>=FACTION_THRESHOLDS.organized?factionLeaderName(g.kingdomName,g.foundedAt):null}})()}})(),
    defense:(()=>{const d=defenseOf(g);
     return{watchRatio:d.watch,watchers:d.watchers,wallLevel:d.wall,power:Math.round(d.power*10)/10,terrainDefense:terrainCatalog[g.terrain]?.defense??1,
      raidsRepelled:g.raidsRepelled??0,raidsSuffered:g.raidsSuffered??0,
@@ -395,6 +400,18 @@ async function openNegotiation(){
         <p className="mood-explain-note">Bu talepler bir dilekçe süreci değil: ceza ya da bastırma aracı yoktur. Kapanmalarının tek yolu istihkak, vergi, fiyat, konut ve şenlik kararlarıdır.</p></>
       : <p className="mood-explain-note">Halkın Kraldan açık bir isteği yok. Talep ancak bir eşik saatlerce aşılı kalırsa açılır; anlık dalgalanma masaya gelmez.</p>}
    </div>
+
+   {/* İÇ HİZİP — Kralın bastıracağı bir düğme YOK; yalnızca rızayı yükseltmek
+       eritir. Blok bu yüzden bir emir sunmuyor, durumu ve tek çıkışı söylüyor. */}
+   {(()=>{const pressure=factionPressureOf(game),state=factionState(pressure);
+    if(state.id==="none")return null;
+    return <div className={`faction-block ${state.id}`}>
+     <div className="section-head"><span>İÇ HİZİP</span><b>{state.label}</b></div>
+     <div className="faction-gauge"><i style={{width:`${Math.min(100,Math.round(pressure))}%`}}/></div>
+     <small>Baskı {Math.round(pressure)} · {state.note}</small>
+     {pressure>=FACTION_THRESHOLDS.organized&&<p className="faction-leader">Elebaşı: <b>{factionLeaderName(game.kingdomName,game.foundedAt)}</b></p>}
+     <p className="faction-warning">Hizip güçle bastırılamaz: askerin zapt gücünü zayıflatan şeyin kendisidir. Tek çıkış halkın rızasını yükseltmektir — istihkak, vergi, fiyat ve konut.</p>
+    </div>})()}
 
    <div className="mood-explain">
     <div><span>Üretim çarpanı</span><b>×{mood.production.toFixed(2)}</b></div>

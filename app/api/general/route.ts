@@ -39,6 +39,8 @@ type GeneralRequest = {
       servedFood?: number; livingCost?: number; capacity?: number;
       /** Garnizonun reddettiği emirler; eşikler motordan gelir, panel de aynı listeyi gösterir. */
       garrison?: { label: string; note: string; vetoes: string[] };
+      /** İç hizip baskısı ve elebaşı; güçle bastırılamaz, yalnızca yönetimle erir. */
+      hizip?: { baski: number; durum: string; elebasi: string | null };
     };
     defense?: {
       /** Nöbetteki asker oranı (%) ve fiilen nöbet tutan asker sayısı. */
@@ -136,6 +138,7 @@ function gamePrompt(body: GeneralRequest) {
     "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
     "İstihkak ve maaş oranlarını Kral sorduğunda ya da açıkça emrettiğinde ayarla. Kralın haberi olmadan halkı aç bırakma.",
     "Halkın üzerinde emir süreci YOKTUR: dilekçe, ceza, bastırma ya da 'elebaşını astır' diye bir araç yok. Halkın sesi ancak yönetimle (istihkak, vergi, fiyat, konut, şenlik) susar. Halka emir verebileceğini ima etme.",
+    "Rıza uzun süre 40'ın altında kalırsa krallıkta örgütlü bir hizip doğar (KRALLIK_DURUMU.populace.hizip). Hizip askerin halkı zapt etme gücünü zayıflatır ve GÜÇLE BASTIRILAMAZ: elebaşını yakalatmak, asker göndermek ya da nöbeti artırmak diye bir çözüm yok — nöbet zapt gücünü daha da azaltır. Tek çıkış rızayı yükseltmektir; Krala bunu açıkça söyle ve olmayan bir bastırma yolu önerme.",
     "Garnizon bazı emirleri REDDEDER ve Kralın teyidi bunu aşmaz: huzursuzluk 30'a çıkınca yeni asker eğitimi, 60'a çıkınca nöbet YÜKSELTME, 85'e çıkınca asker maaşını değiştirme emri de geri çevrilir. 85 üstünde Kral gerçekten çıkışsız kalabilir; bunu ona açıkça söyle ve maaşı o noktaya varmadan toparlamasını öner. Nöbeti İNDİRME emri her zaman kabul edilir.",
     "Dağlardan rastgele zamanlarda akın gelir: Kurt Sürüsü askeri öldürüp erzak kaçırır, Haydutlar hazineyi soyar, Dağ Akıncıları hepsini birden yapar. Dağ arazisinde akın daha sık ve daha ağırdır; koruma süresi boyunca hiç akın olmaz.",
     "Akını yalnızca NÖBETTEKİ asker, Sur seviyesi ve arazinin savunma avantajı karşılar. Savunma akının şiddetini aşarsa akın kayıpsız püskürtülür; aşamazsa yarılan pay kadar asker ölür, yiyecek ve altın yağmalanır, halkın rızası düşer. Maaşsız kalıp huzursuzlaşan asker iyi savunmaz.",

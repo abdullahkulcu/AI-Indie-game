@@ -184,6 +184,12 @@ export const gameSaveSchema = z.object({
     >,
   ).strict().optional(),
   lastSpoilNoticeAt: z.number().finite().optional(),
+  /**
+   * İç hizip baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
+   * Değeri istemciden HİÇ kabul edilmez (bkz. SERVER_DERIVED); şemada yer alması
+   * yalnızca `.strict()` kaydın sunucunun kendi yazdığı alanı reddetmemesi için.
+   */
+  factionPressure: finite(100).optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
@@ -254,9 +260,8 @@ function checkFirstSave(game: GameSave): ValidationFailure | null {
  * kalır. Bu meşru bir sonuçtur, hile değildir; tavanı yağmasız üretim eğrisine
  * göre kurarız, böylece sınır yine üretimle çizilir.
  */
-function checkAgainstSimulation(game: GameSave, previous: GameSave, now: number): ValidationFailure | null {
+function checkAgainstSimulation(game: GameSave, previous: GameSave, simulated: GameSave, now: number): ValidationFailure | null {
   const horizon = Math.max(now, previous.lastTickAt);
-  const simulated = tick(previous as Game, horizon);
   const looted = resolveRaids(previous as Game, previous.lastTickAt, horizon, previous.resources);
   const loot: Partial<Record<(typeof RESOURCE_KEYS)[number], number>> = { food: looted.foodStolen, gold: looted.goldStolen };
   for (const key of RESOURCE_KEYS) {
@@ -299,6 +304,34 @@ function checkGrowth(game: GameSave, previous: GameSave, elapsedMs: number, chan
   return null;
 }
 
+/**
+ * SUNUCU-TÜREVİ ALANLAR — 1. sınıf.
+ *
+ * Bu alanlarda istemcinin bildirdiği değer TAMAMEN YOK SAYILIR; yerine
+ * sunucunun kendi `tick(previous)` sonucundaki değer yazılır. Sebep: oyun
+ * durumu hâlâ istemcide hesaplanıyor ve bu alanlar birer CEZA taşıyıcısıdır —
+ * istemci kendi lehine yazabilirse mekaniğin tamamı anlamını yitirir.
+ *
+ * Tavan denetimi (`checkGrowth`/`checkAgainstSimulation`) burada yetmez: hizip
+ * baskısı bir kaynak değil, dolayısıyla "üretim eğrisinin üstüne çıkamaz"
+ * kuralı ona hiç dokunmuyordu. Tek doğru savunma alanı ezmektir.
+ *
+ * Liste her yeni taşıyıcı mekanikle büyür. Sunucunun kendi yazdığı (cron)
+ * değerler `previous`ta durduğu ve `tick` onlara dokunmadığı için, dokunulmayan
+ * bir alan doğal olarak olduğu gibi taşınır.
+ */
+export const SERVER_DERIVED = ["factionPressure"] as const;
+
+export function applyServerDerived(game: GameSave, simulated: GameSave | null): GameSave {
+  const patched: Record<string, unknown> = { ...game };
+  for (const key of SERVER_DERIVED) {
+    const value = simulated ? (simulated as Record<string, unknown>)[key] : undefined;
+    if (value === undefined) delete patched[key];
+    else patched[key] = value;
+  }
+  return patched as GameSave;
+}
+
 export type ValidateOptions = {
   previous: GameSave | null;
   previousUpdatedAt: number | null;
@@ -327,7 +360,8 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
   if (!options.previous) {
     const firstFailure = checkFirstSave(game);
     if (firstFailure) return firstFailure;
-    return { ok: true, game };
+    // İlk kayıtta türetilecek geçmiş yok: taşıyıcı alanlar sıfırlanır.
+    return { ok: true, game: applyServerDerived(game, null) };
   }
 
   // Önceki kaydın sunucu zaman damgası okunamıyorsa büyüme denetimini atlarız;
@@ -336,10 +370,12 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
     const growthFailure = checkGrowth(game, options.previous, now - options.previousUpdatedAt, options.channelSpeed);
     if (growthFailure) return growthFailure;
   }
-  // Kaba tavanlardan sonra dar kontrol: sunucunun kendi simülasyonu.
-  const simulationFailure = checkAgainstSimulation(game, options.previous, now);
+  // Sunucunun kendi simülasyonu iki işi birden yapar: kaba tavanlardan sonraki
+  // dar kaynak kontrolü ve sunucu-türevi alanların kaynağı. Tek kez hesaplanır.
+  const simulated = tick(options.previous as Game, Math.max(now, options.previous.lastTickAt)) as GameSave;
+  const simulationFailure = checkAgainstSimulation(game, options.previous, simulated, now);
   if (simulationFailure) return simulationFailure;
-  return { ok: true, game };
+  return { ok: true, game: applyServerDerived(game, simulated) };
 }
 
 /**
