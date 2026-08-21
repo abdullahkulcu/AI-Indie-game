@@ -7,8 +7,9 @@ import { getDb } from "../../../db";
 import { agitations, agreements, channels, gameSaves, intelDefenses, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
   AGITATION, AGITATION_NOTICE, type AgitationKind,
-  agitationExposedNotice, agitationSenderNotice, applyAgitation,
+  agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut,
 } from "../../../engine/agitation";
+import { isTraded } from "../../../engine/market";
 import {
   LIMITS, MISSES_BEFORE_BREACH, canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide,
   settleTribute, shouldGeneralAnswer, validateTerms, type Side, type Terms, type TributeSettlement,
@@ -504,11 +505,14 @@ async function settleAgitations(now: number) {
     const [shield] = await db.select().from(intelDefenses).where(eq(intelDefenses.userId, row.targetUserId)).limit(1);
     const exposed = Boolean(shield?.activeUntil && shield.activeUntil > row.completesAt);
     const kind = row.kind as AgitationKind;
-    const patch = applyAgitation({ ...target, speed }, kind, row.completesAt);
+    // Mal kesesi yığın taşıyıcısına, altın kesesi baskı/kese taşıyıcılarına
+    // yazar. İkisi ayrı silahtır: mal kesesi hizip baskısı üretmez, çünkü bol
+    // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
+    const patch = kind === "goods_glut"
+      ? applyGlut({ ...target, speed }, isTraded(row.costResource) ? row.costResource : "food", row.completesAt)
+      : applyAgitation({ ...target, speed }, kind, row.completesAt);
     const senderName = exposed ? await displayNameOf(row.sourceUserId, channelName) : "";
-    const text = exposed
-      ? agitationExposedNotice(senderName, kind)
-      : kind === "gold_commons" ? AGITATION_NOTICE.commons : AGITATION_NOTICE.garrison;
+    const text = exposed ? agitationExposedNotice(senderName, kind) : AGITATION_NOTICE[kind];
 
     const written = await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, {
       ...target,

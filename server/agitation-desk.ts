@@ -3,9 +3,9 @@ import { getDb } from "../db";
 import { agitations, channelMembers, gameSaves } from "../db/schema";
 import {
   AGITATION, type AgitationKind, agitationDayStart, agitationPairWindow,
-  agitationSenderNotice, agitationTravelMs,
+  agitationSenderNotice, agitationTravelMs, glutCost,
 } from "../engine/agitation";
-import type { Game } from "../engine/types";
+import type { Game, Key, TradeKey } from "../engine/types";
 import { parseStoredSave } from "./save-validation";
 
 /**
@@ -22,7 +22,7 @@ import { parseStoredSave } from "./save-validation";
  */
 
 export type AgitateOutcome =
-  | { ok: true; completesAt: number; cost: number }
+  | { ok: true; completesAt: number; cost: number; resource: Key }
   | { ok: false; status: 400 | 403 | 404 | 409 | 429; error: string };
 
 const fail = (status: 400 | 403 | 404 | 409 | 429, error: string): AgitateOutcome => ({ ok: false, status, error });
@@ -30,7 +30,18 @@ const fail = (status: 400 | 403 | 404 | 409 | 429, error: string): AgitateOutcom
 export const AGITATION_LABELS: Record<AgitationKind, string> = {
   gold_commons: "halkın arasına",
   gold_garrison: "kışlaya",
+  goods_glut: "pazarına",
 };
+
+/**
+ * Kesenin bedeli: altın kesesi 600 altın, mal kesesi 900 yiyecek (ya da aynı
+ * altın değerinde başka mal). İkisi de sabit fiyatlıdır; serbest miktar yoktur.
+ */
+export function agitationPrice(kind: AgitationKind, resource: TradeKey) {
+  return kind === "goods_glut"
+    ? { key: resource as Key, amount: glutCost(resource) }
+    : { key: "gold" as Key, amount: AGITATION.cost };
+}
 
 /** Bir oyun-günü içinde kaç kese gönderildi/alındı? Tavanlar buradan okunur. */
 async function purseCount(column: "source" | "target", userId: string, since: number) {
@@ -45,10 +56,14 @@ export async function sendAgitation(input: {
   sourceUserId: string;
   targetUserId: string;
   kind: AgitationKind;
+  /** Mal kesesinde yığılacak (ve ödenecek) mal; altın kesesinde okunmaz. */
+  resource?: TradeKey;
   now: number;
 }): Promise<AgitateOutcome> {
   const db = getDb();
   const { channel, sourceUserId, targetUserId, kind, now } = input;
+  const resource = input.resource ?? "food";
+  const price = agitationPrice(kind, resource);
   if (sourceUserId === targetUserId) return fail(400, "Kendi krallığınıza kese gönderemezsiniz.");
 
   const [target] = await db.select({ userId: channelMembers.userId, accepts: channelMembers.acceptsAgitation })
@@ -91,17 +106,17 @@ export async function sendAgitation(input: {
   if (await purseCount("target", targetUserId, dayStart) >= AGITATION.perTargetPerDay) {
     return fail(429, `Bu krallık bugün taşıyabileceği kadar kese aldı (${AGITATION.perTargetPerDay}); hat bir süre kapalı.`);
   }
-  if (source.resources.gold < AGITATION.cost) {
-    return fail(409, `Kese ${AGITATION.cost} altın; hazinede ${Math.floor(source.resources.gold)} var.`);
+  if (source.resources[price.key] < price.amount) {
+    return fail(409, `Kese ${price.amount} ${price.key}; ambarda ${Math.floor(source.resources[price.key])} var.`);
   }
 
   const completesAt = now + agitationTravelMs(channel.speed);
   const next: Game = {
     ...(source as Game),
-    resources: { ...source.resources, gold: source.resources.gold - AGITATION.cost },
+    resources: { ...source.resources, [price.key]: source.resources[price.key] - price.amount },
     notices: [{
       kind: "KESE",
-      text: `${AGITATION.cost} altınlık bir kese komşu krallığın ${AGITATION_LABELS[kind]} yola çıktı.`,
+      text: `${price.amount} ${price.key} değerinde bir kese komşu krallığın ${AGITATION_LABELS[kind]} yola çıktı.`,
       at: now,
     }, ...source.notices].slice(0, 20),
   };
@@ -116,7 +131,7 @@ export async function sendAgitation(input: {
     if (!debited.length) return "stale" as const;
     const opened = await trx.insert(agitations).values({
       id: crypto.randomUUID(), channelId: channel.id,
-      sourceUserId, targetUserId, kind, cost: AGITATION.cost, costResource: "gold",
+      sourceUserId, targetUserId, kind, cost: price.amount, costResource: price.key,
       sentAt: now, completesAt, pairWindow: agitationPairWindow(now, channel.speed),
     }).onConflictDoNothing().returning({ id: agitations.id });
     if (!opened.length) { trx.rollback(); return "waiting" as const; }
@@ -127,7 +142,7 @@ export async function sendAgitation(input: {
   if (sent !== "ok") {
     return fail(429, `Aynı krallığa iki kese arasında ${AGITATION.pairWaitHours} oyun saati beklemek gerekir.`);
   }
-  return { ok: true, completesAt, cost: AGITATION.cost };
+  return { ok: true, completesAt, cost: price.amount, resource: price.key };
 }
 
 /** Gönderene yazılacak sonuç satırı; cron ifşayı öğrendikten sonra kullanır. */

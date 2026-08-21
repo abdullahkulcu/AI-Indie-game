@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applyActions } from "../engine/actions";
+import { applyActions, marketState } from "../engine/actions";
 import {
-  AGITATION, agitationDayStart, agitationEffect, agitationPairWindow,
-  agitationTravelMs, applyAgitation, feltUnrest,
+  AGITATION, GLUT, agitationDayStart, agitationEffect, agitationPairWindow,
+  agitationTravelMs, applyAgitation, applyGlut, feltUnrest, glutCost, glutShare,
 } from "../engine/agitation";
+import { BASE_PRICE, PRICE_FLOOR, fillOrder, maxPurchase } from "../engine/market";
 import { SOLDIER_THRESHOLDS, suppression } from "../engine/populace";
 import { factionPressureOf } from "../engine/faction";
 import { tick } from "../engine/tick";
@@ -230,6 +231,114 @@ test("kese alanı olmayan eski kayıt reddedilmez", () => {
     previous: previous as never, previousUpdatedAt: T0, channelSpeed: 1, now: T0 + HOUR,
   });
   assert.equal(result.ok, true);
+});
+
+// --- Mal kesesi: pazar bozma ---------------------------------------------
+
+/** Halkı tam normal stoğunda olan, Pazar Sv.2 kurulu bir krallık. */
+const trader = (overrides: Partial<Game> = {}) => newGame({
+  buildings: [
+    { type: "keep", name: "Kale", category: "Yönetim", level: 2 },
+    { type: "market", name: "Pazar", category: "Ekonomi", level: 2 },
+    { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", level: 3 },
+  ],
+  ...overrides,
+});
+
+const sellRevenue = (game: Game, amount = 100) => {
+  const market = marketState(game, T0);
+  return fillOrder("food", amount, market.commons.food, market.reference.food, "sell", market.glut.food ?? 0).gold;
+};
+
+test("mal kesesi 900 yiyecek, diğer mallar aynı altın değerinde", () => {
+  assert.equal(glutCost("food"), 900);
+  // 900 yiyecek = 225 altın; odun 0,3 altın olduğu için 750 birim eder.
+  assert.equal(glutCost("wood"), 750);
+  assert.ok(glutCost("iron") < glutCost("food"), "pahalı mal daha az birim");
+});
+
+/** Anlık birim satış fiyatı: ölçünün kendisi fiyat modelinin çıktısıdır. */
+const unitSale = (game: Game) => marketState(game, T0).price.food;
+
+test("tek mal kesesi satış fiyatını tam üçte bir düşürür", () => {
+  // Kapsama 1 → 1,6; GLUT_DOWN .55 olduğu için çarpan 1 → 0,67.
+  const drop = 1 - unitSale(trader({ commonsGlut: { food: GLUT.perPurse }, commonsGlutAt: T0 })) / unitSale(trader());
+  assert.ok(Math.abs(drop - .33) < .005, `düşüş ${(drop * 100).toFixed(2)}%`);
+  // Emrin kendi kayması eklenince yüklü bir satışta düşüş biraz daha büyür.
+  const orderDrop = 1 - sellRevenue(trader({ commonsGlut: { food: GLUT.perPurse }, commonsGlutAt: T0 })) / sellRevenue(trader());
+  assert.ok(orderDrop > .33 && orderDrop < .40, `emir düşüşü ${(orderDrop * 100).toFixed(1)}%`);
+});
+
+test("art arda kese kalıcı olarak %62,5 düşüş bırakır", () => {
+  // Denge: perPurse / (1 − e^(−bekleme/τ)) ≈ 1,137 referans katı. Bu sayı
+  // ÜÇ SABİTİN çarpımından kendiliğinden çıkar, elle konmuş bir tavan değil.
+  let carrier: Game = trader();
+  for (let i = 0; i < 20; i += 1) {
+    const at = T0 + i * AGITATION.pairWaitHours * HOUR;
+    carrier = { ...carrier, ...applyGlut(carrier, "food", at) };
+  }
+  const settled = { ...carrier, commonsGlutAt: T0 };
+  const pile = settled.commonsGlut?.food ?? 0;
+  assert.ok(Math.abs(pile - 1.137) < .01, `denge ${pile}`);
+  const drop = 1 - unitSale(settled) / unitSale(trader());
+  assert.ok(Math.abs(drop - .625) < .01, `kalıcı düşüş ${(drop * 100).toFixed(1)}%`);
+  // Fiyat tabanına (kapsama 2,2727) matematiksel olarak çakmaz: pazar "her zaman
+  // bozuk ama tek seferde deşifre olmayan" hâlde kalır.
+  assert.ok(pile < 1.2727, `yığın tabana çakmamalı: ${pile}`);
+  assert.ok(unitSale(settled) > BASE_PRICE.food * PRICE_FLOOR, "taban fiyata oturmaz");
+});
+
+test("yığın alış fiyatına ve maxPurchase'a HİÇ girmez", () => {
+  const clean = trader(), glutted = trader({ commonsGlut: { food: GLUT.cap }, commonsGlutAt: T0 });
+  const a = marketState(clean, T0), b = marketState(glutted, T0);
+  const buyClean = fillOrder("food", 100, a.commons.food, a.reference.food, "buy", a.glut.food ?? 0);
+  const buyGlut = fillOrder("food", 100, b.commons.food, b.reference.food, "buy", b.glut.food ?? 0);
+  assert.equal(buyGlut.gold, buyClean.gold, "hedef bedava mal alamaz");
+  assert.equal(maxPurchase(b.commons.food), maxPurchase(a.commons.food));
+});
+
+test("yığın hedefin rızasını YÜKSELTMEZ", () => {
+  const clean = tick(trader(), T0 + 3 * HOUR);
+  const glutted = tick(trader({ commonsGlut: { food: GLUT.cap }, commonsGlutAt: T0 }), T0 + 3 * HOUR);
+  assert.equal(glutted.popularity, clean.popularity);
+  // Geçim endeksi de halkın gerçek stoğundan okunur.
+  assert.equal(marketState(glutted, T0).livingCost, marketState(clean, T0).livingCost);
+});
+
+test("mal kesesi hizip baskısı üretmez", () => {
+  const patch = applyGlut(trader(), "food", T0);
+  assert.deepEqual(Object.keys(patch).sort(), ["commonsGlut", "commonsGlutAt"]);
+});
+
+test("yığın hedefin hiçbir kaynak alanına dokunmaz", () => {
+  const target = trader();
+  const after = { ...target, ...applyGlut(target, "food", T0) };
+  const changed = Object.keys(after).filter(key =>
+    JSON.stringify((after as Record<string, unknown>)[key]) !== JSON.stringify((target as Record<string, unknown>)[key]));
+  assert.deepEqual(changed.sort(), ["commonsGlut", "commonsGlutAt"]);
+  assert.deepEqual(after.resources, target.resources);
+  assert.deepEqual(after.commons, target.commons);
+});
+
+test("yığın erir ve tavanı aşmaz", () => {
+  const carrier = trader({ commonsGlut: { food: GLUT.perPurse }, commonsGlutAt: T0 });
+  const later = glutShare(carrier, T0 + AGITATION.tau * HOUR).food;
+  assert.ok(Math.abs(later - GLUT.perPurse / Math.E) < 1e-9, `çıkan ${later}`);
+  let piled = trader();
+  for (let i = 0; i < 20; i += 1) piled = { ...piled, ...applyGlut(piled, "food", T0) };
+  assert.ok((piled.commonsGlut?.food ?? 0) <= GLUT.cap);
+});
+
+test("istemcinin bildirdiği yığın yok sayılır", () => {
+  const previous = save(trader({ lastTickAt: T0, commonsGlut: { food: 1 }, commonsGlutAt: T0 }));
+  // İstemci pazarını "bozulmamış" ilan edip satış getirisini geri kazanmaya çalışıyor.
+  const claimed = save({ ...tick(previous, T0 + HOUR), commonsGlut: {}, commonsGlutAt: 0 });
+  const result = validateGameSave(claimed, {
+    previous: previous as never, previousUpdatedAt: T0, channelSpeed: 1, now: T0 + HOUR,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.game.commonsGlut, { food: 1 });
+  assert.equal(result.ok && result.game.commonsGlutAt, T0);
 });
 
 // --- Sıfır ek model çağrısı ----------------------------------------------

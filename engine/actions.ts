@@ -1,4 +1,4 @@
-import { feltUnrest } from "./agitation";
+import { feltUnrest, glutStock } from "./agitation";
 import { catalog, keepSeconds, keepUpgradeCosts, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
@@ -82,15 +82,20 @@ export function marketState(game: Game, now: number) {
   const limit = level * MARKET.dailyPerLevel;
   const commons = commonsOf(game);
   const reference = commonsReference(game.population);
+  // Yabancının pazara yığdığı mal. YALNIZCA satış fiyatına girer: `coverage` ve
+  // `livingCost` halkın gerçek stoğundan okunur, `maxPurchase` da öyle.
+  const glut = glutStock(game, reference, now);
   return {
     level, used, limit,
     left: Math.max(0, limit - used),
     dayAt: fresh ? now : game.marketDayAt ?? now,
-    price: marketPrices(commons, reference),
+    price: marketPrices(commons, reference, glut),
     spread: SPREAD,
     open, slots: level,
     freeSlots: Math.max(0, level - open.length),
-    commons, reference,
+    commons, reference, glut,
+    /** Pazar bozulmuş mu? Kral az altın aldığını görmeden yönetemez. */
+    glutted: TRADED_KEYS.some(key => glut[key] > 0),
     coverage: Object.fromEntries(TRADED_KEYS.map(key => [key, coverageOf(commons[key], reference[key])])) as Record<string, number>,
     livingCost: livingCost(commons, reference),
   };
@@ -226,7 +231,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
       // Fiyat emrin İÇİNDE hareket eder: emir parçalara bölünür, her parça o
       // andaki stoğa göre fiyatlanır. Büyük emir kendi fiyatını bozar.
-      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell");
+      // Yığın yalnızca satış kolunda fiyatı düşürür; alışta hiç okunmaz.
+      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0);
       const minutes = marketDuration(amount, next.speed);
       // Teklif kimliği deterministik: aynı girdi aynı kimliği üretir, motor saf kalır.
       const id = `${buying ? "b" : "s"}-${resource}-${amount}-${now}`;

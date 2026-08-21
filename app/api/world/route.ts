@@ -4,6 +4,8 @@ import { agitations, channelMembers, channels, gameSaves, intelDefenses, intelMi
 import { currentUser } from "../../../server/account-auth";
 import { sendAgitation } from "../../../server/agitation-desk";
 import { AGITATION, agitationDayStart } from "../../../engine/agitation";
+import { isTraded } from "../../../engine/market";
+import type { TradeKey } from "../../../engine/types";
 import { projectPublicKingdom } from "../../../server/world-projection";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
@@ -93,7 +95,7 @@ export async function POST(request: Request) {
   const body = await request.json() as {
     action?: "scout" | "defend" | "agitate" | "set_agitation_opt";
     channelId?: string; targetId?: string;
-    kind?: string; accepts?: boolean;
+    kind?: string; resource?: string; accepts?: boolean;
   };
   if (!body.channelId) return response({ error: "Channel gerekli." }, 400);
   const channel = await channelFor(user.id, body.channelId);
@@ -108,12 +110,14 @@ export async function POST(request: Request) {
   }
   if (body.action === "agitate") {
     if (!body.targetId) return response({ error: "Kese hedefi gerekli." }, 400);
-    const kind = body.kind === "gold_garrison" ? "gold_garrison" as const : "gold_commons" as const;
+    const kind = body.kind === "gold_garrison" ? "gold_garrison" as const
+      : body.kind === "goods_glut" ? "goods_glut" as const : "gold_commons" as const;
+    const resource = isTraded(String(body.resource)) ? String(body.resource) as TradeKey : "food";
     const outcome = await sendAgitation({
-      channel, sourceUserId: user.id, targetUserId: body.targetId, kind, now: Date.now(),
+      channel, sourceUserId: user.id, targetUserId: body.targetId, kind, resource, now: Date.now(),
     });
     if (!outcome.ok) return response({ error: outcome.error }, outcome.status);
-    return response({ sent: true, completesAt: outcome.completesAt, cost: outcome.cost });
+    return response({ sent: true, completesAt: outcome.completesAt, cost: outcome.cost, resource: outcome.resource });
   }
   if (body.action === "defend") {
     const activeUntil = Date.now() + 3_600_000;

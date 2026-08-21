@@ -135,6 +135,14 @@ export type Game = {
   agitationAt?: number;
   /** Yakalanan kesenin hedefe verdiği kalkanın bitiş anı. */
   agitationShieldUntil?: number;
+  /**
+   * MAL KESESİ: yabancının pazara yığdığı mal, referans stoğun katı olarak.
+   * Fiyat hesabının yalnızca SATIŞ koluna girer; alışa ve rızaya girmez, yani
+   * hedef bu maldan ne ambar doldurabilir ne rıza kazanabilir.
+   * SUNUCU-TÜREVİDİR.
+   */
+  commonsGlut?: Partial<Record<TradeKey, number>>;
+  commonsGlutAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

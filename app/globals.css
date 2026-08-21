@@ -58,6 +58,8 @@
 .market-head small{flex:1;font-size:.7rem;opacity:.68}
 .market-head button{padding:2px 7px;border:0;border-radius:3px;background:transparent;color:#efe0c0;cursor:pointer;font-size:.85rem}
 .market-sheet .market-note{margin:0 0 10px;font-size:.73rem;line-height:1.45;opacity:.66}
+/* Yabancı bir Kral pazara mal yığmışsa satış fiyatları olması gerekenin altında. */
+.market-glut{margin:0 0 10px;padding:7px 9px;border-left:2px solid #c9873c;border-radius:3px;background:rgba(201,135,60,.12);font-size:.73rem;line-height:1.45;color:#f0d9ae}
 .market-open{display:grid;gap:6px;margin-bottom:11px;padding-bottom:10px;border-bottom:1px solid rgba(214,168,80,.2)}
 .open-order{position:relative;display:flex;align-items:center;justify-content:space-between;gap:9px;padding:7px 9px 9px;border-radius:4px;background:rgba(255,236,200,.07)}
 .open-order b{font-size:.76rem}

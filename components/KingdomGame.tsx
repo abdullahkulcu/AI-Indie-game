@@ -245,11 +245,13 @@ async function openNegotiation(){
     if(action.name==="send_purse"){
      const ordinal=Math.floor(Number(action.arguments.target_ordinal));const target=otherKingdoms[ordinal-1];
      if(!target){results.push(`✕ Kese emri uygulanmadı: ${ordinal}. sancak haritada yok.`);continue}
-     const kind=String(action.arguments.target)==="garrison"?"gold_garrison":"gold_commons";
-     const response=await fetch("/api/world",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"agitate",channelId,targetId:target.id,kind})});
-     const data=await response.json() as {sent?:boolean;cost?:number;error?:string};
+     const aim=String(action.arguments.target);
+     const kind=aim==="garrison"?"gold_garrison":aim==="market"?"goods_glut":"gold_commons";
+     const where=kind==="gold_garrison"?"kışlasına":kind==="goods_glut"?"pazarına":"halkının arasına";
+     const response=await fetch("/api/world",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"agitate",channelId,targetId:target.id,kind,resource:action.arguments.resource})});
+     const data=await response.json() as {sent?:boolean;cost?:number;resource?:string;error?:string};
      if(!response.ok){results.push(`✕ Kese gönderilemedi: ${data.error??"sunucu reddetti."}`);continue}
-     results.push(`✓ ${target.name??`${ordinal}. sancağın`} ${kind==="gold_garrison"?"kışlasına":"halkının arasına"} ${data.cost??600} altınlık kese yollandı. Sonucunu ancak hedefin kendisi hissedecek.`);
+     results.push(`✓ ${target.name??`${ordinal}. sancağın`} ${where} ${data.cost??600} ${data.resource??"gold"} değerinde kese yollandı. Sonucunu ancak hedefin kendisi hissedecek.`);
      worldRefresh.current?.();
      continue;
     }
@@ -352,6 +354,9 @@ async function openNegotiation(){
        <p className="market-note">Pazarımız yok; hiçbir kaynak altına çevrilemez. Kale Sv.2'de Pazar kurulabilir.</p></>
      :<><div className="market-head"><b>Pazar Sv.{pazar.level}</b><small>{pazar.freeSlots}/{pazar.slots} yuva boş · {pazar.left} birim hacim</small><button onClick={()=>setMarketOpen(false)}>✕</button></div>
        <p className="market-note">Bu pazar halkınla ticarettir. Fiyat halkın elindekinden doğar: azalınca yükselir, bollaşınca düşer. Alış satıştan {Math.round((pazar.spread-1)*100)}% pahalıdır.</p>
+       {/* Pazar bozma: Kral az altın aldığını görmeden yönetemez. Yığın yalnızca
+           satış fiyatını düşürür; alış ve rıza ondan hiç etkilenmez. */}
+       {pazar.glutted&&<p className="market-glut">Tezgâhlarda kimsenin bilmediği bir bolluk var: satış fiyatları olması gerekenin altında. Alış fiyatı ve halkın geçim yükü bundan etkilenmiyor; yığın zamanla eriyecek.</p>}
        {(()=>{const yasam=pazar.livingCost,etki=livingCostMood(yasam);
          return <div className={etki<0?"living-cost strain":etki>0?"living-cost relief":"living-cost"}>
           <span>GEÇİM YÜKÜ</span>

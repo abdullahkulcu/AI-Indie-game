@@ -198,6 +198,14 @@ export const gameSaveSchema = z.object({
   agitationBribe: finite(100).optional(),
   agitationAt: timestamp.optional(),
   agitationShieldUntil: timestamp.optional(),
+  /** Mal kesesinin yığını; referans stoğun katı olarak, mal başına. */
+  commonsGlut: z.object(
+    Object.fromEntries(TRADED_RESOURCE_KEYS.map(key => [key, finite(10).optional()])) as Record<
+      (typeof TRADED_RESOURCE_KEYS)[number],
+      z.ZodOptional<z.ZodNumber>
+    >,
+  ).strict().optional(),
+  commonsGlutAt: timestamp.optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
@@ -336,6 +344,10 @@ export const SERVER_DERIVED = [
   "agitationBribe",
   "agitationAt",
   "agitationShieldUntil",
+  // Mal kesesi: yığın istemcinin elinde olsaydı Kral kendi pazarını "bozulmamış"
+  // ilan edip satış getirisini geri kazanırdı.
+  "commonsGlut",
+  "commonsGlutAt",
 ] as const;
 
 export function applyServerDerived(game: GameSave, simulated: GameSave | null): GameSave {

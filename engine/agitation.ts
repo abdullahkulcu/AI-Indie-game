@@ -1,4 +1,5 @@
-import type { Game } from "./types";
+import { BASE_PRICE, TRADED_KEYS } from "./market";
+import type { Game, TradeKey } from "./types";
 
 /**
  * DIŞ KESE — komşu krallığın halkına ya da askerine gönderilen para.
@@ -26,7 +27,7 @@ import type { Game } from "./types";
  * yerini tutmaz.
  */
 
-export type AgitationKind = "gold_commons" | "gold_garrison";
+export type AgitationKind = "gold_commons" | "gold_garrison" | "goods_glut";
 
 export const AGITATION = {
   /** Sabit fiyat. Serbest miktar yok: 600, doğrulayıcının 250 altınlık
@@ -59,6 +60,37 @@ export const AGITATION = {
   pairWaitHours: 6,
 } as const;
 
+/**
+ * MAL KESESİ (pazar bozma). Kral kendi ambarından mal çıkarıp hedefin halkına
+ * yığar; amaç kaynak vermek değil, hedefin PAZARINI bozmaktır.
+ *
+ * Düz `commons`'a yazmak iki TERS etki üretiyordu: hedef şişirilen malın büyük
+ * bölümünü ucuza satın alıp kendi ambarına koyabiliyordu, ve şişen stok hedefin
+ * RIZASINI yükseltiyordu (bol mal = memnun halk). Bu yüzden yığın ayrı bir
+ * taşıyıcıda (`commonsGlut`) durur ve fiyat hesabının YALNIZCA SATIŞ koluna
+ * girer (bkz. engine/market.ts → fillOrder / marketPrices).
+ *
+ * Ölçülen etki, üç sabitin (pay, sönüm, bekleme) çarpımından KENDİLİĞİNDEN
+ * çıkar: tek kese satış getirisini %33 düşürür; 6 oyun saati arayla art arda
+ * gönderilen keseler dengeye oturur (0,6 / (1 − e^(−6/8)) ≈ 1,137 referans
+ * katı) ve kalıcı düşüş %62,5 olur. Fiyat modelinin tabanına (kapsama 2,2727)
+ * hiçbir zaman çakmaz, yani pazar "her zaman bozuk ama tek seferde deşifre
+ * olmayan" hâlde kalır.
+ */
+export const GLUT = {
+  /** Tek kesenin yığdığı mal, referans stoğun katı olarak. */
+  perPurse: .6,
+  /** Emniyet tavanı; dengenin (≈1,137) üstünde ve fiyat tabanının (1,2727) altında. */
+  cap: 1.2,
+  /** Taban maliyet: 900 yiyecek. Diğer mallar aynı ALTIN DEĞERİNE göre ölçülür. */
+  baseCost: 900,
+} as const;
+
+/** Malın eşdeğer miktarı: 900 yiyeceğin altın karşılığı kaç birim eder? */
+export function glutCost(key: TradeKey) {
+  return Math.max(1, Math.ceil(GLUT.baseCost * BASE_PRICE.food / BASE_PRICE[key]));
+}
+
 /** Kesenin yolda geçireceği gerçek süre; hızlı channel'da yol da kısalır. */
 export const agitationTravelMs = (channelSpeed: number) =>
   Math.max(15_000, Math.round(AGITATION.travelMinutes * 60_000 / Math.max(1, channelSpeed || 1)));
@@ -80,6 +112,8 @@ export const agitationDayStart = (at: number, channelSpeed: number) =>
   at - 86_400_000 / Math.max(1, channelSpeed || 1);
 
 type AgitationCarrier = Pick<Game, "agitationPressure" | "agitationBribe" | "agitationAt" | "agitationShieldUntil" | "speed">;
+
+type GlutCarrier = Pick<Game, "commonsGlut" | "commonsGlutAt" | "agitationShieldUntil" | "speed">;
 
 const gameHours = (from: number, to: number, speed: number) =>
   Math.max(0, (to - from) / 3_600_000 * Math.max(1, speed || 1));
@@ -147,24 +181,83 @@ export function applyAgitation(
 }
 
 /**
+ * Yığının ŞU ANDAKİ payı, mal başına ve referans stoğun katı olarak.
+ * Altın kesesiyle aynı damga tabanlı kapalı çözüm; kalkan sönümü hızlandırır.
+ */
+export function glutShare(game: GlutCarrier, now: number): Record<TradeKey, number> {
+  const at = game.commonsGlutAt ?? 0;
+  const tau = agitationShielded(game, now) ? AGITATION.shieldedTau : AGITATION.tau;
+  const decay = at > 0 ? Math.exp(-gameHours(at, now, game.speed) / tau) : 0;
+  const stored = game.commonsGlut ?? {};
+  return Object.fromEntries(TRADED_KEYS.map(key => {
+    const value = Number(stored[key]) || 0;
+    return [key, Math.max(0, Math.min(GLUT.cap, value * decay))];
+  })) as Record<TradeKey, number>;
+}
+
+/**
+ * Yığının FİYATLANDIRMADA kullanılacak mutlak miktarı. Referansla çarpılır ki
+ * nüfus büyüyünce aynı yığın daha az bozsun: küçük bir köyü şişirmek kolaydır.
+ */
+export function glutStock(game: GlutCarrier, reference: Record<TradeKey, number>, now: number): Record<TradeKey, number> {
+  const share = glutShare(game, now);
+  return Object.fromEntries(TRADED_KEYS.map(key => [key, share[key] * (reference[key] ?? 0)])) as Record<TradeKey, number>;
+}
+
+/**
+ * Yeni bir mal kesesinin hedefin kaydına yazacağı yığın. Altın kesesiyle aynı
+ * geriye dönük damgalama: `at` malın VARDIĞI andır.
+ *
+ * Mal kesesi hizip baskısı ÜRETMEZ ve rızaya dokunmaz — üretseydi iki kese
+ * birbirini götürürdü, çünkü bol mal halkı memnun eder.
+ */
+export function applyGlut(
+  game: GlutCarrier,
+  key: TradeKey,
+  at: number,
+): { commonsGlut: Partial<Record<TradeKey, number>>; commonsGlutAt: number } {
+  const decayed = glutShare(game, at);
+  const share = agitationShielded(game, at) ? AGITATION.shieldedShare : 1;
+  const next: Partial<Record<TradeKey, number>> = {};
+  for (const traded of TRADED_KEYS) {
+    const value = traded === key
+      ? Math.min(GLUT.cap, decayed[traded] + GLUT.perPurse * share)
+      : decayed[traded];
+    if (value > 0) next[traded] = value;
+  }
+  return { commonsGlut: next, commonsGlutAt: at };
+}
+
+/**
  * İFŞA, iki kademeli ve zarsız.
  *
  * 1. kademe (her zaman): "bir şey oldu", kimlik yok.
  * 2. kademe (hedefin karşı-istihbaratı kesenin VARDIĞI anda ayaktaysa):
  *    gönderenin adı, itibar cezası ve hedefe kalkan.
  */
-export const AGITATION_NOTICE = {
-  commons: "Halkın arasında yabancı bir el sezildi; kim olduğu belli değil. Kahvelerde dağıtılan paranın izi bulunamadı.",
-  garrison: "Kışlada yabancı bir kese dolaştığı duyuldu; kimin gönderdiği belli değil.",
-} as const;
+export const AGITATION_NOTICE: Record<AgitationKind, string> = {
+  gold_commons: "Halkın arasında yabancı bir el sezildi; kim olduğu belli değil. Kahvelerde dağıtılan paranın izi bulunamadı.",
+  gold_garrison: "Kışlada yabancı bir kese dolaştığı duyuldu; kimin gönderdiği belli değil.",
+  goods_glut: "Pazarda tuhaf bir bolluk var: kimsenin bilmediği kervanlar tezgâhları doldurdu, satış fiyatları düştü. Malın nereden geldiği anlaşılamadı.",
+};
+
+const WHERE: Record<AgitationKind, string> = {
+  gold_commons: "halkımızın arasına para dağıtıyordu",
+  gold_garrison: "kışlamıza para sokuyordu",
+  goods_glut: "pazarımızı bozmak için kervanla mal yığıyordu",
+};
 
 export const agitationExposedNotice = (kingdom: string, kind: AgitationKind) =>
-  kind === "gold_commons"
-    ? `Karşı-istihbarat nöbeti keseyi yakaladı: ${kingdom} halkımızın arasına para dağıtıyordu. Yakalanan hat bir süre daha kapalı kalacak.`
-    : `Karşı-istihbarat nöbeti keseyi yakaladı: ${kingdom} kışlamıza para sokuyordu. Yakalanan hat bir süre daha kapalı kalacak.`;
+  `Karşı-istihbarat nöbeti eli yakaladı: ${kingdom} ${WHERE[kind]}. Yakalanan hat bir süre daha kapalı kalacak.`;
+
+const SENT_TO: Record<AgitationKind, string> = {
+  gold_commons: "halkının arasına",
+  gold_garrison: "kışlasına",
+  goods_glut: "pazarına",
+};
 
 /** Gönderene yazılan satır; hedefin adı gönderen zaten bildiği için verilir. */
 export const agitationSenderNotice = (target: string, kind: AgitationKind, exposed: boolean) =>
   exposed
     ? `${target} kesemizi yakaladı; kimliğimiz açığa çıktı ve itibarımız zedelendi.`
-    : `Kese ${target} ${kind === "gold_commons" ? "halkının arasına" : "kışlasına"} sessizce ulaştı.`;
+    : `Kese ${target} ${SENT_TO[kind]} sessizce ulaştı.`;
