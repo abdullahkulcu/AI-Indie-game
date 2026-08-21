@@ -7,7 +7,7 @@ import { getDb } from "../../../db";
 import { agitations, agreements, channels, gameSaves, intelDefenses, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
   AGITATION, AGITATION_NOTICE, type AgitationKind,
-  agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut,
+  agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut, applyLure,
 } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
 import {
@@ -510,7 +510,11 @@ async function settleAgitations(now: number) {
     // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
     const patch = kind === "goods_glut"
       ? applyGlut({ ...target, speed }, isTraded(row.costResource) ? row.costResource : "food", row.completesAt)
-      : applyAgitation({ ...target, speed }, kind, row.completesAt);
+      : kind === "raid_lure"
+        // Yönlendirme `completesAt`e damgalanır; akın penceresi bu damgayı
+        // pencerenin BAŞLANGICINA göre okur, yani sonuç iki okumada da aynı.
+        ? applyLure({ ...target, speed }, row.completesAt)
+        : applyAgitation({ ...target, speed }, kind, row.completesAt);
     const senderName = exposed ? await displayNameOf(row.sourceUserId, channelName) : "";
     const text = exposed ? agitationExposedNotice(senderName, kind) : AGITATION_NOTICE[kind];
 

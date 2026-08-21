@@ -27,7 +27,7 @@ import type { Game, TradeKey } from "./types";
  * yerini tutmaz.
  */
 
-export type AgitationKind = "gold_commons" | "gold_garrison" | "goods_glut";
+export type AgitationKind = "gold_commons" | "gold_garrison" | "goods_glut" | "raid_lure";
 
 export const AGITATION = {
   /** Sabit fiyat. Serbest miktar yok: 600, doğrulayıcının 250 altınlık
@@ -228,6 +228,58 @@ export function applyGlut(
   return { commonsGlut: next, commonsGlutAt: at };
 }
 
+// --- HAYDUT YÖNLENDİRME ----------------------------------------------------
+
+/**
+ * Kral, dağ yollarındaki eşkıyayı komşusunun kalesine doğru çeker.
+ *
+ * Yönlendirme akının ŞİDDETİNE DOKUNMAZ — dokunsaydı "asıl karar nöbet
+ * oranındadır" ilkesi bozulurdu. Yalnızca SIKLIĞI ve haydut türünün ağırlığını
+ * bir süre kaydırır (bkz. engine/raids.ts → raidInWindow).
+ *
+ * Zar hedefin kendi tohumunda kalır; yönlendirme yalnızca eşiği kaydırır. Bunun
+ * belirleyici teknik ayrıntısı şudur: yönlendirme akının çözüldüğü ana DEĞİL,
+ * PENCERENİN BAŞLANGICINA göre okunur. Aksi hâlde `resolveRaids`'in iki kez
+ * çağrılması (istemcinin tick'i ve sunucunun `checkAgainstSimulation`'ı) aynı
+ * pencerede iki farklı akın üretirdi.
+ *
+ * Ölçülen etki (ova, Sur yok, Kale Sv.3): 24 saatte beklenen akın sayısı
+ * 0,94'ten 1,60'a çıkar. Asıl stratejik değeri yağma değil, hedefi nöbet
+ * oranını yükseltmeye zorlaması: nöbet yükseldikçe `suppression` zayıflar, yani
+ * bu mekanik iç hizip ve asker kesesiyle SİNERJİKTİR.
+ */
+export const LURE = {
+  /** Tek yönlendirmenin akın ihtimaline çarpan olarak eklediği pay. */
+  perPurse: .7,
+  /** Hedefte en fazla iki etkin yönlendirme birikir; fazlası kırpılır. */
+  cap: 1.4,
+  /** Haydut ağırlığının kaymasının tavanı: yönlendirilen eşkıya yol keser. */
+  banditShift: .5,
+} as const;
+
+type LureCarrier = Pick<Game, "raidLure" | "raidLureAt" | "agitationShieldUntil" | "speed">;
+
+/**
+ * Yönlendirmenin `at` ANINDAKİ payı. Saf ve damga tabanlı: aynı pencere için
+ * kaç kez sorulursa sorulsun aynı sayıyı verir.
+ */
+export function lureAt(game: LureCarrier, at: number) {
+  const stamp = game.raidLureAt ?? 0;
+  if (!(stamp > 0)) return 0;
+  const tau = agitationShielded(game, at) ? AGITATION.shieldedTau : AGITATION.tau;
+  const decay = Math.exp(-gameHours(stamp, at, game.speed) / tau);
+  return Math.max(0, Math.min(LURE.cap, (game.raidLure ?? 0) * decay));
+}
+
+/** Yeni bir yönlendirmenin hedefin kaydına yazacağı değerler. */
+export function applyLure(game: LureCarrier, at: number): { raidLure: number; raidLureAt: number } {
+  const share = agitationShielded(game, at) ? AGITATION.shieldedShare : 1;
+  return {
+    raidLure: Math.min(LURE.cap, lureAt(game, at) + LURE.perPurse * share),
+    raidLureAt: at,
+  };
+}
+
 /**
  * İFŞA, iki kademeli ve zarsız.
  *
@@ -239,12 +291,14 @@ export const AGITATION_NOTICE: Record<AgitationKind, string> = {
   gold_commons: "Halkın arasında yabancı bir el sezildi; kim olduğu belli değil. Kahvelerde dağıtılan paranın izi bulunamadı.",
   gold_garrison: "Kışlada yabancı bir kese dolaştığı duyuldu; kimin gönderdiği belli değil.",
   goods_glut: "Pazarda tuhaf bir bolluk var: kimsenin bilmediği kervanlar tezgâhları doldurdu, satış fiyatları düştü. Malın nereden geldiği anlaşılamadı.",
+  raid_lure: "Dağ yollarında tuhaf bir hareket var: eşkıya sanki kaleye doğru çekilmiş. Kimin çektiği belli değil.",
 };
 
 const WHERE: Record<AgitationKind, string> = {
   gold_commons: "halkımızın arasına para dağıtıyordu",
   gold_garrison: "kışlamıza para sokuyordu",
   goods_glut: "pazarımızı bozmak için kervanla mal yığıyordu",
+  raid_lure: "dağ eşkıyasını kalemize doğru çekiyordu",
 };
 
 export const agitationExposedNotice = (kingdom: string, kind: AgitationKind) =>
@@ -254,6 +308,7 @@ const SENT_TO: Record<AgitationKind, string> = {
   gold_commons: "halkının arasına",
   gold_garrison: "kışlasına",
   goods_glut: "pazarına",
+  raid_lure: "yollarına",
 };
 
 /** Gönderene yazılan satır; hedefin adı gönderen zaten bildiği için verilir. */

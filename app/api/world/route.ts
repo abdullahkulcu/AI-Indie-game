@@ -111,7 +111,8 @@ export async function POST(request: Request) {
   if (body.action === "agitate") {
     if (!body.targetId) return response({ error: "Kese hedefi gerekli." }, 400);
     const kind = body.kind === "gold_garrison" ? "gold_garrison" as const
-      : body.kind === "goods_glut" ? "goods_glut" as const : "gold_commons" as const;
+      : body.kind === "goods_glut" ? "goods_glut" as const
+      : body.kind === "raid_lure" ? "raid_lure" as const : "gold_commons" as const;
     const resource = isTraded(String(body.resource)) ? String(body.resource) as TradeKey : "food";
     const outcome = await sendAgitation({
       channel, sourceUserId: user.id, targetUserId: body.targetId, kind, resource, now: Date.now(),

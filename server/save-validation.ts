@@ -206,6 +206,9 @@ export const gameSaveSchema = z.object({
     >,
   ).strict().optional(),
   commonsGlutAt: timestamp.optional(),
+  /** Haydut yönlendirmesinin akın ihtimaline eklediği pay. */
+  raidLure: finite(10).optional(),
+  raidLureAt: timestamp.optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(100).optional(),
   lastRaidAt: timestamp.optional(),
@@ -348,6 +351,10 @@ export const SERVER_DERIVED = [
   // ilan edip satış getirisini geri kazanırdı.
   "commonsGlut",
   "commonsGlutAt",
+  // Haydut yönlendirmesi: istemci bunu sıfırlayabilse akın sıklığını kendi
+  // lehine düşürür ve mekanik tamamen kapanırdı.
+  "raidLure",
+  "raidLureAt",
 ] as const;
 
 export function applyServerDerived(game: GameSave, simulated: GameSave | null): GameSave {

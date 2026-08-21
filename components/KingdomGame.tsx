@@ -10,6 +10,7 @@ import { catalog, resourceLabels, terrainCatalog } from "@/engine/catalog";
 import { affordable, buildOptions, keep, materialScaleOf, rates, servedRations, tick } from "@/engine/tick";
 import { garrisonMood, garrisonVetoes } from "@/engine/populace-voice";
 import { factionLeaderName, factionPressureOf, factionState, FACTION_THRESHOLDS } from "@/engine/faction";
+import { lureAt } from "@/engine/agitation";
 import { generalNameFor } from "@/engine/general-name";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
@@ -246,8 +247,8 @@ async function openNegotiation(){
      const ordinal=Math.floor(Number(action.arguments.target_ordinal));const target=otherKingdoms[ordinal-1];
      if(!target){results.push(`✕ Kese emri uygulanmadı: ${ordinal}. sancak haritada yok.`);continue}
      const aim=String(action.arguments.target);
-     const kind=aim==="garrison"?"gold_garrison":aim==="market"?"goods_glut":"gold_commons";
-     const where=kind==="gold_garrison"?"kışlasına":kind==="goods_glut"?"pazarına":"halkının arasına";
+     const kind=aim==="garrison"?"gold_garrison":aim==="market"?"goods_glut":aim==="raids"?"raid_lure":"gold_commons";
+     const where=kind==="gold_garrison"?"kışlasına":kind==="goods_glut"?"pazarına":kind==="raid_lure"?"yollarına":"halkının arasına";
      const response=await fetch("/api/world",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"agitate",channelId,targetId:target.id,kind,resource:action.arguments.resource})});
      const data=await response.json() as {sent?:boolean;cost?:number;resource?:string;error?:string};
      if(!response.ok){results.push(`✕ Kese gönderilemedi: ${data.error??"sunucu reddetti."}`);continue}
@@ -557,6 +558,9 @@ async function openNegotiation(){
    </div>
    <div className="raid-log">
     <div className="raid-tally"><span>Püskürtülen</span><b>{game.raidsRepelled??0}</b><span>Yarılan</span><b className={(game.raidsSuffered??0)>0?"bad":""}>{game.raidsSuffered??0}</b></div>
+    {/* Yönlendirme: hedef ne olduğunu hisseder ama kimin çektiğini bilemez —
+        bilgi sınırı burada da geçerli. Şiddet değişmez, sıklık artar. */}
+    {lureAt(game,now)>0&&<p className="raid-lure">Dağ yollarında tuhaf bir hareket var: akınlar olması gerekenden sık geliyor ve eşkıya hep bu tarafa çekiliyor. Akınların şiddeti değişmedi; sıklığı arttı. Kimin çektiği belli değil.</p>}
     {raids.length?raids.map((n,i)=><p key={i}>{n.text}</p>):<p className="quiet">Dağlardan henüz akın gelmedi.</p>}
    </div></>;})()}
   </div>}

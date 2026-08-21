@@ -77,6 +77,8 @@
 .raid-tally b.bad{color:#8f3512}
 .raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
 .raid-log p.quiet{color:#8a7854;font-style:italic}
+/* Yabancı bir Kral eşkıyayı bu tarafa çekmişse akınlar sıklaşır; kimin çektiği belli değildir. */
+.raid-log p.raid-lure{margin:6px 0;padding:6px 8px;border-left:2px solid #b26a1f;background:#f6e6c4;color:#8a5a1c;font-style:normal}
 
 /* ---- Halkın Sesi (Halk sekmesi) ----
    Halkın ve kışlanın Kraldan açık talepleri. Görsel dil parşömen + kızıl-kahve;

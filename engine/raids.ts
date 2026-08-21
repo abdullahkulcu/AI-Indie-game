@@ -1,3 +1,4 @@
+import { LURE, lureAt } from "./agitation";
 import { terrainCatalog } from "./catalog";
 import { armySize } from "./populace";
 import type { Game, TerrainId } from "./types";
@@ -140,9 +141,21 @@ const windowIndexAt = (game: Pick<Game, "speed" | "foundedAt">, at: number) =>
 export const windowStart = (game: Pick<Game, "speed" | "foundedAt">, index: number) =>
   Math.round(game.foundedAt + index * windowMs(game));
 
-/** Akın türünü ağırlıklı kurayla seçer. */
-function pickKind(terrain: TerrainId, roll: number): RaidKind {
-  const weights = (TERRAIN_RAIDS[terrain] ?? TERRAIN_RAIDS.plain).weights;
+/**
+ * Akın türünü ağırlıklı kurayla seçer.
+ *
+ * `lure` verilirse ağırlık haydutlara doğru kayar: yönlendirilen eşkıya yol
+ * kesen haydutlardır, dağdan inen kurt değil. Kayma yalnızca TÜR dağılımını
+ * oynatır; her türün kendi şiddeti sabittir.
+ */
+function pickKind(terrain: TerrainId, roll: number, lure = 0): RaidKind {
+  const base = (TERRAIN_RAIDS[terrain] ?? TERRAIN_RAIDS.plain).weights;
+  const shift = Math.max(0, Math.min(LURE.banditShift, lure * .35));
+  const weights: Record<RaidKind, number> = {
+    wolves: base.wolves * (1 - shift),
+    bandits: base.bandits * (1 - shift) + shift,
+    mountain_raiders: base.mountain_raiders * (1 - shift),
+  };
   let cursor = 0;
   for (const kind of Object.keys(weights) as RaidKind[]) {
     cursor += weights[kind];
@@ -160,7 +173,8 @@ export type PlannedRaid = { kind: RaidKind; label: string; threat: number; at: n
  * Koruma süresi akınları engellemez; krallık kurulduğu andan itibaren akına açıktır.
  */
 export function raidInWindow(
-  game: Pick<Game, "kingdomName" | "foundedAt" | "speed" | "terrain" | "buildings" | "protectionEndsAt">,
+  game: Pick<Game, "kingdomName" | "foundedAt" | "speed" | "terrain" | "buildings" | "protectionEndsAt">
+    & Partial<Pick<Game, "raidLure" | "raidLureAt" | "agitationShieldUntil">>,
   index: number,
 ): PlannedRaid | null {
   // Koruma süresi akınları durdurmaz: dağdaki kurt da haydut da fermanı tanımaz.
@@ -174,12 +188,17 @@ export function raidInWindow(
 
   const terrain = TERRAIN_RAIDS[game.terrain] ?? TERRAIN_RAIDS.plain;
   const level = keepLevel(game);
+  // Yabancı bir Kralın yönlendirmesi. PENCERENİN BAŞLANGICINA (`at`) göre
+  // okunur, çözüm anına değil: `resolveRaids` iki kez çağrıldığında (istemcinin
+  // tick'i ve sunucunun doğrulaması) aynı pencere aynı akını üretmek zorunda.
+  // Yönlendirme yalnızca EŞİĞİ kaydırır; zar hedefin kendi tohumunda kalır.
+  const lure = lureAt(game, at);
   // Zengin ve büyük kale daha çok göze batar; ihtimal ölçülü biçimde artar.
-  const chance = Math.min(.45, terrain.chance * (1 + (level - 1) * .06));
+  const chance = Math.min(.45, terrain.chance * (1 + (level - 1) * .06) * (1 + lure));
   const seed = `${game.kingdomName}:${game.foundedAt}:${index}`;
   if (rand01(`${seed}:gelir`) >= chance) return null;
 
-  const kind = pickKind(game.terrain, rand01(`${seed}:tur`));
+  const kind = pickKind(game.terrain, rand01(`${seed}:tur`), lure);
   const entry = raidCatalog[kind];
   // Şiddet krallığın gelişmişliğiyle ölçeklenir: kale seviyesi ve geçen gün.
   const days = Math.min(30, Math.max(0, (at - game.foundedAt) / 86_400_000 * Math.max(1, game.speed || 1)));

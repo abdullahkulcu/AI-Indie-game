@@ -31,6 +31,7 @@ export const AGITATION_LABELS: Record<AgitationKind, string> = {
   gold_commons: "halkın arasına",
   gold_garrison: "kışlaya",
   goods_glut: "pazarına",
+  raid_lure: "yollarına",
 };
 
 /**

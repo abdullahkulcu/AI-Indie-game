@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyActions, marketState } from "../engine/actions";
 import {
-  AGITATION, GLUT, agitationDayStart, agitationEffect, agitationPairWindow,
-  agitationTravelMs, applyAgitation, applyGlut, feltUnrest, glutCost, glutShare,
+  AGITATION, GLUT, LURE, agitationDayStart, agitationEffect, agitationPairWindow,
+  agitationTravelMs, applyAgitation, applyGlut, applyLure, feltUnrest, glutCost,
+  glutShare, lureAt,
 } from "../engine/agitation";
+import { raidInWindow, resolveRaids } from "../engine/raids";
 import { BASE_PRICE, PRICE_FLOOR, fillOrder, maxPurchase } from "../engine/market";
 import { SOLDIER_THRESHOLDS, suppression } from "../engine/populace";
 import { factionPressureOf } from "../engine/faction";
@@ -339,6 +341,117 @@ test("istemcinin bildirdiği yığın yok sayılır", () => {
   assert.equal(result.ok, true);
   assert.deepEqual(result.ok && result.game.commonsGlut, { food: 1 });
   assert.equal(result.ok && result.game.commonsGlutAt, T0);
+});
+
+// --- Haydut yönlendirme ---------------------------------------------------
+
+/** Ova, Sur yok, Kale Sv.3, 20 asker: planın ölçüm kurulumu. */
+const lured = (overrides: Partial<Game> = {}) => newGame({
+  terrain: "plain",
+  buildings: [
+    { type: "keep", name: "Kale", category: "Yönetim", level: 3 },
+    { type: "barracks", name: "Kışla", category: "Askeri", level: 1 },
+  ],
+  ...overrides,
+});
+
+/** 24 oyun saatinde (6 pencere) beklenen akın sayısı; birçok krallık üstünde ortalanır. */
+function expectedRaids(overrides: Partial<Game>, samples = 4000) {
+  let total = 0;
+  for (let i = 0; i < samples; i += 1) {
+    const game = lured({ kingdomName: `Kale${i}`, ...overrides });
+    for (let window = 1; window <= 6; window += 1) {
+      if (raidInWindow(game, window)) total += 1;
+    }
+  }
+  return total / samples;
+}
+
+test("yönlendirme akın sıklığını ölçülü artırır", () => {
+  const quiet = expectedRaids({});
+  const pulled = expectedRaids({ raidLure: LURE.perPurse, raidLureAt: T0 - 40 * 86_400_000 });
+  // Damga çok eskiyse sönüm her şeyi siler; taze damgayla ölçelim.
+  assert.ok(Math.abs(quiet - .94) < .12, `yönlendirmesiz beklenen akın ${quiet.toFixed(2)}`);
+  assert.ok(pulled <= quiet + .0001, "çok eski damga etkisiz olmalı");
+});
+
+test("taze yönlendirme 24 saatte beklenen akını 0,94'ten 1,6'ya taşır", () => {
+  // Damga ilk pencerenin başlangıcında: sönüm pencereler ilerledikçe işler.
+  const quiet = expectedRaids({});
+  const pulled = expectedRaids({ raidLure: LURE.cap, raidLureAt: T0 });
+  assert.ok(pulled > quiet * 1.5, `yönlendirmesiz ${quiet.toFixed(2)}, yönlendirmeli ${pulled.toFixed(2)}`);
+  assert.ok(pulled < 6 * .45, "ihtimal tavanı aşılmaz");
+});
+
+test("yönlendirme akının ŞİDDETİNE dokunmaz", () => {
+  // Aynı pencerede aynı tür akın çıktığında tehdidi birebir aynı olmalı.
+  let checked = 0;
+  for (let i = 0; i < 400 && checked < 20; i += 1) {
+    const name = `Kale${i}`;
+    const quiet = raidInWindow(lured({ kingdomName: name }), 3);
+    const pulled = raidInWindow(lured({ kingdomName: name, raidLure: LURE.perPurse, raidLureAt: T0 }), 3);
+    if (!quiet || !pulled || quiet.kind !== pulled.kind) continue;
+    assert.equal(pulled.threat, quiet.threat);
+    checked += 1;
+  }
+  assert.ok(checked > 0, "karşılaştırılabilir akın bulunmalı");
+});
+
+test("yönlendirme haydut ağırlığını kaydırır", () => {
+  const share = (overrides: Partial<Game>) => {
+    let bandits = 0, total = 0;
+    for (let i = 0; i < 4000; i += 1) {
+      const raid = raidInWindow(lured({ kingdomName: `Dag${i}`, terrain: "mountain", ...overrides }), 3);
+      if (!raid) continue;
+      total += 1;
+      if (raid.kind === "bandits") bandits += 1;
+    }
+    return bandits / Math.max(1, total);
+  };
+  assert.ok(share({ raidLure: LURE.cap, raidLureAt: T0 }) > share({}) + .1, "yönlendirilen eşkıya haydutlardır");
+});
+
+test("yönlendirme PENCERENİN BAŞLANGICINA damgalanır: iki çağrı aynı akını verir", () => {
+  // Determinizmin belirleyici testi: resolveRaids istemcide ve sunucunun
+  // doğrulamasında ayrı anlarda çağrılır; aynı pencere aynı akını üretmeli.
+  const game = lured({ raidLure: LURE.cap, raidLureAt: T0 });
+  const stock = { food: 5000, gold: 5000 };
+  const single = resolveRaids(game, T0, T0 + 24 * HOUR, stock);
+  let stepped = { events: [] as unknown[], count: 0 };
+  for (let hour = 0; hour < 24; hour += 1) {
+    const step = resolveRaids(game, T0 + hour * HOUR, T0 + (hour + 1) * HOUR, stock);
+    stepped = { events: [...stepped.events, ...step.events], count: stepped.count + step.events.length };
+  }
+  assert.equal(stepped.count, single.events.length, "adımlı çözüm aynı akınları üretmeli");
+  assert.deepEqual(
+    stepped.events.map(event => (event as { kind: string; at: number }).at),
+    single.events.map(event => event.at),
+  );
+});
+
+test("yönlendirme tavanı iki keseyle dolar, fazlası kırpılır", () => {
+  let carrier: Game = lured();
+  for (let i = 0; i < 6; i += 1) carrier = { ...carrier, ...applyLure(carrier, T0) };
+  assert.equal(carrier.raidLure, LURE.cap);
+  assert.equal(LURE.cap, LURE.perPurse * 2);
+});
+
+test("yönlendirme kapalı çözümle söner", () => {
+  const carrier = lured({ raidLure: LURE.perPurse, raidLureAt: T0 });
+  const later = lureAt(carrier, T0 + AGITATION.tau * HOUR);
+  assert.ok(Math.abs(later - LURE.perPurse / Math.E) < 1e-9, `çıkan ${later}`);
+  assert.equal(lureAt(lured(), T0 + HOUR), 0, "damga yoksa etki yok");
+});
+
+test("istemcinin bildirdiği yönlendirme yok sayılır", () => {
+  const previous = save(lured({ lastTickAt: T0, raidLure: LURE.cap, raidLureAt: T0 }));
+  const claimed = save({ ...tick(previous, T0 + HOUR), raidLure: 0, raidLureAt: 0 });
+  const result = validateGameSave(claimed, {
+    previous: previous as never, previousUpdatedAt: T0, channelSpeed: 1, now: T0 + HOUR,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.game.raidLure, LURE.cap);
+  assert.equal(result.ok && result.game.raidLureAt, T0);
 });
 
 // --- Sıfır ek model çağrısı ----------------------------------------------

@@ -143,6 +143,14 @@ export type Game = {
    */
   commonsGlut?: Partial<Record<TradeKey, number>>;
   commonsGlutAt?: number;
+  /**
+   * HAYDUT YÖNLENDİRME: akın ihtimaline eklenen çarpan payı. Akının ŞİDDETİNE
+   * dokunmaz, yalnızca SIKLIĞINI ve haydut türünün ağırlığını kaydırır.
+   * Pencerenin BAŞLANGICINA göre okunur (bkz. engine/raids.ts).
+   * SUNUCU-TÜREVİDİR.
+   */
+  raidLure?: number;
+  raidLureAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;
