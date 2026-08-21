@@ -13,7 +13,7 @@ import { SOLDIER_THRESHOLDS, suppression } from "../engine/populace";
 import { factionPressureOf } from "../engine/faction";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
-import { reputationChange } from "../server/game/diplomacy";
+import { reputationChange } from "../engine/diplomacy";
 import { validateGameSave } from "../server/save-validation";
 
 const T0 = 1_800_000_000_000;
