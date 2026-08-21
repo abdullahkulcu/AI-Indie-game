@@ -1,8 +1,12 @@
-import { and, desc, eq, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
+import { agitations, channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
+import { sendAgitation } from "../../../server/agitation-desk";
+import { AGITATION, agitationDayStart } from "../../../engine/agitation";
+import { isTraded } from "../../../engine/market";
+import type { TradeKey } from "../../../engine/types";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
 export const dynamic = "force-dynamic";
@@ -39,11 +43,14 @@ export async function GET(request: Request) {
   const channel = await channelFor(user.id, channelId);
   if (!channel) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
   await resolveDueMissions(user.id, channel.id, channel.name);
-  const [rows, missions, defense, incoming] = await Promise.all([
+  const dayStart = agitationDayStart(Date.now(), channel.speed);
+  const [rows, missions, defense, incoming, membership, sentToday] = await Promise.all([
     getDb().select({ userId: channelMembers.userId, gameState: gameSaves.gameState }).from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId)).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"))).orderBy(channelMembers.joinedAt),
     getDb().select().from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.sourceUserId, user.id))).orderBy(desc(intelMissions.completesAt)),
     getDb().select().from(intelDefenses).where(eq(intelDefenses.userId, user.id)).limit(1),
     getDb().select({ id: intelMissions.id }).from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.targetUserId, user.id), eq(intelMissions.status, "detected"))).limit(10),
+    getDb().select({ accepts: channelMembers.acceptsAgitation }).from(channelMembers).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.channelId, channel.id))).limit(1),
+    getDb().select({ total: count() }).from(agitations).where(and(eq(agitations.sourceUserId, user.id), gt(agitations.sentAt, dayStart))),
   ]);
   const latest = new Map<string, typeof missions[number]>();
   missions.forEach(mission => { if (!latest.has(mission.targetUserId)) latest.set(mission.targetUserId, mission); });
@@ -80,16 +87,48 @@ export async function GET(request: Request) {
       reportStale: report && mission ? isStaleReport(mission.completesAt, now) : false,
     }];
   });
-  return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length });
+  return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length,
+    // Dış kese: bedeli, günlük tavanı ve Kralın kendi opt-out durumu. Sabitler
+    // motordan okunur; panel kendi kopyasını tutmaz.
+    agitation: {
+      accepts: membership[0]?.accepts !== false,
+      cost: AGITATION.cost,
+      sentToday: Number(sentToday[0]?.total ?? 0),
+      perDay: AGITATION.perSenderPerDay,
+    } });
 }
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return response({ error: "Oturum gerekli." }, 401);
-  const body = await request.json() as { action?: "scout" | "defend"; channelId?: string; targetId?: string };
+  const body = await request.json() as {
+    action?: "scout" | "defend" | "agitate" | "set_agitation_opt";
+    channelId?: string; targetId?: string;
+    kind?: string; resource?: string; accepts?: boolean;
+  };
   if (!body.channelId) return response({ error: "Channel gerekli." }, 400);
   const channel = await channelFor(user.id, body.channelId);
   if (!channel) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
+  // Opt-out: `acceptsNegotiation` deseninin ikizi. Kral dış keseye kapanabilir;
+  // taciz aracına dönüşmesine karşı ilk savunma hattı budur.
+  if (body.action === "set_agitation_opt") {
+    const accepts = body.accepts !== false;
+    await getDb().update(channelMembers).set({ acceptsAgitation: accepts })
+      .where(and(eq(channelMembers.userId, user.id), eq(channelMembers.channelId, channel.id)));
+    return response({ acceptsAgitation: accepts });
+  }
+  if (body.action === "agitate") {
+    if (!body.targetId) return response({ error: "Kese hedefi gerekli." }, 400);
+    const kind = body.kind === "gold_garrison" ? "gold_garrison" as const
+      : body.kind === "goods_glut" ? "goods_glut" as const
+      : body.kind === "raid_lure" ? "raid_lure" as const : "gold_commons" as const;
+    const resource = isTraded(String(body.resource)) ? String(body.resource) as TradeKey : "food";
+    const outcome = await sendAgitation({
+      channel, sourceUserId: user.id, targetUserId: body.targetId, kind, resource, now: Date.now(),
+    });
+    if (!outcome.ok) return response({ error: outcome.error }, outcome.status);
+    return response({ sent: true, completesAt: outcome.completesAt, cost: outcome.cost, resource: outcome.resource });
+  }
   if (body.action === "defend") {
     const activeUntil = Date.now() + 3_600_000;
     await getDb().insert(intelDefenses).values({ userId: user.id, level: 1, activeUntil }).onConflictDoUpdate({ target: intelDefenses.userId, set: { level: 1, activeUntil, updatedAt: sql`CURRENT_TIMESTAMP` } });

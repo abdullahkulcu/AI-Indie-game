@@ -117,6 +117,40 @@ export type Game = {
   marketOrders?: MarketOrder[];
   /** Son depo taşması bildirimi; defteri saniyede bir uyarıyla doldurmamak için. */
   lastSpoilNoticeAt?: number;
+  /**
+   * İç hizip baskısı (0-100). Rıza uzun süre düşük kalınca birikir, düzelince
+   * erir; askerin zapt gücünü zayıflatır (bkz. engine/faction.ts).
+   *
+   * SUNUCU-TÜREVİDİR: istemcinin bildirdiği değer yok sayılır, sunucunun kendi
+   * `tick()`'i esas alınır (bkz. server/save-validation.ts → SERVER_DERIVED).
+   */
+  factionPressure?: number;
+  /**
+   * DIŞ KESE taşıyıcıları (bkz. engine/agitation.ts). Değerler `agitationAt`
+   * ANINDAKİ değerdir; sönüm okuma anında kapalı çözümle hesaplanır. Üçü de
+   * SUNUCU-TÜREVİDİR: istemci bunları ne yazabilir ne silebilir.
+   */
+  agitationPressure?: number;
+  agitationBribe?: number;
+  agitationAt?: number;
+  /** Yakalanan kesenin hedefe verdiği kalkanın bitiş anı. */
+  agitationShieldUntil?: number;
+  /**
+   * MAL KESESİ: yabancının pazara yığdığı mal, referans stoğun katı olarak.
+   * Fiyat hesabının yalnızca SATIŞ koluna girer; alışa ve rızaya girmez, yani
+   * hedef bu maldan ne ambar doldurabilir ne rıza kazanabilir.
+   * SUNUCU-TÜREVİDİR.
+   */
+  commonsGlut?: Partial<Record<TradeKey, number>>;
+  commonsGlutAt?: number;
+  /**
+   * HAYDUT YÖNLENDİRME: akın ihtimaline eklenen çarpan payı. Akının ŞİDDETİNE
+   * dokunmaz, yalnızca SIKLIĞINI ve haydut türünün ağırlığını kaydırır.
+   * Pencerenin BAŞLANGICINA göre okunur (bkz. engine/raids.ts).
+   * SUNUCU-TÜREVİDİR.
+   */
+  raidLure?: number;
+  raidLureAt?: number;
   /** Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular. */
   watchRatio?: number;
   lastRaidAt?: number;

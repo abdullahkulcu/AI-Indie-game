@@ -246,6 +246,31 @@ export const gameSaveSchema = z.object({
     >,
   ).strict().optional(),
   lastSpoilNoticeAt: z.number().finite().optional(),
+  /**
+   * İç hizip baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
+   * Değeri istemciden HİÇ kabul edilmez (bkz. SERVER_DERIVED); şemada yer alması
+   * yalnızca `.strict()` kaydın sunucunun kendi yazdığı alanı reddetmemesi için.
+   */
+  factionPressure: finite(100).optional(),
+  /**
+   * Dış kese taşıyıcıları. Hepsi `.optional()` ve hepsi SERVER_DERIVED: bunları
+   * yazan tek yer cron'dur, istemcinin bildirdiği değer yok sayılır.
+   */
+  agitationPressure: finite(100).optional(),
+  agitationBribe: finite(100).optional(),
+  agitationAt: timestamp.optional(),
+  agitationShieldUntil: timestamp.optional(),
+  /** Mal kesesinin yığını; referans stoğun katı olarak, mal başına. */
+  commonsGlut: z.object(
+    Object.fromEntries(TRADED_RESOURCE_KEYS.map(key => [key, finite(10).optional()])) as Record<
+      (typeof TRADED_RESOURCE_KEYS)[number],
+      z.ZodOptional<z.ZodNumber>
+    >,
+  ).strict().optional(),
+  commonsGlutAt: timestamp.optional(),
+  /** Haydut yönlendirmesinin akın ihtimaline eklediği pay. */
+  raidLure: finite(10).optional(),
+  raidLureAt: timestamp.optional(),
   // Akın ve nöbet sistemi. Eski kayıtlarda yok; motor varsayılan uygular.
   watchRatio: finite(CAPS.watchRatio).optional(),
   lastRaidAt: timestamp.optional(),
@@ -564,7 +589,7 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
         ),
       }
     : { peopleLeft: undefined, migrationDrift: undefined, peopleJoined: undefined };
-  return {
+  const patched: Record<string, unknown> = {
     ...game,
     ...migration,
     // Halkın defteri: yalan bildirilen `commons` fiyatı oynatıp hem geçim
@@ -583,7 +608,41 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
     soldierPay: optional(game.soldierPay, clampRation),
     watchRatio: optional(game.watchRatio, clampWatch),
   };
+  // SUNUCU-TÜREVİ ALANLAR — 2. sınıf (akıllı halk taşıyıcıları). Bu alanlarda
+  // istemcinin bildirdiği değer TAMAMEN YOK SAYILIR; yerine sunucunun kendi
+  // `tick(previous)` sonucundaki değer yazılır. Sebep: hizip baskısı, kese ve
+  // haydut yönlendirmesi birer CEZA/durum taşıyıcısıdır — istemci kendi
+  // lehine yazabilirse mekaniğin tamamı anlamını yitirir. Tavan denetimi
+  // (`checkGrowth`/`checkAgainstSimulation`) burada yetmez: bunlar kaynak
+  // değildir, "üretim eğrisinin üstüne çıkamaz" kuralı onlara dokunmaz.
+  // Liste her yeni taşıyıcı mekanikle büyür. Sunucunun kendi yazdığı (cron)
+  // değerler `previous`ta durduğu ve `tick` onlara dokunmadığı için, dokunulmayan
+  // bir alan doğal olarak olduğu gibi taşınır.
+  for (const key of SERVER_DERIVED) {
+    const value = simulated ? (simulated as unknown as Record<string, unknown>)[key] : undefined;
+    if (value === undefined) delete patched[key];
+    else patched[key] = value;
+  }
+  return patched as GameSave;
 }
+
+export const SERVER_DERIVED = [
+  "factionPressure",
+  // Dış kese: yazan tek yer cron. `tick` bunlara dokunmadığı için `simulated`
+  // değeri `previous`takiyle aynıdır — yani istemcinin yazdığı her şey silinir.
+  "agitationPressure",
+  "agitationBribe",
+  "agitationAt",
+  "agitationShieldUntil",
+  // Mal kesesi: yığın istemcinin elinde olsaydı Kral kendi pazarını "bozulmamış"
+  // ilan edip satış getirisini geri kazanırdı.
+  "commonsGlut",
+  "commonsGlutAt",
+  // Haydut yönlendirmesi: istemci bunu sıfırlayabilse akın sıklığını kendi
+  // lehine düşürür ve mekanik tamamen kapanırdı.
+  "raidLure",
+  "raidLureAt",
+] as const;
 
 export type ValidateOptions = {
   previous: GameSave | null;
@@ -613,6 +672,7 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
   if (!options.previous) {
     const firstFailure = checkFirstSave(game, options.channelSpeed);
     if (firstFailure) return firstFailure;
+    // İlk kayıtta türetilecek geçmiş yok: taşıyıcı alanlar sıfırlanır.
     return { ok: true, game: serverDerived(game, null, null, 0) };
   }
 
@@ -628,7 +688,8 @@ export function validateGameSave(input: unknown, options: ValidateOptions): Vali
     const growthFailure = checkGrowth(game, options.previous, elapsed, options.channelSpeed);
     if (growthFailure) return growthFailure;
   }
-  // Kaba tavanlardan sonra dar kontrol: sunucunun kendi simülasyonu.
+  // Sunucunun kendi simülasyonu iki işi birden yapar: kaba tavanlardan sonraki
+  // dar kaynak kontrolü ve sunucu-türevi alanların kaynağı. Tek kez hesaplanır.
   const horizon = Math.max(now, options.previous.lastTickAt);
   const simulated = tick(options.previous as Game, horizon);
   const simulationFailure = checkAgainstSimulation(game, options.previous, simulated, horizon);

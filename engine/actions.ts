@@ -1,13 +1,15 @@
+import { feltUnrest, glutStock } from "./agitation";
 import { catalog, keepSeconds, MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
 import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, orderCost, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
+import { garrisonRefusal } from "./populace-voice";
 import { POLICY_LIMITS } from "./policy";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, keepCostFor, materialScaleOf, rates, tick } from "./tick";
 import type { Game, GameAction, Key, Res } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
-export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms"];
+export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms", "send_purse"];
 
 export type ApplyResult = {
   game: Game;
@@ -105,15 +107,20 @@ export function marketState(game: Game, now: number) {
   const limit = level * MARKET.dailyPerLevel;
   const commons = commonsOf(game);
   const reference = commonsReference(game.population);
+  // Yabancının pazara yığdığı mal. YALNIZCA satış fiyatına girer: `coverage` ve
+  // `livingCost` halkın gerçek stoğundan okunur, `maxPurchase` da öyle.
+  const glut = glutStock(game, reference, now);
   return {
     level, used, limit,
     left: Math.max(0, limit - used),
     dayAt: fresh ? now : game.marketDayAt ?? now,
-    price: marketPrices(commons, reference),
+    price: marketPrices(commons, reference, glut),
     spread: SPREAD,
     open, slots: level,
     freeSlots: Math.max(0, level - open.length),
-    commons, reference,
+    commons, reference, glut,
+    /** Pazar bozulmuş mu? Kral az altın aldığını görmeden yönetemez. */
+    glutted: TRADED_KEYS.some(key => glut[key] > 0),
     coverage: Object.fromEntries(TRADED_KEYS.map(key => [key, coverageOf(commons[key], reference[key])])) as Record<string, number>,
     livingCost: livingCost(commons, reference),
   };
@@ -135,6 +142,14 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
   for (const action of actions.slice(0, MAX_ACTIONS_PER_TURN)) {
     overridden = action.arguments.confirmed_risk === true;
     const confirmed = overridden;
+    // GARNİZON VETOSU. Halkın direnişi pasiftir (emir gecikir), askerin aktif:
+    // emir HİÇ uygulanmaz ve Kralın teyidi bunu AŞMAZ — `confirmed` burada hiç
+    // sorulmaz, çünkü veto Kralın cesaretiyle değil kışlanın rızasıyla kalkar.
+    // Eşikler tek dosyadadır (engine/populace-voice.ts → GARRISON_VETOES).
+    // Huzursuzluğun HİSSEDİLEN değeri okunur: yabancının kesesi de vetoyu
+    // tetikleyebilir (bkz. engine/agitation.ts → feltUnrest).
+    const garrison = (order: Parameters<typeof garrisonRefusal>[0]) =>
+      garrisonRefusal(order, feltUnrest(next, now), armySize(next.units ?? {}));
 
     if (action.name === "build_structure") {
       if (next.queue) { blocked(`İnşa emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
@@ -203,6 +218,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     }
 
     if (action.name === "train_unit") {
+      const veto = garrison("train_unit");
+      if (veto) { blocked(veto); continue; }
       if (next.queue) { blocked(`Eğitim emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
       if (!next.buildings.some(b => b.type === "barracks")) { blocked("Eğitim engellendi: önce Kışla kurulmalı."); continue; }
       const unit = String(action.arguments.unit_type ?? ""), count = Math.floor(Number(action.arguments.count));
@@ -243,7 +260,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
 
       // Fiyat emrin İÇİNDE hareket eder: emir parçalara bölünür, her parça o
       // andaki stoğa göre fiyatlanır. Büyük emir kendi fiyatını bozar.
-      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell");
+      // Yığın yalnızca satış kolunda fiyatı düşürür; alışta hiç okunmaz.
+      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0);
       const minutes = marketDuration(amount, next.speed);
       // Teklif kimliği deterministik: aynı girdi aynı kimliği üretir, motor saf kalır.
       const id = `${buying ? "b" : "s"}-${resource}-${amount}-${now}`;
@@ -343,6 +361,8 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         success(`Bira istihkakı %${percent} olarak mühürlendi.`);
         continue;
       }
+      const payVeto = garrison("set_soldier_pay");
+      if (payVeto) { blocked(payVeto); continue; }
       if (percent < 60 && !confirmed) { blocked(`Asker maaşını %${percent}'e indirmek firara ve isyana yol açar; açık teyit bekliyorum.`); continue; }
       next = { ...next, soldierPay: percent, notices: [{ kind: "ORDU", text: `Asker maaşı %${percent} olarak belirlendi.`, at: now }, ...next.notices] };
       success(`Asker maaşı %${percent} olarak mühürlendi.`);
@@ -354,6 +374,11 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       if (!Number.isFinite(requested) || requested < 0 || requested > 100) { blocked("Nöbet oranı %0 ile %100 arasında olmalı."); continue; }
       const percent = clampWatch(requested);
       if (percent === watchRatioOf(next)) { blocked(`Nöbet zaten %${percent}; emir kotası harcanmadı.`); continue; }
+      // Yalnızca YÜKSELTME reddedilir; indirme her zaman kabul edilir.
+      if (percent > watchRatioOf(next)) {
+        const watchVeto = garrison("raise_watch");
+        if (watchVeto) { blocked(watchVeto); continue; }
+      }
       if (next.quota < 1) { blocked("Nöbet emri uygulanmadı: emir kotası tükendi."); continue; }
       // İki uç da risklidir: düşük nöbet kaleyi akına açar, yüksek nöbet halkı
       // zapt edecek kuvvet bırakmaz. İkisi de Kralın açık teyidini bekler.

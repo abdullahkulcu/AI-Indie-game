@@ -14,12 +14,17 @@ export type DiplomaticEvent =
   | "abandoned_vassal"
   | "broke_ceasefire"
   | "betrayal"
-  | "rental_recall_under_siege";
+  | "rental_recall_under_siege"
+  | "caught_agitating";
 
 /**
  * Değerler taşınırken KORUNDU; oyuncunun defterindeki itibar aynı hareket
  * ediyor. En ağırı sözünde durmamaktır: verilen sözün bozulması (ödenmeyen
  * haraç, bozulan anlaşma) 20 puan götürür.
+ *
+ * `caught_agitating`: kesesi ya da haydut yönlendirmesi karşı-istihbarata
+ * yakalanan Kralın itibar cezası. İmzalı barışı olan taraf için ayrıca
+ * `betrayal` uygulanır ve anlaşma bozulur; ikisi ayrı olaydır.
  */
 export const REPUTATION_CHANGES: Readonly<Record<DiplomaticEvent, number>> = {
   kept_promise: 2,
@@ -29,6 +34,7 @@ export const REPUTATION_CHANGES: Readonly<Record<DiplomaticEvent, number>> = {
   broke_ceasefire: -12,
   betrayal: -20,
   rental_recall_under_siege: -6,
+  caught_agitating: -10,
 };
 
 export function reputationChange(event: DiplomaticEvent): number {

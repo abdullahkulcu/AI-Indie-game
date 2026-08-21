@@ -144,11 +144,35 @@ export function unitPrice(key: TradeKey, stock: number, reference: number) {
 }
 
 /**
+ * FİYATLANDIRMA STOĞU ile TİCARET STOĞUNUN AYRIMI.
+ *
+ * `tradableStock` halkın gerçekten sahip olduğu maldır: alışta bundan alınır,
+ * `maxPurchase` bunu ölçer, geçim endeksi (`livingCost`) bunu okur.
+ *
+ * `pricingStock` ise fiyatın okunduğu yığındır ve YALNIZCA SATIŞTA devreye
+ * girer: yabancı bir Kralın hedefin pazarına yığdığı mal (`commonsGlut`)
+ * buraya eklenir. Ayrım bilinçlidir ve iki ters etkiyi kapatır — hedef
+ * şişirilen malı ucuza satın alıp ambarına koyamaz, ve şişen yığın hedefin
+ * rızasını YÜKSELTMEZ. Fiyat kanalı açık, kaçak kanallar kapalı.
+ */
+export const tradableStock = (commons: number) => Math.max(0, commons);
+
+export const pricingStock = (commons: number, glut = 0) =>
+  Math.max(0, commons) + Math.max(0, glut);
+
+export const pricingCoverage = (commons: number, reference: number, glut = 0) =>
+  coverageOf(pricingStock(commons, glut), reference);
+
+/**
  * Bütün malların anlık satış fiyatı. `marketState` bunu arayüze verir; eski
  * sabit tablonun yerini birebir aynı biçimde alır.
+ *
+ * `glut` verilirse SATIŞ fiyatı düşer — bu, arayüzün de bozulmuş pazarı
+ * göstermesini sağlar; Kral neden az altın aldığını görmeden yönetemez.
  */
-export function marketPrices(commons: Commons, reference: Commons): Record<string, number> {
-  return Object.fromEntries(TRADED_KEYS.map(key => [key, unitPrice(key, commons[key], reference[key])]));
+export function marketPrices(commons: Commons, reference: Commons, glut?: Partial<Record<TradeKey, number>>): Record<string, number> {
+  return Object.fromEntries(TRADED_KEYS.map(key =>
+    [key, unitPrice(key, pricingStock(commons[key], glut?.[key] ?? 0), reference[key])]));
 }
 
 /** Halktan bir seferde alınabilecek en büyük miktar. */
@@ -186,14 +210,22 @@ export function fillOrder(
   stock: number,
   reference: number,
   direction: "sell" | "buy",
+  /**
+   * Yabancının pazara yığdığı mal. YALNIZCA satış kolunda fiyata girer; alışta
+   * hiç okunmaz, yoksa hedef bedavaya yakın fiyattan mal alıp ambarına koyardı.
+   */
+  glut = 0,
 ): Fill {
   const total = Math.max(0, Math.floor(amount));
-  const from = unitPrice(key, stock, reference);
+  // Fiyat penceresi satışta yığını da içerir; hareket eden stok her zaman
+  // halkın gerçek malıdır.
+  const offset = direction === "sell" ? Math.max(0, glut) : 0;
+  const from = unitPrice(key, stock + offset, reference);
   let held = Math.max(0, stock), gold = 0, left = total;
 
   while (left > 0) {
     const lot = Math.min(LOT, left);
-    const middle = direction === "sell" ? held + lot / 2 : Math.max(0, held - lot / 2);
+    const middle = direction === "sell" ? held + offset + lot / 2 : Math.max(0, held - lot / 2);
     gold += lot * unitPrice(key, middle, reference) * (direction === "buy" ? SPREAD : 1);
     held = direction === "sell" ? held + lot : Math.max(0, held - lot);
     left -= lot;
@@ -208,7 +240,7 @@ export function fillOrder(
     // sayı ile hazineye giren sayı birbirini tutsun.
     average: total > 0 ? settled / total : from,
     from,
-    to: unitPrice(key, held, reference),
+    to: unitPrice(key, held + offset, reference),
   };
 }
 

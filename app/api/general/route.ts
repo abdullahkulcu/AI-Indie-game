@@ -15,8 +15,9 @@ type GeneralRequest = {
     keepLevel?: number;
     population?: number;
     popularity?: number;
+    taxRate?: number;
     resources?: Record<string, number>;
-    buildings?: Array<{ name: string; level: number }>;
+    buildings?: Array<{ type?: string; name: string; level: number }>;
     units?: Record<string, number>;
     channelSpeed?: number;
     channelId?: string;
@@ -34,6 +35,12 @@ type GeneralRequest = {
       mood: string; moodScore: number; productionMultiplier: number;
       foodRation: number; aleRation: number; soldierPay: number;
       army: number; soldierUnrest: number; dailyFoodNeed: number;
+      /** Halkın sesi bu üç alanı okur; kâğıt üstündeki oran değil fiilen dağıtılan. */
+      servedFood?: number; livingCost?: number; capacity?: number;
+      /** Garnizonun reddettiği emirler; eşikler motordan gelir, panel de aynı listeyi gösterir. */
+      garrison?: { label: string; note: string; vetoes: string[] };
+      /** İç hizip baskısı ve elebaşı; güçle bastırılamaz, yalnızca yönetimle erir. */
+      hizip?: { baski: number; durum: string; elebasi: string | null };
     };
     defense?: {
       /** Nöbetteki asker oranı (%) ve fiilen nöbet tutan asker sayısı. */
@@ -82,6 +89,7 @@ const actionTools = [
   { name: "send_miners", description: "Ortak madene işçi gönderir veya mevcut işçi sayısını değiştirir. İşçiler halkın içinden çıkar: madene giden her el tarlada eksilir ama yine de istihkakını yer. En fazla nüfusun %20'si gönderilebilir, ayrıca channel'daki yuva sayısı sınırlıdır. Kral madene işçi/adam göndermeyi emrettiğinde çağır.", parameters: { type: "object", properties: { workers: { type: "integer", minimum: 1, maximum: 200 } }, required: ["workers"], additionalProperties: false } },
   { name: "recall_miners", description: "Ortak madendeki bütün işçileri geri çeker. Kral işçileri geri çağırmayı emrettiğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
   { name: "send_scout", description: "Komşu bir sancağa ajan gönderir. Hedefi KRALLIK_DURUMU içindeki neighbors listesindeki ordinal (sıra) numarasıyla belirt; kimlik uydurma. Başarı ihtimali düşüktür ve hedef karşı-istihbarat kurmuşsa daha da düşer.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1, maximum: 40 } }, required: ["target_ordinal"], additionalProperties: false } },
+  { name: "send_purse", description: "Komşu krallığa gizli bir kese gönderir. Üç hedef var: 'commons' → 600 altın halkının arasına dağıtılır ve orada örgütlü bir hizip büyütür; 'garrison' → 600 altın kışlasına sokulur ve asker huzursuzluğu enjekte eder; 'market' → 900 yiyecek (ya da eşdeğer mal) hedefin pazarına yığılır ve SATIŞ getirisini düşürür (hedef bu maldan ne ambar doldurabilir ne rıza kazanır); 'raids' → 600 altın dağ eşkıyasına dağıtılır ve akınlar hedefin kalesine yönlendirilir — akının ŞİDDETİ değişmez, yalnızca SIKLIĞI artar, asıl kazanç hedefi nöbet oranını yükseltmeye zorlamaktır. Fiyat sabittir, miktar seçilemez ve BAŞARI İHTİMALİ YOKTUR — etki kesindir. Hedef karşı-istihbarat nöbeti kurmuşsa kimliğimiz açığa çıkar, itibarımız düşer ve imzalı barışımız varsa anlaşma bozulur. Hedefi yalnızca neighbors listesindeki ordinal ile belirt. Tek kese ne orduyu dağıtır ne krallığı devirir; sabotaj aracıdır.", parameters: { type: "object", properties: { target_ordinal: { type: "integer", minimum: 1, maximum: 40 }, target: { type: "string", enum: ["commons", "garrison", "market", "raids"] }, resource: { type: "string", enum: ["food", "wood", "stone", "iron", "ale"], description: "Yalnızca 'market' hedefinde: yığılacak ve ambarımızdan çıkacak mal." }, confirmed_risk: { type: "boolean" } }, required: ["target_ordinal", "target"], additionalProperties: false } },
   { name: "raise_counter_intelligence", description: "Bir saatliğine karşı-istihbarat nöbeti kurar; gelen ajanların başarı ihtimalini %10'dan %3'e düşürür ve yakalanma ihtimalini yükseltir. Kral savunma/istihbarat tedbiri emrettiğinde çağır.", parameters: { type: "object", properties: {}, additionalProperties: false } },
 ] as const;
 
@@ -137,6 +145,9 @@ function gamePrompt(body: GeneralRequest) {
     "Bira ve eğlence yapıları (Park, Tiyatro, Evlilik Dairesi) morali yükseltir ama AÇ HALKA ETKİSİ ÇOK AZDIR; önce karnını doyur, sonra eğlendir.",
     "Askerler maaş yer ve karşılığında huzursuzluğu bastırır. Maaşı kesersen önce isterler, sonra firar ederler, sonunda isyan edip halkı zapt etmeyi bırakırlar; silahlı isyan sivil isyandan ağırdır.",
     "İstihkak ve maaş oranlarını Kral sorduğunda ya da açıkça emrettiğinde ayarla. Kralın haberi olmadan halkı aç bırakma.",
+    "Halkın üzerinde emir süreci YOKTUR: dilekçe, ceza, bastırma ya da 'elebaşını astır' diye bir araç yok. Halkın sesi ancak yönetimle (istihkak, vergi, fiyat, konut, şenlik) susar. Halka emir verebileceğini ima etme.",
+    "Rıza uzun süre 40'ın altında kalırsa krallıkta örgütlü bir hizip doğar (KRALLIK_DURUMU.populace.hizip). Hizip askerin halkı zapt etme gücünü zayıflatır ve GÜÇLE BASTIRILAMAZ: elebaşını yakalatmak, asker göndermek ya da nöbeti artırmak diye bir çözüm yok — nöbet zapt gücünü daha da azaltır. Tek çıkış rızayı yükseltmektir; Krala bunu açıkça söyle ve olmayan bir bastırma yolu önerme.",
+    "Garnizon bazı emirleri REDDEDER ve Kralın teyidi bunu aşmaz: huzursuzluk 30'a çıkınca yeni asker eğitimi, 60'a çıkınca nöbet YÜKSELTME, 85'e çıkınca asker maaşını değiştirme emri de geri çevrilir. 85 üstünde Kral gerçekten çıkışsız kalabilir; bunu ona açıkça söyle ve maaşı o noktaya varmadan toparlamasını öner. Nöbeti İNDİRME emri her zaman kabul edilir.",
     "Dağlardan rastgele zamanlarda akın gelir: Kurt Sürüsü askeri öldürüp erzak kaçırır, Haydutlar hazineyi soyar, Dağ Akıncıları hepsini birden yapar. Dağ arazisinde akın daha sık ve daha ağırdır; koruma süresi boyunca hiç akın olmaz.",
     "Akını yalnızca NÖBETTEKİ asker, Sur seviyesi ve arazinin savunma avantajı karşılar. Savunma akının şiddetini aşarsa akın kayıpsız püskürtülür; aşamazsa yarılan pay kadar asker ölür, yiyecek ve altın yağmalanır, halkın rızası düşer. Maaşsız kalıp huzursuzlaşan asker iyi savunmaz.",
     "Nöbet oranı gerçek bir seçimdir: nöbete verdiğin asker akını karşılar ama halkın huzursuzluğunu bastırmaya daha az kalır, yani üretim ve iş bırakma riski artar. Az askerle iki işi birden yapamazsın; Krala bu bedeli açıkça söyle. Oranı set_watch_ratio ile ayarla, savunma gücünü KRALLIK_DURUMU içindeki defense alanından oku ve rakam uydurma.",
@@ -148,6 +159,7 @@ function gamePrompt(body: GeneralRequest) {
     "Pazar kaynağı altına, altını kaynağa çevirir ve bunu YALNIZCA trade_resource aracı yapar. Alış fiyatı satıştan yüksektir, yani alıp satmak hep zarardır. Günlük hacim Pazar seviyesi başına 500 birimdir. Pazar kurulu değilse hiçbir kaynak altına çevrilemez; bu durumda Krala açıkça 'Pazarımız yok, satamam' de.",
     "Sana verilen araçların DIŞINDA hiçbir yetenek yoktur. Ticaret, diplomasi, ittifak, saldırı, kuşatma, kaynak bağışı, kredi, kervan ve pazarlık gibi araç listesinde karşılığı olmayan işleri yapabilirmiş gibi konuşma, söz verme ve 'hemen yaparım' deme. Kral olmayan bir şeyi isterse 'bu krallıkta böyle bir şey yok' diye açıkça söyle.",
     "Ortak maden channel'daki bütün krallıklarla paylaşılır; toplam yuva sınırlıdır, komşular doldurursa sana az kalır. Madenciler halkın içinden çıkar, yerel üretimi düşürür. Maden emirlerinde send_miners/recall_miners kullan.",
+    "Dış kese (send_purse) sabotajdır, savaş değildir: 600 altın sabit bedelle komşunun halkına ya da kışlasına para gönderilir. Zar yoktur, etki kesindir; ama tek kese ne orduyu dağıtır ne krallığı devirir — yabancının altını, hedefin kendi maaşını ödememesinden yaklaşık 14 kat verimsizdir. Krala bunu abartmadan anlat. Hedef nöbet kurmuşsa kimliğimiz açığa çıkar, itibarımız düşer ve imzalı barışımız varsa anlaşma bozulur; bu yüzden imzalı barışı olan komşuya kese önerme. Kuruluş koruması sürerken ne gönderilir ne alınır, hedef hattı kapatmışsa hiç gitmez.",
     "Ajan göndermek risklidir: normal başarı ihtimali %10, hedef nöbet kurmuşsa %3'tür ve yakalanırsan hedef seni görür. send_scout çağırırken hedefi yalnızca neighbors listesindeki ordinal ile belirt, kimlik veya isim uydurma. Keşfedilmemiş sancağın adını biliyormuş gibi konuşma.",
     "Riskli eylem, hazinenin büyük bölümünü tüketen karar, çok yüksek vergi veya savunmayı tehlikeye atan karardır. Böyle durumda araç çağırmadan önce gerekçeli teyit iste. Kral konuşma geçmişinde açıkça ısrar etmişse uygula fakat sonucu belirt.",
     "Araç çağrısı yalnızca bir öneridir; oyun motoru kaynak, kuyruk, bina kilidi ve halk koşullarını yeniden doğrular. Sonucu görmeden eylem tamamlandı deme.",
@@ -384,6 +396,34 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
 }
 
 /**
+ * HALKIN SESİ. Kralın zaten başlattığı turun promptuna bedava bir blok olarak
+ * biner: EK MODEL ÇAĞRISI YOKTUR. Kral konuşmazsa blok hiç yazılmaz.
+ *
+ * Channel hızı istemciden değil sunucudan okunur; süre şartı oyun saatiyle
+ * işlediği için istemci hızı şişirip halkın sesini anında açtırabilirdi.
+ */
+async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: number) {
+  const populace = body.kingdom?.populace;
+  if (!populace) return { lines: [] as string[], open: [] as OpenDemand[] };
+  const [row] = await getDb().select({ speed: channels.speed })
+    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
+    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
+  const { open } = await syncPopulaceDemands(userId, {
+    servedFood: Number(populace.servedFood ?? populace.foodRation) || 0,
+    livingCost: Number(populace.livingCost ?? 1) || 1,
+    taxRate: Number(body.kingdom?.taxRate ?? 0) || 0,
+    popularity: Number(populace.moodScore) || 0,
+    population: Number(body.kingdom?.population) || 0,
+    capacity: Number(populace.capacity) || 0,
+    soldierUnrest: Number(populace.soldierUnrest) || 0,
+    army: Number(populace.army) || 0,
+    buildings: body.kingdom?.buildings ?? [],
+    channelSpeed: row?.speed ?? (Number(body.kingdom?.channelSpeed) || 1),
+  }, now);
+  return { lines: renderPopulaceVoice(open, now), open };
+}
+
+/**
  * Açık müzakere masalarını sistem promptuna taşır.
  *
  * Sıra numaraları paylaşılan yükleyiciden gelir; Kralın arayüzünde gördüğü sıra
@@ -521,7 +561,10 @@ export async function POST(request: Request) {
     // `requests` alanı dolu gitsin diye modelden önce yüklenir.
     const now = Date.now();
     const memory = await loadGeneralMemory(user.id, body, now);
-    body.memoryLines = memory.lines;
+    // Halkın sesi Generalin taleplerinin YANINDA durur, yerine geçmez: biri
+    // komutanın kendi isteği, öbürü halkın ve kışlanın sesi.
+    const voice = await loadPopulaceVoice(user.id, body, now);
+    body.memoryLines = [...memory.lines, ...voice.lines];
     const desk = await loadNegotiationDesk(user.id);
     body.negotiationLines = desk.lines;
     body.negotiationTranscript = desk.transcript;
@@ -532,7 +575,7 @@ export async function POST(request: Request) {
       await appendToLedger(user.id, ["heeded"], now);
       return json({
         connected: true, text: "Emri geri çektim; bekleyen bir işlem kalmadı.",
-        actions: [], requests: memory.open,
+        actions: [], requests: memory.open, populaceDemands: voice.open,
         provider: body.provider, model: body.model,
       });
     }
@@ -598,6 +641,8 @@ export async function POST(request: Request) {
       // seçiminin üstüne yazar; yoksa panel bir modeli gösterip fatura
       // başkasına yazılıyordu.
       provider: body.provider, model: body.model,
+      // HALK sekmesindeki "Halkın Sesi" bloğu bu alandan okur.
+      populaceDemands: voice.open,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "General bağlantısı başarısız oldu.";
@@ -607,7 +652,7 @@ export async function POST(request: Request) {
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { channelMembers, channels, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { NEGOTIATION_DOCTRINE, renderNegotiationLines, renderNegotiationTranscript } from "../../../server/negotiation-brief";
 // Şema sınırları motordan TÜRETİLİR; elle yazılan tavan motorunkinden sessizce sapar.
 import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, NEGOTIATION_TOPICS, TRIBUTE_RESOURCES } from "../../../engine/negotiation";
@@ -616,6 +661,7 @@ import { BUILDABLE_TYPES } from "../../../engine/catalog";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
 import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
+import { type OpenDemand, renderPopulaceVoice, syncPopulaceDemands } from "../../../server/populace-voice";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { activeMembershipOf } from "../../../server/active-membership";

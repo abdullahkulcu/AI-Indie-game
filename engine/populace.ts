@@ -1,3 +1,4 @@
+import { factionDrag } from "./faction";
 import type { Game } from "./types";
 
 /**
@@ -90,48 +91,103 @@ const AMENITY_VALUE: Record<string, number> = {
 };
 
 /**
- * Mevcut koşulların işaret ettiği rıza. Açlık baskındır: istihkak %60'ın
- * altına düştüğünde diğer bütün iyileştirmeler anlamını yitirir.
+ * Hedef rızayı oluşturan kalemler, TEK TEK.
+ *
+ * `moodTarget` bu kalemleri aynı sırayla toplar; ayrıca göç bildirimi hangi
+ * kalemin en ağır bastığını buradan okur (bkz. `heaviestGrievance`). Kalemler
+ * ayrıştırılmadan önce "göçün sebebi" ikinci bir yerde yeniden hesaplanmak
+ * zorundaydı ve iki hesap birbirinden sapardı.
  */
-export function moodTarget(input: MoodInputs) {
-  let target = 50;
+export type MoodParts = {
+  food: number;
+  ale: number;
+  tax: number;
+  living: number;
+  amenities: number[];
+  raid: number;
+  crowding: number;
+};
 
+export function moodParts(input: MoodInputs): MoodParts {
   // Yiyecek: %100 nötr, altı hızla cezalandırılır, üstü ölçülü ödüllendirir.
   const food = input.servedFood;
-  target += food >= 100 ? Math.min(12, (food - 100) * 0.12) : -Math.pow((100 - food) / 100, 1.35) * 55;
-
   // Aç halk eğlenceye sevinmez: bira ve eğlence yapılarının katkısı tokluk
   // oranıyla ölçeklenir. Aksi hâlde tiyatro açlığı gizleyebiliyordu.
   const fed = Math.max(0, Math.min(1, food / 100));
-
-  target += Math.min(16, input.servedAle * 0.1) * fed;
-
-  // Vergi: %15 nötr kabul edilir.
-  target -= (input.taxRate - 15) * 0.9;
-
-  // Pazardaki geçim maliyeti. İstihkak halkın AĞZINA ne girdiğini söyler; bu
-  // ise kendi cebinden aldığı ekmeğin kaça mal olduğunu. Kral ambarı açıp
-  // fiyatı kırarsa rıza yükselir, halkın kilerini pazardan süpürürse düşer.
-  // `fed` ile ölçeklenmez: aç halk ekmeğin fiyatını daha çok umursar, az değil.
-  target += input.livingMood ?? 0;
-
+  const amenities: number[] = [];
   for (const building of input.buildings) {
     const value = AMENITY_VALUE[building.type];
-    if (value) target += value * Math.min(3, building.level) * fed;
+    if (value) amenities.push(value * Math.min(3, building.level) * fed);
   }
-
-  // Akın travması: tek seferlik bir rıza düşüşü hedefe yakınsama yüzünden bir
-  // saatte siliniyordu, yani yağmalanmak hissedilmiyordu. Artık hedefin kendisi
-  // bir süre baskılanır ve yaklaşık bir günde düzelir.
-  if (input.hoursSinceRaid !== null && input.hoursSinceRaid !== undefined) {
-    target -= RAID_TRAUMA * Math.exp(-Math.max(0, input.hoursSinceRaid) / RAID_TRAUMA_HALFLIFE);
-  }
-
   // Kalabalıklık: kapasitenin %90'ını aşınca huzursuzluk başlar.
   const crowding = input.capacity > 0 ? input.population / input.capacity : 0;
-  if (crowding > 0.9) target -= (crowding - 0.9) * 120;
+  return {
+    food: food >= 100 ? Math.min(12, (food - 100) * 0.12) : -Math.pow((100 - food) / 100, 1.35) * 55,
+    ale: Math.min(16, input.servedAle * 0.1) * fed,
+    // Vergi: %15 nötr kabul edilir.
+    tax: -((input.taxRate - 15) * 0.9),
+    // Pazardaki geçim maliyeti. İstihkak halkın AĞZINA ne girdiğini söyler; bu
+    // ise kendi cebinden aldığı ekmeğin kaça mal olduğunu. Kral ambarı açıp
+    // fiyatı kırarsa rıza yükselir, halkın kilerini pazardan süpürürse düşer.
+    // `fed` ile ölçeklenmez: aç halk ekmeğin fiyatını daha çok umursar, az değil.
+    living: input.livingMood ?? 0,
+    amenities,
+    // Akın travması: tek seferlik bir rıza düşüşü hedefe yakınsama yüzünden bir
+    // saatte siliniyordu, yani yağmalanmak hissedilmiyordu. Artık hedefin kendisi
+    // bir süre baskılanır ve yaklaşık bir günde düzelir.
+    raid: input.hoursSinceRaid === null || input.hoursSinceRaid === undefined
+      ? 0
+      : -(RAID_TRAUMA * Math.exp(-Math.max(0, input.hoursSinceRaid) / RAID_TRAUMA_HALFLIFE)),
+    crowding: crowding > 0.9 ? -((crowding - 0.9) * 120) : 0,
+  };
+}
 
+/**
+ * Mevcut koşulların işaret ettiği rıza. Açlık baskındır: istihkak %60'ın
+ * altına düştüğünde diğer bütün iyileştirmeler anlamını yitirir.
+ *
+ * Toplama sırası `moodParts` ile birebir aynıdır; kayan nokta toplamının sırası
+ * değiştirilirse eski kayıtların rızası kıl payı kayar.
+ */
+export function moodTarget(input: MoodInputs) {
+  const parts = moodParts(input);
+  let target = 50;
+  target += parts.food;
+  target += parts.ale;
+  target += parts.tax;
+  target += parts.living;
+  for (const value of parts.amenities) target += value;
+  target += parts.raid;
+  target += parts.crowding;
   return Math.max(0, Math.min(100, target));
+}
+
+/** Göç bildiriminde gerekçe olarak gösterilen kalemler ve halkın ağzındaki adı. */
+export const GRIEVANCE_LABELS = {
+  food: "ambarın yarım payını",
+  living: "pazarda pahalanan ekmeği",
+  tax: "verginin ağırlığını",
+  crowding: "konutların kalabalığını",
+  raid: "akının yıkımını",
+} as const;
+
+export type GrievanceKey = keyof typeof GRIEVANCE_LABELS;
+
+/**
+ * Göçün EN AĞIR sebebi. Yeni bir hesap değil: `moodParts`'ın zaten ürettiği
+ * eksi kalemlerin en büyüğü seçilir. Hiçbir kalem eksi değilse (halk başka bir
+ * nedenle, örneğin salt kapasite tavanıyla eriyorsa) null döner ve bildirim
+ * gerekçe uydurmaz.
+ */
+export function heaviestGrievance(input: MoodInputs): { key: GrievanceKey; label: string; weight: number } | null {
+  const parts = moodParts(input);
+  const keys = Object.keys(GRIEVANCE_LABELS) as GrievanceKey[];
+  let worst: GrievanceKey | null = null;
+  for (const key of keys) {
+    if (parts[key] >= 0) continue;
+    if (worst === null || parts[key] < parts[worst]) worst = key;
+  }
+  return worst === null ? null : { key: worst, label: GRIEVANCE_LABELS[worst], weight: -parts[worst] };
 }
 
 /** Rıza hedefe doğru yürür; ani sıçrama olmaz. */
@@ -170,12 +226,14 @@ const STATES: Array<{ min: number } & MoodState> = [
  * kalmaya devam eder ama iş bırakma eşiği yükselir. Maaşı ödenmeyen asker
  * bastırmaz; silahlı isyan sivil isyandan ağırdır.
  */
-export function suppression(army: number, population: number, soldierUnrest: number) {
+export function suppression(army: number, population: number, soldierUnrest: number, factionPressure = 0) {
   if (population <= 0 || army <= 0) return 0;
   const ratio = army / population;
   const raw = Math.min(14, ratio * 100 * 0.9);
   const reliability = Math.max(0, 1 - soldierUnrest / 60);
-  return raw * reliability;
+  // Örgütlü hizip zapt gücünü kırar: kalabalık artık kimin adamı olduğunu
+  // bilmiyordur. Varsayılan 0 olduğu için eski çağrılar aynı sonucu verir.
+  return raw * reliability * factionDrag(factionPressure);
 }
 
 export function moodState(popularity: number, suppressionBonus: number): MoodState {

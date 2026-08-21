@@ -1,10 +1,15 @@
 import { env } from "cloudflare:workers";
-import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
 import { tick } from "../../../engine/tick";
 import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
-import { agreements, channels, gameSaves, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
+import { agitations, agreements, channels, gameSaves, intelDefenses, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
+import {
+  AGITATION, AGITATION_NOTICE, type AgitationKind,
+  agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut, applyLure,
+} from "../../../engine/agitation";
+import { isTraded } from "../../../engine/market";
 import {
   LIMITS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MISSES_BEFORE_BREACH, TRIBUTE_TOPICS,
   canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide, settleTribute,
@@ -528,6 +533,111 @@ async function settleTributes(now: number) {
   return { deals: deals.length, paid, missed: missedTotal, error: null };
 }
 
+/**
+ * DIŞ KESELERİN VARIŞI.
+ *
+ * Omurga: maliyet gönderenin kaydından zaten düşmüştü (POST /api/world, tek
+ * işlem, sürüm korumalı); burada yalnızca ETKİ hedefin kaydına yazılır ve
+ * `completesAt` anına GERİYE DÖNÜK damgalanır — cron bir tur gecikse de sonuç
+ * değişmez, çünkü sönüm damgadan okunur (bkz. engine/agitation.ts).
+ *
+ * Hedefte HİÇBİR KAYNAK ALANI yazılmaz: yalnızca üç taşıyıcı alan ve bir
+ * bildirim. İfşa zarsızdır — hedefin karşı-istihbaratı kesenin VARDIĞI anda
+ * ayaktaysa gönderenin adı açılır, itibarı düşer ve hedefe kalkan verilir.
+ */
+async function settleAgitations(now: number) {
+  const db = getDb();
+  const due = await db.select({ row: agitations, speed: channels.speed, channelName: channels.name })
+    .from(agitations)
+    .innerJoin(channels, eq(channels.id, agitations.channelId))
+    .where(and(eq(agitations.status, "pending"), lte(agitations.completesAt, now), eq(channels.status, "active")))
+    .orderBy(agitations.completesAt);
+
+  let landed = 0, exposedCount = 0;
+  for (const { row, speed, channelName } of due) {
+    const [targetRow] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.targetUserId)).limit(1);
+    const target = targetRow ? parseStoredSave(targetRow.gameState) : null;
+    if (!target) {
+      await db.update(agitations).set({ status: "settled", settledAt: now }).where(eq(agitations.id, row.id));
+      continue;
+    }
+    // Kalkan yalnızca kesenin VARDIĞI anda ayakta olan nöbete bakar; cron'un
+    // gecikmesi ifşayı ne açar ne kapatır.
+    const [shield] = await db.select().from(intelDefenses).where(eq(intelDefenses.userId, row.targetUserId)).limit(1);
+    const exposed = Boolean(shield?.activeUntil && shield.activeUntil > row.completesAt);
+    const kind = row.kind as AgitationKind;
+    // Mal kesesi yığın taşıyıcısına, altın kesesi baskı/kese taşıyıcılarına
+    // yazar. İkisi ayrı silahtır: mal kesesi hizip baskısı üretmez, çünkü bol
+    // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
+    const patch = kind === "goods_glut"
+      ? applyGlut({ ...target, speed }, isTraded(row.costResource) ? row.costResource : "food", row.completesAt)
+      : kind === "raid_lure"
+        // Yönlendirme `completesAt`e damgalanır; akın penceresi bu damgayı
+        // pencerenin BAŞLANGICINA göre okur, yani sonuç iki okumada da aynı.
+        ? applyLure({ ...target, speed }, row.completesAt)
+        : applyAgitation({ ...target, speed }, kind, row.completesAt);
+    const senderName = exposed ? await displayNameOf(row.sourceUserId, channelName) : "";
+    const text = exposed ? agitationExposedNotice(senderName, kind) : AGITATION_NOTICE[kind];
+
+    const written = await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, {
+      ...target,
+      ...patch,
+      // Yakalanan kese hedefe kalkan bırakır: sönüm hızlanır, gelen keseler yarılanır.
+      ...(exposed ? { agitationShieldUntil: row.completesAt + AGITATION.shieldHours * 3_600_000 / Math.max(1, speed) } : {}),
+      notices: [{ kind: "KESE", text, at: row.completesAt }, ...target.notices].slice(0, 20),
+    });
+    // Yazma düşerse satır PENDING kalır ve bir sonraki tur tekrar denenir; etki
+    // `completesAt`e damgalandığı için gecikme sonucu değiştirmez.
+    if (!written) continue;
+
+    if (exposed) {
+      exposedCount += 1;
+      await punishAgitator(row.sourceUserId, row.targetUserId, await displayNameOf(row.targetUserId, channelName), kind, now);
+    }
+    await db.update(agitations)
+      .set({ status: exposed ? "exposed" : "settled", settledAt: now })
+      .where(and(eq(agitations.id, row.id), eq(agitations.status, "pending")));
+    landed += 1;
+  }
+  return { due: due.length, landed, exposed: exposedCount };
+}
+
+/**
+ * Yakalanan Kralın bedeli: itibar cezası ve — imzalı barışı varsa — ihanet.
+ * İki olay ayrıdır: `caught_agitating` her yakalanmada, `betrayal` yalnızca
+ * imzalı saldırmazlık/ittifak varken uygulanır ve anlaşma bozulur.
+ */
+async function punishAgitator(sourceUserId: string, targetUserId: string, targetName: string, kind: AgitationKind, now: number) {
+  const db = getDb();
+  const pacts = await db.select().from(agreements).where(and(
+    eq(agreements.status, "active"),
+    inArray(agreements.topic, ["non_aggression", "alliance"]),
+    or(
+      and(eq(agreements.payerId, sourceUserId), eq(agreements.payeeId, targetUserId)),
+      and(eq(agreements.payerId, targetUserId), eq(agreements.payeeId, sourceUserId)),
+    ),
+  ));
+  const betrayed = pacts.length > 0;
+  const penalty = reputationChange("caught_agitating") + (betrayed ? reputationChange("betrayal") : 0);
+  for (const pact of pacts) {
+    await db.update(agreements).set({ status: "broken" }).where(eq(agreements.id, pact.id));
+  }
+  const [row] = await db.select().from(gameSaves).where(eq(gameSaves.userId, sourceUserId)).limit(1);
+  const game = row ? parseStoredSave(row.gameState) : null;
+  if (!game) return;
+  await writeSaveIfUnchanged(sourceUserId, row!.revision, {
+    ...game,
+    reputation: Math.max(0, Math.min(100, game.reputation + penalty)),
+    notices: [{
+      kind: "KESE",
+      text: betrayed
+        ? `${agitationSenderNotice(targetName, kind, true)} İmzalı barışı bozduğumuz için anlaşma da düştü.`
+        : agitationSenderNotice(targetName, kind, true),
+      at: now,
+    }, ...game.notices].slice(0, 20),
+  });
+}
+
 export async function POST(request: Request) {
   const secret = env.CRON_SECRET;
   if (!secret) return Response.json({ error: "CRON_SECRET tanımlı değil." }, { status: 503, headers });
@@ -561,6 +671,11 @@ export async function POST(request: Request) {
   let tributes: TributeRound = { deals: 0, paid: 0, missed: 0, error: null };
   try { tributes = await settleTributes(now); }
   catch (error) { tributes = { deals: 0, paid: 0, missed: 0, error: `Haraç turu düştü: ${error instanceof Error ? error.message : "bilinmiyor"}` }; }
+  // Yolda olan keseler: etki hedefin kaydına `completesAt` anına damgalanarak yazılır.
+  // Aynı sarma gerekçesi: bu turun düşmesi haraç ya da gece vardiyasını etkilemesin.
+  let purses = { due: 0, landed: 0, exposed: 0 };
+  try { purses = await settleAgitations(now); }
+  catch { purses = { due: 0, landed: 0, exposed: 0 }; }
   // Kral çevrimdışıyken masada bekleyen cevap; imza atılmaz, yalnızca konuşulur.
   let desks: DeskReport[] = [];
   try { desks = await answerNegotiations(now); }
@@ -576,6 +691,7 @@ export async function POST(request: Request) {
     considered: rows.length,
     swept,
     tributes,
+    agitations: purses,
     negotiations: { spoke: desks.filter(desk => desk.spoke).length, reports: desks },
     acted: reports.filter(report => report.acted).length,
     llmCalls: reports.filter(report => report.tokensUsed).length + desks.filter(desk => desk.tokensUsed).length,
