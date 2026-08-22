@@ -299,6 +299,16 @@ eklemek.
     `Tab` tipini ve `tabs six` CSS sınıfını değiştirir) yoksa mevcut
     `diyar`'ın içinde mi büyütülecek?
 
+- **Karar (2026-08-22):**
+  - Somut bir **"zafer skoru"** olacak (sezon sonu ölçütü) — yeni bir
+    puanlama sistemi tasarımı gerektirir, bu maddeyi tek başına "hızlı"
+    olmaktan çıkarır (bkz. güncellenmiş efor notu aşağıda).
+  - Bu araçlar yeni bir **"İSTİHBARAT" sekmesinde** öne çıkar — `Tab`
+    tipi yediye çıkar, `KingdomGame.tsx`'teki sekme CSS'i güncellenir.
+  - **Efor güncellemesi:** kararlar nedeniyle bu madde artık "hızlı"
+    değil **"orta"** — yeni sekme + zafer skoru formülü + formülün nasıl
+    hesaplanacağı (hangi olaylar kaç puan) ayrı bir tasarım gerektiriyor.
+
 ---
 
 ### 4. Slack bildirimi (tek yönlü)
