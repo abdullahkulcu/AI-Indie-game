@@ -254,6 +254,33 @@ export const agitations = pgTable("agitations", {
   index("idx_agitations_target").on(table.targetUserId, table.sentAt),
 ]);
 
+/**
+ * GÖÇ KUYRUĞU — bir krallıktan ayrılan halkın channel'daki başka bir krallığa
+ * ulaşması (bkz. engine/migration.ts).
+ *
+ * `agitations` tablosunun küçük kardeşi: aynı "kaynakta olay olur, cron
+ * hedefin kaydına gecikmeli yazar" deseni, ama burada gönderen bir hedef
+ * SEÇMEZ (nüfus kendiliğinden ayrılır) ve maliyet yoktur — bu yüzden
+ * `agitations`'daki fiyat, çift bekleme ve tavan alanları burada karşılıksızdır.
+ * Hedef, cron `completesAt` anında GÜNCEL channel üyeleri arasından seçilir;
+ * kuyruğa alma anında SEÇİLMEZ, çünkü o ana kadar hedeflerin boş konutu
+ * değişmiş olabilir (bkz. app/api/cron/route.ts → settleMigrations).
+ */
+export const migrations = pgTable("migrations", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  sourceUserId: text("source_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Ayrılan kişi sayısı; `engine/tick.ts`'in `peopleLeft` defterinden türer. */
+  count: integer("count").notNull(),
+  sentAt: bigint("sent_at", { mode: "number" }).notNull(),
+  completesAt: bigint("completes_at", { mode: "number" }).notNull(),
+  status: text("status", { enum: ["pending", "settled"] }).notNull().default("pending"),
+  settledAt: bigint("settled_at", { mode: "number" }),
+}, (table) => [
+  index("idx_migrations_pending").on(table.status, table.completesAt),
+  index("idx_migrations_source").on(table.sourceUserId, table.sentAt),
+]);
+
 // Sabit pencereli hız sınırı sayaçları; tek upsert deyimiyle atomik artar.
 export const rateLimits = pgTable("rate_limits", {
   bucket: text("bucket").primaryKey(),

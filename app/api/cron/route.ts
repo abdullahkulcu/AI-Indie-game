@@ -1,15 +1,17 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
-import { tick } from "../../../engine/tick";
+import { capacityFor, tick } from "../../../engine/tick";
 import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
-import { agitations, agreements, channels, gameSaves, intelDefenses, llmCredentials, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
+import { agitations, agreements, channelMembers, channels, gameSaves, intelDefenses, llmCredentials, migrations, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
   AGITATION, AGITATION_NOTICE, type AgitationKind,
   agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut, applyLure,
 } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
+import { arrivingMigrants, migrationArrivalNotice, pickMigrationTarget } from "../../../engine/migration";
+import { queueEmigrants } from "../../../server/migration-desk";
 import {
   LIMITS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MISSES_BEFORE_BREACH, TRIBUTE_TOPICS,
   canProposeTerms, clampTerms, duePayments, isKingPresent, otherSide, settleTribute,
@@ -174,9 +176,27 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     const again = { ...redone.game, notices: [{ kind: "GECE VARDİYASI", text: (redone.results[0] ?? summary).replace(/^[✓✕] /, ""), at: now }, ...redone.game.notices].slice(0, 20) };
     const retried = await writeSaveIfUnchanged(row.userId, fresh!.revision, again);
     if (!retried) return finish("Kayıt eşzamanlı değişti; hamle atlandı.", false, true);
+    // Göç kuyruğu: bu tur GERÇEKTEN yazılan `peopleLeft` artışı kuyruğa girer
+    // (bkz. server/migration-desk.ts). `game`in kendi tick()'i değil, taze
+    // durumun üstüne yeniden atılan `freshGame`/`redone.game` çifti okunur —
+    // asıl kalıcı olan budur.
+    try {
+      await queueEmigrants({
+        channelId: row.channelId, sourceUserId: row.userId,
+        before: freshGame.peopleLeft, after: redone.game.peopleLeft, now,
+      });
+    } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
     if (ok) await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
     return finish(redone.results[0] ?? summary, ok, true);
   }
+  // Göç kuyruğu: `stored` (bu turun BAŞINDAKİ kayıt) ile `applied.game` (bu
+  // turun SONUNDA GERÇEKTEN yazılan durum) arasındaki `peopleLeft` farkı.
+  try {
+    await queueEmigrants({
+      channelId: row.channelId, sourceUserId: row.userId,
+      before: stored.peopleLeft, after: applied.game.peopleLeft, now,
+    });
+  } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
   if (succeeded) {
     await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
   }
@@ -603,6 +623,84 @@ async function settleAgitations(now: number) {
 }
 
 /**
+ * GÖÇÜN VARIŞI (Faz 6).
+ *
+ * Kaynaktan ayrılan halk, kuyruğa alındığı anda DEĞİL, cron bu satırı işlerken
+ * o anın GÜNCEL aday listesinden seçilen TEK bir hedefe gider (bkz.
+ * engine/migration.ts → pickMigrationTarget). Hedef kuyruğa alma anında
+ * SEÇİLMEZ: aradaki sürede adayların boş konutu değişmiş olabilir, "an
+ * fotoğrafı" hemen bayatlardı.
+ *
+ * Kuruluş koruması süren krallık ADAY OLARAK BİLE değerlendirilmez — dış
+ * kesenin (`server/agitation-desk.ts` → `sendAgitation`) koruma süren hedefe
+ * gösterdiği saygının aynısı: henüz ilk günlerini yaşayan, dengesi oturmamış
+ * bir krallığa habersiz bir nüfus dalgası göndermek de kendi başına bir
+ * istismar yüzeyi açardı (kuruluşun hemen ardından sürekli göçmen alıp normalde
+ * imkânsız bir hızda büyümek gibi).
+ *
+ * Hedef seçilemezse (uygun aday yok ya da hiçbirinde boş konut kalmamış)
+ * göçmenler kaybolur — bu, `tick()`'in bugüne kadarki davranışının aynısı;
+ * FARK şu ki artık ÇOĞU zaman gerçekten bir yer buluyorlar.
+ */
+async function settleMigrations(now: number) {
+  const db = getDb();
+  const due = await db.select({ row: migrations })
+    .from(migrations)
+    .innerJoin(channels, eq(channels.id, migrations.channelId))
+    .where(and(eq(migrations.status, "pending"), lte(migrations.completesAt, now), eq(channels.status, "active")))
+    .orderBy(migrations.completesAt);
+
+  const settle = (id: string) =>
+    db.update(migrations).set({ status: "settled", settledAt: now }).where(and(eq(migrations.id, id), eq(migrations.status, "pending")));
+
+  let landed = 0, lost = 0;
+  for (const { row } of due) {
+    const members = await db.select({ userId: channelMembers.userId }).from(channelMembers)
+      .where(and(eq(channelMembers.channelId, row.channelId), eq(channelMembers.status, "active")));
+    const candidateIds = members.map(member => member.userId).filter(id => id !== row.sourceUserId);
+    const rows = candidateIds.length
+      ? await db.select({ userId: gameSaves.userId, gameState: gameSaves.gameState, revision: gameSaves.revision })
+          .from(gameSaves).where(inArray(gameSaves.userId, candidateIds))
+      : [];
+    const parsed = rows
+      .map(entry => ({ userId: entry.userId, revision: entry.revision, save: parseStoredSave(entry.gameState) }))
+      // Kaydı okunamayan ve kuruluş koruması süren krallık aday değildir.
+      .filter(entry => entry.save && entry.save.protectionEndsAt <= now)
+      .map(entry => ({ userId: entry.userId, revision: entry.revision, save: entry.save! }));
+
+    const pick = parsed.length
+      ? pickMigrationTarget(
+          parsed.map(entry => ({
+            userId: entry.userId, population: entry.save.population,
+            capacity: capacityFor(entry.save.buildings), popularity: entry.save.popularity,
+          })),
+          row.id,
+        )
+      : null;
+    if (!pick) { lost += row.count; await settle(row.id); continue; }
+
+    const target = parsed.find(entry => entry.userId === pick.userId)!;
+    const arrived = arrivingMigrants(row.count, pick.room);
+    if (arrived <= 0) { lost += row.count; await settle(row.id); continue; }
+
+    const written = await writeSaveIfUnchanged(target.userId, target.revision, {
+      ...target.save,
+      population: target.save.population + arrived,
+      // Kaynağı ne olursa olsun "krallığa katılan" ledger'ıdır (bkz.
+      // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
+      // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
+      peopleJoined: (target.save.peopleJoined ?? 0) + arrived,
+      notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(arrived), at: now }, ...target.save.notices].slice(0, 20),
+    });
+    // Yazma düşerse satır PENDING kalır; sonraki tur GÜNCEL adaylarla yeniden dener.
+    if (!written) continue;
+    landed += arrived;
+    await settle(row.id);
+  }
+  return { due: due.length, landed, lost };
+}
+
+/**
  * Yakalanan Kralın bedeli: itibar cezası ve — imzalı barışı varsa — ihanet.
  * İki olay ayrıdır: `caught_agitating` her yakalanmada, `betrayal` yalnızca
  * imzalı saldırmazlık/ittifak varken uygulanır ve anlaşma bozulur.
@@ -676,6 +774,11 @@ export async function POST(request: Request) {
   let purses = { due: 0, landed: 0, exposed: 0 };
   try { purses = await settleAgitations(now); }
   catch { purses = { due: 0, landed: 0, exposed: 0 }; }
+  // Yolda olan göçmenler: aynı sarma gerekçesi, bu turun düşmesi diğer
+  // turları etkilemesin (bkz. settleMigrations).
+  let migrationRound = { due: 0, landed: 0, lost: 0 };
+  try { migrationRound = await settleMigrations(now); }
+  catch { migrationRound = { due: 0, landed: 0, lost: 0 }; }
   // Kral çevrimdışıyken masada bekleyen cevap; imza atılmaz, yalnızca konuşulur.
   let desks: DeskReport[] = [];
   try { desks = await answerNegotiations(now); }
@@ -692,6 +795,7 @@ export async function POST(request: Request) {
     swept,
     tributes,
     agitations: purses,
+    migrations: migrationRound,
     negotiations: { spoke: desks.filter(desk => desk.spoke).length, reports: desks },
     acted: reports.filter(report => report.acted).length,
     llmCalls: reports.filter(report => report.tokensUsed).length + desks.filter(desk => desk.tokensUsed).length,
