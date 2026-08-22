@@ -735,6 +735,12 @@ daha rahat yaşıyor, biz neden böyleyiz" diye AÇIKÇA gelen bir talep.
   - Kıyaslama hangi sıklıkla yenilenir — her tick'te mi (pahalı, sürekli
     sorgu) yoksa saatlik cron turunda mı (Fikir 1 ile aynı ritimde olmalı)?
 
+- **Karar (2026-08-22):**
+  - "Kıyas" talebi **aynı `MAX_OPEN_DEMANDS` tavanını** diğer taleplerle
+    paylaşır — ayrı bir kategori açılmadı.
+  - Yenileme **saatlik cron turunda**, Fikir 1'in agregasyon sorgusuyla
+    aynı ritimde.
+
 ---
 
 ### 14. "General'in verdiği söz" ile Halk'ın gerçek yaşadığı arasındaki fark
