@@ -351,6 +351,10 @@ oyunu açık tutmadan "krallığında bir şey oluyor" bilgisini alır.
   - Rate limit / günlük tavan olacak mı (bir krallık kriz içindeyse
     saatte 10 bildirim gitmesin diye)?
 
+- **Karar (2026-08-22): BEKLEMEDE.** Kullanıcı Slack entegrasyonunu (bu
+  madde ve Fikir 12) şimdilik plana dahil etmek istemiyor — açık sorular
+  yanıtlanmadı, karar verilmedi. İleride ayrıca ele alınacak.
+
 ---
 
 ### 5. Düşman halkının moralini casuslukla öğrenmek
@@ -386,6 +390,13 @@ gözetlemesidir, tamamen farklı bir kanal.
     felsefesi ("kesin sayı değil, kaba çerçeve") ikincisini işaret ediyor.
   - Bu bilgi raporun standart bir parçası mı, yoksa ayrı (daha pahalı/daha
     riskli) bir "derin gözetleme" görevi mi olmalı?
+
+- **Karar (2026-08-22):**
+  - Rapor yalnızca **kaba durum etiketi** verir ("Huzursuz" gibi), kesin
+    sayı asla — `intelReportOf`'un mevcut felsefesiyle tutarlı.
+  - Bu bilgi standart keşif raporunun parçası DEĞİL, **ayrı ve daha
+    riskli/pahalı bir "derin gözetleme" görevi** olarak sunulur — daha
+    düşük başarı ihtimali, daha yüksek bedel.
 
 ---
 
