@@ -1261,6 +1261,16 @@ alır — kısa, yoğun bir yarış anı.
   - Fırsat kaçırılırsa (belirli bir süre içinde kimse ulaşmazsa) ne olur
     — sonsuza dek beklemede mi kalır, yoksa kaybolup damar boş mu kalır?
 
+- **Karar (2026-08-22):**
+  - Fırsatın konumu/türü/büyüklüğü **tohumlu** (channel adı + tükenme
+    anı) — `rand01` deseniyle deterministik, admin müdahalesi gerekmez.
+  - **Gerçek bir yarış**: tek kazanan tüm fırsatı alır — Fikir 22'nin
+    sürekli paylaşımlı doğasından BİLİNÇLİ olarak farklı bir ton (madenin
+    kendisi işbirlikçi+rekabetçi, bu tükenme-sonrası olay tek-kazananlı;
+    ikisi farklı anları temsil ediyor, tutarsızlık değil).
+  - Fırsat kaçırılırsa **bekleyen kalır**, sonradan da alınabilir —
+    aciliyet zayıflar ama affedici bir tasarım tercih edildi.
+
 ---
 
 ### 24. Channel-geneli pazar endeksi
