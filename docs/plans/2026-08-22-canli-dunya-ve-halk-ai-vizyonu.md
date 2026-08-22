@@ -165,6 +165,14 @@ bunu yöneten bir ekran.
     girmeme, CLAUDE.md kısıt #4) tabi olacak — bu, tasarımın en başında
     netleşmeli, sonradan yama olarak eklenmemeli.
 
+- **Karar (2026-08-22):**
+  - Model/kişilik **değiştirilebilir ama nadiren** (ör. sezon başına) —
+    tam sabit değil, admin dilediği anda değil.
+  - Kimlik seviyesi **karışık**: admin channel'a bir varsayılan persona
+    atar; isterse belirli krallıklara özel farklı bir persona verebilir
+    (override). Başlangıçta düşük maliyet (channel varsayılanı yeter),
+    ihtiyaç halinde krallık bazlı detaylandırma imkanı açık kalır.
+
 ---
 
 ### 1. Channel ortalamasını (anonim, AI'sız) panelde göstermek
