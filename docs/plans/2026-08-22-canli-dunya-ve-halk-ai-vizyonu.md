@@ -655,6 +655,13 @@ emrin KENDİSİ General'den gelir.
     birkaç kez mi? Çok sık olursa "Kader" sıradanlaşır, vizyonun istediği
     "bazen" kelimesi kaybolur.
 
+- **Karar (2026-08-22):**
+  - **General'in kendi doğrusunu aşan bir anı** olarak konuşur — üçüncü
+    bir ses/persona GEREKMİYOR, mevcut General kimliğine oturur, yeni bir
+    "kimin ödediği" sorusu açmaz.
+  - Tetikleyici eşikler **sezonda birkaç kez** görülecek kadar nadir
+    olmalı.
+
 ---
 
 ### 12. Slack üzerinden iki yönlü karar
@@ -689,6 +696,9 @@ tepkisi ya da thread cevabı ile gerçek bir oyun kararı verilebilmesi
     (OAuth app, Slack Bot Token) gerektirir — aynı "Slack" kelimesi
     altında iki farklı teknik yatırım var, bu ayrım kullanıcıya açıkça
     anlatılmalı.
+
+- **Karar (2026-08-22): BEKLEMEDE.** Fikir 4 ile aynı gerekçeyle Slack
+  entegrasyonu şimdilik ele alınmıyor.
 
 ---
 
