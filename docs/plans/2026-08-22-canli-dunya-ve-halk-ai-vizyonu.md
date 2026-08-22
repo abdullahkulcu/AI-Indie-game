@@ -1166,6 +1166,18 @@ kazanma).
   - Bu, Fikir 19 (birlik deneyimi) ile aynı fazda mı ele alınmalı —
     abluka sırasında ordunun deneyimi/morali de mi etkilenir?
 
+- **Karar (2026-08-22):**
+  - Abluka süren Kral'ın **kendi ordusu üretimden düşer / kendi
+    savunması zayıflar** — dış kesenin dengelenmiş maliyet modeliyle
+    tutarlı bir bedel.
+  - İmzalı bir saldırmazlık anlaşması varken abluka kurmak **ihanet
+    cezası işletir** (`punishAgitator` deseniyle aynı).
+  - Süre tavanı **yok** — Kral dilediği kadar sürdürebilir, üretim/
+    savunma kaybı zaten doğal bir fren.
+  - **Fikir 19 (birlik deneyimi) ile bağlantılı**: uzun ablukada bekleyen
+    ordunun deneyimi/morali de etkilenir — bu iki fikir birlikte
+    tasarlanmalı, ayrı fazlara bölünmemeli.
+
 ---
 
 ### 22. Ortak madende nüfuz mücadelesi
