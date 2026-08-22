@@ -916,6 +916,12 @@ daha iyiyse göç eğilimi artar; komşular da kötüyse (herkes zorluk
     mi hesaplanır (pahalı, her krallığın kaydını okumak gerekir) yoksa
     saatlik bir önbellek mi (bayat ama ucuz)?
 
+- **Karar (2026-08-22): BEKLEMEDE.** `tick()`'in imzasını değiştirmek
+  (yeni zorunlu bir channel-ortalaması parametresi) kod tabanının en
+  hassas noktalarından birine (CLAUDE.md kısıt #2) dokunuyor — kullanıcı
+  bunu şimdilik ertelemeyi tercih etti. İleride ele alınırsa: güncelleme
+  **saatlik önbellek** olacak, Fikir 1/13 ile aynı ritimde.
+
 ---
 
 ### 18. Kral rakiplerini zayıflatmak için kendi halkını feda edebilir
