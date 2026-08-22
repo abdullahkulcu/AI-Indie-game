@@ -431,6 +431,12 @@ Veto değil, güçlü bir sinyal.
     ama daha az "strateji" hissi verir — vizyon ikisini de istiyor
     ("gerçekten demokrasi VE strateji").
 
+- **Karar (2026-08-22):**
+  - Gösterge **`elevated` + `severe`** risk kademelerinde görünür (yalnızca
+    `severe` değil).
+  - Gösterge **nitel bir etiket** olacak ("Halk bunu hoş karşılamaz" gibi),
+    sayısal tahmin yok — min-maxing riski bilinçli olarak tercih edilmedi.
+
 ---
 
 ### 7. Halk'ın kendi kamusal "feed"i
