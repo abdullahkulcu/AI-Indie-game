@@ -78,7 +78,7 @@ geldiği doğrulanamamıştır.
 | **Faz 3** (muhtemelen) | ✅ TAMAM | İç hizip: rıza uzun süre düşük kalırsa elebaşı çıkıyor; kapalı-çözümlü üstel biriktirme/erime, Kral'ın bunu güçle bastıracak bir emri YOK. | `beb822c` "İç hizip: rıza uzun süre düşük kalırsa elebaşı çıksın" | `engine/faction.ts`, `tests/faction.test.ts` |
 | **Faz 4** (muhtemelen) | ✅ TAMAM | Dış kese — altın: komşu krallığın halkına ya da askerine para gönderme (hizip baskısı/asker huzursuzluğu enjeksiyonu), zar yok, iki kademeli ifşa. | `1b7d651` "Dış kese — altın: komşunun halkını ya da askerini satın al" | `engine/agitation.ts`, `server/agitation-desk.ts`, `db/schema.ts` → `agitations` |
 | **Faz 5** (muhtemelen) | ✅ TAMAM | Dış kese — mal: hedefin pazarına mal yığarak satış getirisini düşürme (`commonsGlut`), rızaya ya da alışa dokunmaz. | `4aa4ad8` "Dış kese — mal: hedefin pazarını boz, ambarını doldurma" | `engine/agitation.ts` (`GLUT`, `applyGlut`), `engine/market.ts` (`pricingStock`) |
-| **Faz 6** | 🔴 **BACKLOG — HENÜZ YAPILMADI** | **Göçün çok krallığa dağılması.** Şu an krallığı terk eden nüfus (`engine/tick.ts` içindeki `peopleLeft`/GÖÇ bildirimi) hiçbir yere "gitmiyor" — yalnızca bir sayaçtan düşüyor. Bu fazın hedefi göçün channel'daki BAŞKA krallıklara (ya da ortak bir havuza) dağılması olarak tasarlanmış olmalı, ancak plan belgesine bu oturumda erişilemediği için kesin kapsam doğrulanamadı. **Önemli:** bu iş şu anda bu depoda AYRI bir worktree'de başka bir ajan tarafından yürütülüyor olabilir — bu belgeyi güncelleyen oturumun görevi bu fazı UYGULAMAK değildir, yalnızca durumunu doğru yansıtmaktır. | — | — |
+| **Faz 6** | ✅ **TAMAM** | **Göçün çok krallığa dağılması.** Krallığı terk eden nüfus artık channel'daki aktif ve kuruluş koruması bitmiş başka bir krallığa, boş konut + rızadan doğan ağırlıklı bir seçimle (tohumlu `rand01`, `Math.random()` yok) gerçekten ulaşıyor. Orijinal tasarım belgesi erişilemez olduğu için kod tabanından rekonstrükte edildi (dış kese/ortak madenin "kaynakta olay olur, cron hedefe gecikmeli yazar" deseni). | `f143657`, `f74687b` | `engine/migration.ts`, `server/migration-desk.ts`, `app/api/cron/route.ts` (`settleMigrations`), `app/api/save/route.ts`, `db/schema.ts` → `migrations`, `tests/migration.test.ts` |
 | **Faz 7** (muhtemelen) | ✅ TAMAM | Haydut yönlendirme: Kral, dağ yollarındaki eşkıyayı komşusunun kalesine doğru çekebiliyor; yalnızca akın SIKLIĞINI ve haydut ağırlığını kaydırır, şiddete dokunmaz. | `80f23af` "Haydut yönlendirme: eşkıyayı komşunun kalesine çek" | `engine/agitation.ts` (`LURE`, `applyLure`, `lureAt`), `engine/raids.ts` (`pickKind` içindeki `lure` parametresi) |
 | **Faz 8** | ✅ TAMAM (DEVIRTESLIM'e göre; içerik bu oturumda doğrulanamadı) | Bilinmiyor — muhtemelen Faz 0-7'nin sunucu tarafı sertleştirmesi (`server/save-validation.ts` → `SERVER_DERIVED` listesinin 9 alanı tek fonksiyonda toplanması) ile örtüşüyor olabilir. | `c14aa38` (merge) içinde | `server/save-validation.ts` |
 | **Faz 9** | ✅ TAMAM (DEVIRTESLIM'e göre; içerik bu oturumda doğrulanamadı) | Bilinmiyor — muhtemelen arayüz entegrasyonu (`components/KingdomGame.tsx`'teki "DIŞ KESE" paneli, hizip göstergesi) ile örtüşüyor olabilir. | `c14aa38` (merge) içinde | `components/KingdomGame.tsx` |
@@ -87,11 +87,13 @@ geldiği doğrulanamamıştır.
 
 `DEVIRTESLIM-2026-08-21.md`, Faz 6'yı şöyle tanımlıyor: *"göçün çok krallığa
 dağılması"*, ve durumunu şöyle işaretliyor: *"🔴 BACKLOG, hiç başlanmadı —
-worktree agent bilinçli olarak burada durduruldu"*. Bu belgenin yazıldığı an
-itibarıyla (2026-08-22) `engine/tick.ts` içindeki göç mantığı hâlâ tek
-krallık içi bir defterdir (`peopleJoined`/`peopleLeft`/`migrationDrift`);
-başka bir krallığa aktarım yapan hiçbir kod yolu yoktur. Bu tutarlılık,
-DEVIRTESLIM'in "hiç başlanmadı" notunu doğrular.
+worktree agent bilinçli olarak burada durduruldu"*. Bu belge ilk yazıldığında
+(2026-08-22, sabah) `engine/tick.ts` içindeki göç mantığı hâlâ tek krallık
+içi bir defterdi; aynı gün ilerleyen saatlerde ayrı bir agent tarafından
+implemente edildi (bkz. `updates/2026-08-22-faz6-goc-dagilimi.md`) ve
+yukarıdaki tablo güncellendi. Faz 6'nın kapsamı da (orijinal tasarım belgesi
+hâlâ erişilemediği için) kod tabanından rekonstrükte edildi — bkz.
+`engine/migration.ts`'in başındaki gerekçe yorumu.
 
 ## 3. Sonraki oturumlar için
 
