@@ -471,6 +471,13 @@ fiyatı konuşuluyor" gibi). Kral'a doğrudan bir talep DEĞİL — yalnızca
   - Periyot ne olmalı — saatte bir mi (cron'a biner, ucuz) yoksa Kral
     sekmeyi her açtığında mı (daha pahalı, ama daha "canlı")?
 
+- **Karar (2026-08-22):**
+  - Feed **ara sıra anonim çapraz-referans da içerir** ("komşu sancakta
+    böyleymiş" gibi) — isim/kimlik asla sızmamalı, `intelReportOf`'un
+    "tek tek alan yazma" disipliniyle dikkatli tasarlanmalı.
+  - Üretim **saatte bir, cron'a biner** (yalnızca gerçekten bir şey varsa
+    üretilir, gece vardiyası token disipliniyle tutarlı).
+
 ---
 
 ### 8. Hizip müzakere masası — iç muhalefetle pazarlık
