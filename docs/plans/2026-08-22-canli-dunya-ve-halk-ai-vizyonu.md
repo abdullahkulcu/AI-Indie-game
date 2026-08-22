@@ -610,6 +610,16 @@ gömer.
     nasıl etkiler — hızlı bir channel'da "gerçek gün" ile "oyun günü"
     arasındaki fark nasıl ölçülür?
 
+- **Karar (2026-08-22):**
+  - **CEZA** olacak: Kral pencerede giriş yapıp cevap vermezse baskı
+    hızlanır.
+  - Pencere **channel hızıyla ölçeklenen oyun-içi gün** olarak ölçülür
+    (gerçek 24 saat değil). Bu, `docs/plans/2026-08-22-acik-backlog-maddeleri.md`'deki
+    "General'in günlük sayacı channel hızından bağımsız" maddesiyle AYNI
+    kategoride bir düzeltme — ikisi birlikte, tutarlı bir "oyun-içi gün"
+    tanımıyla ele alınmalı (`server/night-shift.ts`'teki `DAY_MS` bu
+    tanımın TEK KAYNAĞI olmalı, ikinci bir yerde ayrı hesaplanmamalı).
+
 ---
 
 ### 11. "Kader" katmanı — oyunun Kral'dan akıllı olduğu anlar
