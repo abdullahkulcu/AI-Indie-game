@@ -1361,3 +1361,15 @@ kontrol edemez, yalnızca General buna karşı hazırlık önerebilir.
   - Bu, tüm channel-geneli fikirlerin (22, 23, 24) ortak bir
     "channel-events" cron altyapısını mı paylaşmalı, yoksa her biri ayrı
     mı inşa edilmeli?
+
+- **Karar (2026-08-22):**
+  - Olay **arazi/hazırlığa göre farklı** etkiler — `raids.ts`'in arazi-
+    bazlı ağırlıklandırma deseniyle tutarlı.
+  - Olumlu/olumsuz olaylar **yarı yarıya** sıklıkla gelir.
+  - **General önceden bir uyarı sinyali verir** — bu fikir artık **Fikir
+    11 ("Kader" katmanı) ile aynı fazda tasarlanmalı**, ayrı ele alınamaz.
+  - Ortak "channel-events" altyapısı **paylaşılmıyor** — her channel-
+    geneli fikir (22/23/24/25) ayrı inşa edilir. Not: bu, CLAUDE.md'nin
+    "erken soyutlama yapma, üç benzer satır bir soyutlamadan iyidir"
+    ilkesiyle tutarlı bir tercih — ortak altyapı gerçekten tekrar eden
+    bir desen netleşirse SONRADAN çıkarılabilir, baştan zorlanmaz.
