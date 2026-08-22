@@ -970,6 +970,16 @@ kullanılabilmesinin altını çizer.
     yoksa Fikir 14'ün ikiyüzlülük mekanizmasıyla BAĞLANTILI bir itibar/
     hizip cezası da mı devreye girmeli?
 
+- **Karar (2026-08-22):**
+  - `engine/migration.ts`'nin **"hedef adaylar arasından seçilir, gönderen
+    seçmez" ilkesi korunur** — bu fikir dolaylı/anlatısal kalır, yeni bir
+    doğrudan hedefleme aracı EKLENMEZ. Kral yalnızca kendi rızasını
+    düşürerek göçü dolaylı tetikler.
+  - Maliyet: doğal rıza/nüfus kaybının ÜSTÜNE, **Halk fark ederse
+    (Fikir 14'ün ikiyüzlülük mekanizması) itibar/hizip cezası da
+    devreye girer** — iki fikir birbirine bağlanıyor, bu yüzden Fikir 18
+    Fikir 14'ten SONRA ele alınmalı.
+
 ---
 
 ## 5. Genel (fikirler-arası) açık sorular
