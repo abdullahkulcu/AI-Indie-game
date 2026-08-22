@@ -1214,6 +1214,18 @@ Damarda en çok işçi bulunduran krallık "bölge sahibi" sayılıp küçük bi
     bugün nüfusun %20'si) bu rekabetle birlikte yeniden mi
     değerlendirilmeli (rekabet daha çok işçi göndermeyi teşvik eder)?
 
+- **Karar (2026-08-22):**
+  - Nüfuz payı **aktif üretimden çalınır** — `engine/mine.ts`'in bugünkü
+    "kimse başkasının payını yemez" ilkesi BİLİNÇLİ olarak kısmen terk
+    ediliyor. **Uygulanırken dosyanın kendi yorumu da güncellenmeli**
+    (CLAUDE.md'nin tek-doğru-kaynak disiplini: kod bir ilkeyi
+    söylüyorsa ve o ilke artık kısmen geçersizse, yorum sessizce eskimiş
+    bırakılmaz).
+  - "En çok işçi" ölçütü **bir süre boyunca sabit tutulur** (ör. son 24
+    saat ortalaması) — anlık "sahiplik kapma yarışını" önler.
+  - Nüfus tavanı (**%20**) olduğu gibi kalır, bu rekabetle birlikte
+    yeniden değerlendirilmez.
+
 ---
 
 ### 23. Maden tükenince ortaya çıkan yeni fırsat (define, yıkık kale)
