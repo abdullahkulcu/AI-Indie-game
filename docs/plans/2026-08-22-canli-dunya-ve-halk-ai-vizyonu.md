@@ -1311,6 +1311,16 @@ komşularının fiyatını da (küçük bir sızıntı/yayılma etkisiyle) etkil
     ortalaması) agregasyon altyapısını mı paylaşır, yoksa bağımsız bir
     sistem mi kurar?
 
+- **Karar (2026-08-22):**
+  - Etki **gerçekten fiyatı değiştirir** — `engine/market.ts`'in bugünkü
+    izolasyon ilkesine bilinçli bir istisna. **Uygulanırken dosyanın
+    kendi yorumu ("Channel çapındaki oyuncular arası pazar AYRI bir
+    iştir") da güncellenmeli** (tek-doğru-kaynak disiplini).
+  - Altyapı **Fikir 1/13'ün agregasyon sorgusunu paylaşır** — bağımsız
+    bir sistem kurulmaz.
+  - Eşik **channel nüfusuna/hızına göre ölçeklenir** — sabit bir eşik
+    yerine, farklı büyüklükteki channel'larda adil kalır.
+
 ---
 
 ### 25. Tohumlu, channel-genelinde dünya olayları (mevsim/kıtlık)
