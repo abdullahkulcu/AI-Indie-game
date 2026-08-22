@@ -509,9 +509,9 @@ normal seyrine (mevcut kapalı-çözüm) devam eder.
 - **Efor:** orta-büyük — `engine/faction.ts`'e yeni saf fonksiyonlar
   (`factionDemand`, `factionSettlement` gibi) + muhtemelen yeni bir küçük
   tablo (aktif bir "hizip talebi" bekliyorsa) + UI.
-  Bu fikir Halk-AI kimlik altyapısını (Fikir 0) GEREKTİRMEZ — elebaşının
-  talebi deterministik/şablon olabilir, tıpkı bugünkü `factionNotice`
-  gibi. Yani Fikir 0'dan ÖNCE de yapılabilir.
+  **Karar sonrası not:** talep LLM'den üretileceği için bu fikir artık
+  Halk-AI kimlik altyapısını (Fikir 0) GEREKTİRİYOR — Fikir 0'dan önce
+  yapılamaz (aşağıdaki orijinal analiz bunun tersini varsayıyordu).
 - **Açık sorular:**
   - Elebaşının talebi LLM'den mi (Fikir 0 sonrası, daha "akıllı" ve
     öngörülemez) yoksa deterministik bir talep şablonu mu (bugünkü
@@ -520,6 +520,13 @@ normal seyrine (mevcut kapalı-çözüm) devam eder.
   - Kral talebi reddederse VE tekrar tekrar reddederse elebaşı "sertleşir"
     mi (örn. `engine/ledger.ts`'teki `weight` artan dil sertliği deseni
     burada da uygulanabilir mi)?
+
+- **Karar (2026-08-22):**
+  - Talep **LLM'den üretilir** — bu madde artık **Fikir 0'a bağımlı**,
+    önce Halk-AI kimlik altyapısı hazır olmalı (yukarıdaki "Fikir 0'dan
+    önce de yapılabilir" notu artık geçerli değil).
+  - Kral ısrarla reddederse **elebaşı sertleşir** (dil/baskı hızlanır),
+    `engine/ledger.ts`'teki artan ağırlık deseniyle tutarlı.
 
 ---
 
