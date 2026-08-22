@@ -777,6 +777,18 @@ var" diye buna açıkça itiraz edebilir.
     ilkesiyle (CLAUDE.md'deki "Kesin işlem kuralı") gerilimli,
     netleştirilmeli.
 
+- **Karar (2026-08-22):**
+  - Fark baştan **genel bir desen** olarak kurulur (yiyecek + maaş
+    birlikte), tek bir dar örnekle sınırlı kalmaz.
+  - **Halk yakalar, "General yalan söyledi" hissi doğar.** Bunu
+    CLAUDE.md'nin "General uygulamadığı eylemi uyguladım demez" ilkesiyle
+    uzlaştıran ayrım: General teknik olarak yalan söylemez — istihkakı
+    GERÇEKTEN %100'e çıkardı, eylem fiilen uygulandı; yalnızca SONUCU
+    (ambarın yetmediğini, fiilen daha azının dağıtıldığını) Krala
+    kendiliğinden söylemedi. Halk bu eksikliği yakalayıp seslendirir.
+    İlke ihlal edilmiyor, yalnızca "eksik açıklama" ile "yanlış iddia"
+    arasındaki çizgi kullanılıyor.
+
 ---
 
 ### 15. Propaganda — enformasyon silahı olarak Halk-AI
