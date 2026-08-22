@@ -1118,6 +1118,16 @@ fazlası olan) asker "kiralayabilir" — ekonomik gücü doğrudan askeri güce
     sayılır — kiracıya mı (parasını ödedi, riski o taşır) yoksa
     kiralayan krallığa mı (kendi vatandaşı öldü)?
 
+- **Karar (2026-08-22):**
+  - Kiralanan asker **ayrı bir `units.mercenary` kategorisinde** izlenir.
+  - **Gerçekten akın/abluka savunmasında kullanılır** — yalnızca
+    caydırıcılık değil.
+  - Fiyat **serbest müzakereyle** belirlenir (müzakere sisteminin doğal
+    bir uzantısı).
+  - Kayıp **kiralayan krallığa** ait sayılır (kendi vatandaşı öldü) —
+    kiralamanın gerçek bir riski/bedeli olur, kiracı için bedelsiz bir
+    "kalkan" olmaz.
+
 ---
 
 ### 21. Uzun süreli abluka
