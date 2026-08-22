@@ -824,6 +824,14 @@ ANLATI katmanı AI'dan gelir.
     farklı "tutması" (isyankâr bir halk propagandaya daha çok inanır) mı
     beklenir — bu, Fikir 0'ın persona kararına doğrudan bağlı.
 
+- **Karar (2026-08-22):**
+  - İçerik **yalnızca genel/belirsiz** kalır ("birileri parayla
+    dolaşıyor" gibi) — hedefin gerçek/kamuya açık verisine dayanan somut
+    bir zaaf işaret etmez, asimetrik bilgi sınırına en güvenli seçenek.
+  - **Persona etkiler**: isyankâr bir halk propagandaya daha çok inanır,
+    itaatkâr bir halk daha az — Fikir 0'ın persona kararını anlamlı kılan
+    bir sonuç.
+
 ---
 
 ### 16. Halk'ın General'i atlayıp doğrudan Kral'a sesi
