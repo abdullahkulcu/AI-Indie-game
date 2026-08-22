@@ -65,6 +65,12 @@ ihlalidir.
    bir sorgu API'si yok. Ama Halk, kendi kıyaslamasına dayanarak Kral'a
    doğrudan gelip isyan/talep/basınç oluşturabilir. Bilgi **tek yönlü**
    akar: halk-kıyaslaması → Kral'ın bilgisi. Ters yönde asla.
+   **TEK BİLİNÇLİ İSTİSNA (bkz. Fikir 9, karar 2026-08-22):** Referandum
+   fikri için kullanıcı bu kuralı KASITLI olarak esnetti — Kral (General
+   aracılığıyla) halka AÇIKÇA ve HALKIN DA BİLEREK cevap verdiği bir soru
+   sorabilir. Bu, General'in gizlice bilgi sızdırmasından farklı: açık,
+   karşılıklı, Kral'ın başlattığı bir davettir. Bu istisna yalnızca
+   referandum mekanizmasına özeldir, genel kuralı geçersiz kılmaz.
 
 ## 3. Bugünkü kod tabanı — bu vizyonun üstüne oturacağı zemin
 
@@ -561,6 +567,13 @@ bir gösterge).
     değil.**
   - Ne sıklıkla kullanılabilir (spam'e karşı bir tavan gerekir, tıpkı
     `host_festival`/müzakere masası tavanları gibi)?
+
+- **Karar (2026-08-22):**
+  - Referandum **LLM'e bağlanır** — bu, §2 madde 2'deki sabit kurala
+    bilinçli bir istisnadır (yukarıdaki §2 güncellemesine bakın). Artık
+    bu madde de Fikir 0'ın (Halk-AI kimlik altyapısı) bir uzantısı.
+  - Kullanım sıklığı: **haftada 1** gibi bir tavan (günlük değil, ama
+    sezon başına birkaçtan daha sık).
 
 ---
 
