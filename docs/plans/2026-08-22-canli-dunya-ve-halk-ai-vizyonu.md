@@ -1069,6 +1069,20 @@ firar riskini daha hızlı taşır. Bugünkü `soldierUnrest` tek eksenli
     panel göstergesi olarak mı başlar? Hangi fazda, hangi öncelikte ele
     alınmalı?
 
+- **Karar (2026-08-22):**
+  - Deneyim **akın PÜSKÜRTÜLDÜĞÜNDE** birikir (savaş deneyimi ekseni,
+    maaş/idare ekseni değil).
+  - Bu eksen **doğrudan `defenseOf.power`'a girer** — kartopu riski
+    bilinçli olarak kabul edildi, dengelenmesi ayrı bir iş.
+  - **Birimle birlikte deneyim de kaybolur.** Bu, bugünkü `units:
+    Record<string, number>` (yalnızca birim SAYISI tutan) yapısından
+    DAHA KARMAŞIK bir veri modeli gerektirir — birim bazlı deneyim takibi
+    demek, ordunun artık salt bir sayı değil, iç yapısı olan bir koleksiyon
+    olması gerektiği anlamına gelir. **Efor tahmini bu kararla "orta"dan
+    "orta-büyük"e çıkar** — bu, yalnızca yeni bir alan eklemek değil,
+    `units`'in temsilini değiştirmek demektir; `engine/actions.ts`,
+    `engine/raids.ts`, save şeması ve UI'nin hepsi etkilenir.
+
 ---
 
 ### 20. Channel-geneli paralı asker havuzu
