@@ -869,6 +869,14 @@ BAĞIMSIZ, filtrelenmemiş bir cümle.
     TAMAMLANDIKTAN sonra çok daha güçlü olur, önce yalnızca "konumu"
     değiştirmek (şablon metinle) bir ilk adım olabilir.
 
+- **Karar (2026-08-22):**
+  - Halk'ın sesi **meclis sohbetinin İÇİNE**, ayrı bir konuşma balonu
+    olarak girer — Kral'ın General'le konuştuğu akışı böler, en dramatik
+    seçenek.
+  - Bu madde **Fikir 2 tamamlanana kadar beklenir** — şimdi şablon metinle
+    başlamak yerine, ikisi birlikte güçlü bir versiyon olarak gelecek.
+    Sıralama: **Fikir 0 → Fikir 2 → Fikir 16.**
+
 ---
 
 ### 17. Göçün gerekçesi göreceli olabilir
