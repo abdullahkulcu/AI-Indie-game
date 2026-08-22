@@ -207,6 +207,16 @@ tek tek okunup özetlenir.
     göç sistemlerinin ikisi de bu krallıkları hariç tutuyor, aynı kural
     burada da geçerli olmalı gibi duruyor, ama teyit gerekir)?
 
+- **Karar (2026-08-22):**
+  - Ortalamaya **rıza + istihkak + vergi + hizip baskısı** girer (zengin
+    kıyaslama tercih edildi). Not: küçük channel'larda (az sayıda krallık)
+    bu ortalama tek bir rakibin durumunu neredeyse birebir yansıtabilir —
+    channel büyüklüğü arttıkça bu sızıntı riski doğal olarak seyrelir;
+    uygulamada bir alt sınır (ör. en az N aktif krallık yoksa panel
+    gösterilmez) gerekip gerekmediği ayrıca değerlendirilmeli.
+  - Kuruluş koruması süren krallıklar ortalamaya **girmez** (dış kese/göç
+    ile aynı kural).
+
 ---
 
 ### 2. Halk Sesi'nin metnini Halk-AI'dan üretmek (köprü fikri)
@@ -247,6 +257,17 @@ oyun dengesi hiç değişmez, yalnızca anlatım kalitesi değişir.
   - LLM çağrısı başarısız olursa (sağlayıcı hatası) şablon metne (bugünkü
     davranışa) mı düşülür? Muhtemelen evet ama bu açıkça karara
     bağlanmalı — sessiz düşüş "Halk'ın sesi kesildi" gibi görünmemeli.
+
+- **Karar (2026-08-22):**
+  - Metin, `engine/ledger.ts`'teki ağırlık deseniyle tutarlı olarak
+    **süre uzadıkça yeniden üretilir ve dil sertleşir** (maliyet bilinçli
+    olarak göz ardı edildi, bkz. genel not).
+  - LLM çağrısı başarısız olursa talep **bu turda hiç gösterilmez**
+    (şablona düşülmez). Not: bu, Kral'ın acil bir talebi (ör. `wage`
+    ivedi) yalnızca sağlayıcı hatası yüzünden kaçırabileceği anlamına
+    gelir — kabul edilen bir risk, ama uygulamada bir tekrar-deneme
+    (retry) ya da "son bilinen metni göster" gibi hafif bir güvenlik ağı
+    düşünülebilir.
 
 ---
 
