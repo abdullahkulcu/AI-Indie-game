@@ -128,10 +128,12 @@ hash'iyle yeni bir satır eklenir.
 | Madde | Durum | İçerik | Commit(ler) | Dosyalar |
 | --- | --- | --- | --- | --- |
 | **Fikir 1** | ✅ TAMAM (kesin) | **Channel ortalamasını panelde göstermek.** "Diyar" sekmesi, Kralın dört ölçütünü (rıza, yiyecek istihkakı, vergi oranı, muhalefet baskısı) channel'ın ANONİM ortalamasıyla yan yana gösteriyor. Kimin hangi değere sahip olduğu istemciye hiç inmez; kuruluş koruması süren krallıklar ve Kralın kendisi ortalamaya girmez; aday sayısı gizlilik alt sınırının (3 sancak) altındaysa sunucu sayı üretmez. AI çağrısı yok, yeni DB turu yok — `GET /api/world`'ün zaten okuduğu satırlar üzerinde çalışır. | `2ada90d` | `engine/comparison.ts` (ölçüt listesi, "iyi" yönü, alt sınır), `server/world-projection.ts` (`channelAverages`), `app/api/world/route.ts`, `components/KingdomGame.tsx`, `app/game.css`, `tests/channel-averages.test.ts` |
+| **Fikir 13** | ✅ TAMAM (kesin) | **Sessiz kıyaslama — halk kendini komşu sancaklarla kıyaslar.** Fikir 1'in anonim ortalaması artık Kral'a bir gösterge olmakla kalmıyor, Halk'ın kendi tarafında bir BASKIYA dönüşüyor: yeni bir talep türü (`DemandKind = "kiyas"`) ekmek ve maaşla AYNI `MAX_OPEN_DEMANDS` tavanını paylaşarak açılıyor. Bilgi akışı tek yönlü ve sınır koda yazılı: metin hiçbir krallık adı taşımaz ve HİÇ sayı vermez, yalnızca nitel bir kıyas kurar (bir test bunu doğrular). Eşik: ölçüt başına fark (rıza 10, istihkak 10, vergi 6, muhalefet 15), en az iki ölçütte birden geride olma şartı, 8 oyun saati kesintisiz süre. Ortalama gizlilik alt sınırının altındaysa (`averages: null`) talep KESİNLİKLE açılmaz; kıyas asla `urgent` olmaz, yani somut taleplerin önüne geçmez. **RİTİM SAPMASI:** karar "saatlik cron turunda" diyordu; `syncPopulaceDemands` bugün yalnızca Kral General'le konuşurken çağrıldığı için kıyas talep senkronunun ritmine bağlandı — gerekçe ve kabul edilen sonuç `updates/2026-08-22-sessiz-kiyaslama.md`'de. AI çağrısı yok; istek başına tek ek DB sorgusu. | `3b91835` | `engine/populace-voice.ts` (`"kiyas"` türü, `VOICE_THRESHOLDS.kiyas`, `VoiceSignals.comparison`, `comparisonDemand`), `server/world-projection.ts` (`populaceComparison` — `channelAverages`'i paylaşır), `app/api/general/route.ts` (`loadComparison`; üyelik artık `activeMembershipOf`'tan), `tests/populace-voice.test.ts` |
 
 Fikir 1'in agregasyonu bilinçli olarak **paylaşılan altyapı** hâlinde
 yazıldı: plan belgesinin kararlarına göre Fikir 13 (sessiz kıyaslama, Halkın
 kendi tarafında bir talep olarak) ve Fikir 24 (channel-geneli pazar endeksi)
-kendi ortalamalarını hesaplamaz, `channelAverages`'ı çağırır. O iki madde
-uygulanırken ilk bakılacak yer `server/world-projection.ts` ve
-`engine/comparison.ts`.
+kendi ortalamalarını hesaplamaz, `channelAverages`'ı çağırır. Fikir 13 bunu
+uyguladı (`populaceComparison` aynı fonksiyonu çağırıyor, kendi ortalamasını
+kurmuyor); Fikir 24 uygulanırken ilk bakılacak yer aynı şekilde
+`server/world-projection.ts` ve `engine/comparison.ts`.
