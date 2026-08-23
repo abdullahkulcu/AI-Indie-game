@@ -133,6 +133,24 @@
 .general-requests .request button:hover:not(:disabled){background:#6d3325;color:#f2e7cb}
 .general-requests .request button:disabled{opacity:.4;cursor:not-allowed}
 
+/* ---- Meclis: halkın araya giren sesi (plan belgesi Fikir 16) ----
+   Halk, General'i ATLAYIP doğrudan Kral'a seslendiğinde bu balon çıkar. Görsel
+   dil bilinçli olarak parşömenin DIŞINA çıkar: General'in balonu sıcak
+   parşömen (#f1e6c8), Kral'ın balonu şarap kırmızısı; halkın sesi ikisinin de
+   olmadığı SOĞUK bir taş-mavisi. Amaç dekor değil okunabilirlik — Kral bir
+   balonun kimin ağzı olduğunu okumadan, rengiyle bilmeli. Vurgu (ACİL) yine
+   kızıl (#8f3512), çünkü aciliyetin rengi bu kod tabanında zaten o.
+   `.message` ile aynı kutuyu paylaşır, farkları burada yazılıdır. */
+.message.populace{max-width:100%;background:#dfe4e8;border:1px solid #93a2ad;border-left:4px solid #3f5a6b}
+.message.populace b{color:#2f4655;letter-spacing:.12em}
+.message.populace p{font:11px/1.45 Spectral;color:#26333c}
+.message.populace em{float:right;font-style:normal;font:600 7px JetBrains Mono,monospace;letter-spacing:.14em;color:#8f3512}
+.message.populace small{display:block;margin-top:7px;font:7px/1.5 JetBrains Mono,monospace;color:#5b6b76}
+/* Kışlanın sesi halkınkinden ayrı bir ağız: Halk sekmesindeki `.voice-row.garrison`
+   ile AYNI koyu kahveyi kullanır ki iki ekranda aynı taraf aynı renk olsun. */
+.message.populace.garrison{background:#e8e0dc;border-color:#b09a91;border-left-color:#6d3325}
+.message.populace.garrison b{color:#6d3325}
+
 /* ---- Meclis: kompakt rozetler + bilgi popup'ı ---- */
 .council-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .council-chips button{padding:5px 10px;font-size:.64rem;letter-spacing:.1em;border:1px solid #cbb488;background:#f2e7cb;color:#6d3325;cursor:pointer}
