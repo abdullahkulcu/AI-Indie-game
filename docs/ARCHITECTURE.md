@@ -92,8 +92,8 @@ JSON döner. Tam liste ve sorumluluklar için §4.
 
 `KingdomGame.tsx` (742 satır) uygulamanın gövdesidir: kurulum akışı
 (`welcome → channel → kingdom → general`), oyun döngüsü (`tick()`'i istemcide
-çalıştırıp periyodik `PUT /api/save` ile sunucuya yazma) ve altı sekme
-(`meclis`, `binalar`, `halk`, `ordu`, `defter`, `diyar`). `KingdomScene.tsx`
+çalıştırıp periyodik `PUT /api/save` ile sunucuya yazma) ve yedi sekme
+(`meclis`, `binalar`, `halk`, `ordu`, `istihbarat`, `defter`, `diyar`). `KingdomScene.tsx`
 (867 satır) izometrik Three.js sahnesini (arazi, binalar, yürüyen halk,
 nöbetteki asker, nehir şeridi) çizer. `ChannelWorldMap.tsx` "diyar" sekmesindeki
 channel haritasını (komşular, ortak maden, siluetler) render eder.
@@ -266,7 +266,8 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   dönük damgalanır, iki kademeli ifşa: karşı-istihbarat ayaktaysa gönderenin
   adı açılır + itibar cezası + hedefe kalkan).
 - **API:** `POST /api/world` (kese/yönlendirme gönderme).
-- **UI:** `diyar` sekmesi ("DIŞ KESE" paneli).
+- **UI:** `istihbarat` sekmesi ("DIŞ KESE", "KARŞI-İSTİHBARAT" ve "HAYDUT
+  YÖNLENDİRME" panelleri; komşuya yönelik bütün araçlar orada toplanır).
 
 ### 3.9 İç muhalefet / faction baskısı (faction)
 

@@ -1,8 +1,8 @@
-import { and, count, desc, eq, gt, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { agitations, channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { channelAverages, intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
+import { channelAverages, channelVictoryStanding, intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
 import { sendAgitation } from "../../../server/agitation-desk";
 import { AGITATION, agitationDayStart } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
@@ -12,6 +12,17 @@ import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
 const response = (body: unknown, status = 200) => Response.json(body, { status, headers });
+
+/**
+ * Zafer skorunun kese defteri için okunan satır tavanı.
+ *
+ * Kese GÖNDERİMİ zaten sıkı tavanlı (gönderen başına oyun-günü 4, hedef başına
+ * 3, çift arası 6 saat), yani uzun bir sezonda bile satır sayısı binlerle
+ * ölçülür. Tavan yine de duruyor: bu sorgu her `GET /api/world` turunda (10
+ * saniyede bir) koşuyor ve sınırsız bir SELECT'in maliyeti channel yaşıyla
+ * birlikte sessizce büyürdü.
+ */
+const VICTORY_PURSE_LIMIT = 4000;
 
 async function channelFor(userId: string, channelId: string) {
   const [channel] = await getDb().select({ id: channels.id, name: channels.name, speed: channels.speed }).from(channels).where(and(eq(channels.id, channelId), eq(channels.status, "active"))).limit(1);
@@ -44,13 +55,18 @@ export async function GET(request: Request) {
   if (!channel) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
   await resolveDueMissions(user.id, channel.id, channel.name);
   const dayStart = agitationDayStart(Date.now(), channel.speed);
-  const [rows, missions, defense, incoming, membership, sentToday] = await Promise.all([
+  const [rows, missions, defense, incoming, membership, sentToday, purseRows] = await Promise.all([
     getDb().select({ userId: channelMembers.userId, gameState: gameSaves.gameState }).from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId)).where(and(eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"))).orderBy(channelMembers.joinedAt),
     getDb().select().from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.sourceUserId, user.id))).orderBy(desc(intelMissions.completesAt)),
     getDb().select().from(intelDefenses).where(eq(intelDefenses.userId, user.id)).limit(1),
     getDb().select({ id: intelMissions.id }).from(intelMissions).where(and(eq(intelMissions.channelId, channel.id), eq(intelMissions.targetUserId, user.id), eq(intelMissions.status, "detected"))).limit(10),
     getDb().select({ accepts: channelMembers.acceptsAgitation }).from(channelMembers).where(and(eq(channelMembers.userId, user.id), eq(channelMembers.channelId, channel.id))).limit(1),
     getDb().select({ total: count() }).from(agitations).where(and(eq(agitations.sourceUserId, user.id), gt(agitations.sentAt, dayStart))),
+    // ZAFER SKORU: channel'ın kaderi belli olmuş bütün keseleri. Kralın kendi
+    // defteri de sıralama da aynı satırlardan çıkar; komşuların skoru
+    // hesaplanır ama İSTEMCİYE İNMEZ (bkz. server/world-projection.ts →
+    // channelVictoryStanding).
+    getDb().select({ sourceUserId: agitations.sourceUserId, targetUserId: agitations.targetUserId, status: agitations.status }).from(agitations).where(and(eq(agitations.channelId, channel.id), ne(agitations.status, "pending"))).limit(VICTORY_PURSE_LIMIT),
   ]);
   const latest = new Map<string, typeof missions[number]>();
   missions.forEach(mission => { if (!latest.has(mission.targetUserId)) latest.set(mission.targetUserId, mission); });
@@ -100,7 +116,16 @@ export async function GET(request: Request) {
       cost: AGITATION.cost,
       sentToday: Number(sentToday[0]?.total ?? 0),
       perDay: AGITATION.perSenderPerDay,
-    } });
+    },
+    // ZAFER SKORU: yalnızca KENDİ kese defterimiz ve (gizlilik alt sınırı
+    // sağlanıyorsa) sıramız iner. Skorun kendisini arayüz canlı oyun
+    // durumundan aynı motor fonksiyonuyla hesaplar (engine/victory.ts).
+    victory: channelVictoryStanding({
+      channelName: channel.name, userId: user.id, rows, now,
+      // `ne(status,"pending")` süzgeci SQL'de uygulandı; tip daralması burada
+      // yapılır ki motora "pending" değeri taşıyan bir satır hiç geçmesin.
+      purses: purseRows.flatMap(row => row.status === "pending" ? [] : [{ sourceUserId: row.sourceUserId, targetUserId: row.targetUserId, status: row.status }]),
+    }) });
 }
 
 export async function POST(request: Request) {

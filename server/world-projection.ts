@@ -9,6 +9,7 @@
  */
 
 import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, type CompareMetric } from "../engine/comparison";
+import { victoryScore, type VictoryPurse } from "../engine/victory";
 import { parseStoredSave } from "./save-validation";
 
 export type PublicKingdom = {
@@ -213,4 +214,78 @@ export function populaceComparison(input: {
   });
   if (!averages) return null;
   return { mine: compareValuesOf(save), averages };
+}
+
+/**
+ * ZAFER SKORU SIRALAMASI — Kralın channel içindeki yeri, komşunun verisi
+ * sızmadan.
+ *
+ * Formülün kendisi motordadır (`engine/victory.ts`); burada yalnızca "kim
+ * sıralamaya girer" ve "sıra kaç" soruları cevaplanır. Dışarıya çıkan tek yeni
+ * bilgi SIRA SAYISIDIR: hiçbir komşunun skoru, adı ya da kalemi istemciye
+ * inmez. `channelAverages` ile aynı iki süzgeç geçerlidir — kuruluş koruması
+ * süren sancak sıralamaya girmez ve gizlilik alt sınırı (`COMPARE_MIN_SAMPLE`)
+ * sağlanmazsa sıra HİÇ üretilmez. Alt sınır burada "bizden başka en az üç
+ * sancak" demektir: iki sancaklı bir sıralamada "1/2" görmek komşunun skorunu
+ * kendi skorumuzla birlikte birebir çözerdi.
+ *
+ * Kendi skorumuzu bu fonksiyon DÖNDÜRMEZ: arayüz onu CANLI oyun durumundan
+ * (istemcinin tick'lediği `Game`) ve buradan gelen kese defterinden aynı motor
+ * fonksiyonuyla hesaplar. Sıralama kayıtlı durumdan çıktığı için kılpayı
+ * gecikebilir; sıra kaba bir göstergedir, kalem kalem bir kıyas değildir.
+ */
+export type VictoryStanding = {
+  /** Kralın KENDİ gönderdiği, kaderi belli olmuş keseleri. */
+  purses: VictoryPurse[];
+  /** Karşı-istihbaratımızın yakaladığı gelen kese sayısı. */
+  caught: number;
+  /** Sıramız; alt sınır sağlanmazsa ya da kuruluş korumamız sürüyorsa null. */
+  rank: number | null;
+  /** Sıralamaya giren sancak sayısı (biz dâhil). */
+  ranked: number;
+};
+
+export function channelVictoryStanding(input: {
+  channelName: string;
+  userId: string;
+  /** `GET /api/world`'ün zaten okuduğu channel kayıtları. */
+  rows: ReadonlyArray<{ userId: string; gameState: string }>;
+  /** Channel'ın kaderi belli olmuş bütün keseleri (`pending` olanlar hariç). */
+  purses: ReadonlyArray<{ sourceUserId: string; targetUserId: string; status: "settled" | "exposed" }>;
+  now: number;
+}): VictoryStanding {
+  const sent = new Map<string, VictoryPurse[]>();
+  const caught = new Map<string, number>();
+  for (const purse of input.purses) {
+    const list = sent.get(purse.sourceUserId) ?? [];
+    list.push({ target: purse.targetUserId, status: purse.status });
+    sent.set(purse.sourceUserId, list);
+    // Yakalanan kese hedefin karşı-istihbarat hanesine yazılır: ifşa yalnızca
+    // nöbet kurulmuşsa olur, yani bu satır hedefin kazandığı bir savunmadır.
+    if (purse.status === "exposed") caught.set(purse.targetUserId, (caught.get(purse.targetUserId) ?? 0) + 1);
+  }
+  const mine = { purses: sent.get(input.userId) ?? [], caught: caught.get(input.userId) ?? 0 };
+
+  const totals: Array<{ userId: string; total: number }> = [];
+  for (const row of input.rows) {
+    const save = parseStoredSave(row.gameState);
+    if (!save || save.channel !== input.channelName) continue;
+    if (save.protectionEndsAt > input.now) continue;
+    totals.push({
+      userId: row.userId,
+      total: victoryScore({
+        purses: sent.get(row.userId) ?? [],
+        caughtPurses: caught.get(row.userId) ?? 0,
+        game: save,
+      }).total,
+    });
+  }
+  // Alt sınır: bizden başka en az COMPARE_MIN_SAMPLE sancak sıralamada olmalı.
+  const own = totals.find(entry => entry.userId === input.userId);
+  if (!own || totals.length - 1 < COMPARE_MIN_SAMPLE) {
+    return { ...mine, rank: null, ranked: totals.length };
+  }
+  // Eşitlikte aynı sıra: bizden KESİN olarak yukarıda kaç sancak var.
+  const above = totals.filter(entry => entry.total > own.total).length;
+  return { ...mine, rank: above + 1, ranked: totals.length };
 }

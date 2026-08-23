@@ -62,6 +62,41 @@
 .tabs.six{grid-template-columns:repeat(6,1fr)}
 .tabs.six button{padding-left:4px;padding-right:4px;font-size:.62rem;letter-spacing:.08em}
 
+/* Yedi sekme tek satıra sığsın (İSTİHBARAT eklendi). `minmax(0,1fr)` şart:
+   uzun etiket olmasa bile grid dilimlerinin içerikle büyümesini engeller.
+   "İSTİHBARAT" on harfle diğerlerinin iki katı uzunlukta olduğu için o
+   düğmeye ayrıca daha küçük bir punto verilir — sekme kimliği düğmenin
+   sınıfından gelir (bkz. components/KingdomGame.tsx sekme şeridi). */
+.tabs.seven{grid-template-columns:repeat(7,minmax(0,1fr))}
+.tabs.seven button{padding-left:2px;padding-right:2px;font-size:.58rem;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+.tabs.seven button.istihbarat{font-size:.48rem;letter-spacing:0}
+
+/* ---- Zafer skoru (İstihbarat sekmesi) ----
+   Sezon ölçütü: askersiz üstünlük ile askeri katkı AYRI sütunda. Renk dili
+   ayrımı taşır — sessiz sütun parşömenin yeşiline, askeri sütun kızıl-kahveye
+   çalar; toplam mürekkep rengindedir. Formül ve etiketler engine/victory.ts. */
+.victory-score{background:#f2e7cb;border:1px solid #cbb488}
+.victory-columns{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid #dccba2}
+.victory-columns>div{padding:9px 10px;border-right:1px solid #dccba2;text-align:center}
+.victory-columns>div:last-child{border-right:0}
+.victory-columns span{display:block;font-size:.54rem;letter-spacing:.1em;color:#7a6540}
+.victory-columns b{display:block;margin-top:4px;font:600 1.25rem Cinzel}
+.victory-columns .quiet b{color:#3f6b22}
+.victory-columns .martial b{color:#8f3512}
+.victory-columns .total b{color:#3a2f1d}
+.victory-doctrine{margin:0;padding:8px 11px;border-bottom:1px solid #dccba2;font-size:.7rem;line-height:1.5;color:#5c4a2c}
+.victory-lines{padding:2px 11px 6px}
+.victory-lines article{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #e0cfa6}
+.victory-lines article:first-child{border-top:0}
+.victory-lines b{display:block;font:600 .78rem Cinzel;color:#3a2f1d}
+.victory-lines small{display:block;margin-top:2px;font-size:.62rem;color:#7a6540;line-height:1.45}
+.victory-lines article.martial b{color:#6d3325}
+.victory-lines strong{font-size:.9rem;color:#7a6540}
+.victory-lines strong.gain{color:#3f6b22}
+.victory-lines strong.loss{color:#8f3512}
+.victory-rank,.victory-note{display:block;padding:0 11px 8px;font-size:.6rem;line-height:1.5;color:#7a6540}
+.victory-rank{padding-top:2px;color:#6d3325}
+
 /* ---- Nöbet ve akın (Ordu sekmesi) ---- */
 .watch-block{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-top:10px}
 .watch-head{display:flex;justify-content:space-between;align-items:baseline}
@@ -77,8 +112,6 @@
 .raid-tally b.bad{color:#8f3512}
 .raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
 .raid-log p.quiet{color:#8a7854;font-style:italic}
-/* Yabancı bir Kral eşkıyayı bu tarafa çekmişse akınlar sıklaşır; kimin çektiği belli değildir. */
-.raid-log p.raid-lure{margin:6px 0;padding:6px 8px;border-left:2px solid #b26a1f;background:#f6e6c4;color:#8a5a1c;font-style:normal}
 
 /* ---- Halkın Sesi (Halk sekmesi) ----
    Halkın ve kışlanın Kraldan açık talepleri. Görsel dil parşömen + kızıl-kahve;
