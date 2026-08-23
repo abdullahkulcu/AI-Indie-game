@@ -399,6 +399,12 @@ function snapshotOf(body: GeneralRequest): KingdomSnapshot {
     army: Object.values(units).reduce<number>((total, amount) => total + (Number(amount) || 0), 0),
     protectionHoursLeft: Number(state.protectionHoursLeft) || 0,
     counterIntelligenceActive: Boolean(state.counterIntelligence?.active),
+    // HALKIN NABZI (plan belgesi Fikir 6): baskı istemcinin bağlamındaki
+    // muhalefet bloğundan okunur — o blok da motorun `factionPressureOf`undan
+    // doğar, yani burada ikinci bir hesap yapılmaz. İstemci şişirse bile en
+    // kötü hâlde Kral kendine daha karamsar bir nabız gösterir; gösterge bir
+    // cezaya ya da kaynağa dokunmadığı için istismar yüzeyi yok.
+    factionPressure: Number(state.populace?.muhalefet?.baski) || 0,
   };
 }
 

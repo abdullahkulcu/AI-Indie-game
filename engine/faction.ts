@@ -109,6 +109,80 @@ export function factionState(pressure: number): FactionState {
   return { id: "none", label: "Muhalefet yok", note: "Krallıkta örgütlü bir muhalefet yok." };
 }
 
+// --- HALKIN NABZI (plan belgesi Fikir 6) -----------------------------------
+
+/**
+ * KRİTİK BİR KARARDA HALKIN MUHTEMEL TEPKİSİ — kararın SONRASI değil ÖNCESİ.
+ *
+ * Kral ağır bir emir verdiğinde (`server/general-risk.ts` → `elevated`/`severe`)
+ * General'in itirazının yanında halkın nabzı da gösterilir: "bu karar halkın
+ * gözünde nasıl karşılanır". Veto DEĞİL, sinyal.
+ *
+ * İKİ KESİN TASARIM KARARI (plan belgesi, "Karar 2026-08-22") — ikisi de
+ * tartışmaya kapalı:
+ *
+ *  1) NİTEL ETİKET, sayı YOK. "Rıza tahmini −8 puan" demek oyuncuyu min-maxing'e
+ *     çağırırdı: Kral eşiğin bir puan altında kalmayı öğrenir ve halk bir
+ *     aktörden bir formüle dönüşürdü. Bu yüzden `label`/`note` metindir ve
+ *     BURADA hiçbir sayı üretilmez.
+ *  2) `elevated` VE `severe` kademelerinde görünür (yalnızca `severe` değil).
+ *     Kademe kapısı BU DOSYADA DEĞİL, `server/general-risk.ts` içinde durur:
+ *     risk kademesi orada hesaplanıyor ve kapıyı iki yerde tutmak ikinci bir
+ *     eşik listesi açardı (kısıt #5).
+ *
+ * YENİ EŞİK UYDURULMADI: nabız yalnızca zaten var olan iki ölçüden okunur —
+ * `factionTarget(popularity)` (mevcut rızanın işaret ettiği baskı; rıza
+ * `moodFloor`un üstündeyse 0) ve `FACTION_THRESHOLDS`. Yani nabız halkın
+ * bugünkü hâlini değil, gidişatın işaret ettiği yeri söyler.
+ */
+export type PopulacePulseId = "steady" | "grumbling" | "hostile" | "breaking";
+
+export type PopulacePulse = {
+  id: PopulacePulseId;
+  /** Kral'a gösterilen tek cümlelik nitel etiket. */
+  label: string;
+  /** Etiketin gerekçesi; hâlâ nitel, hâlâ sayısız. */
+  note: string;
+};
+
+const PULSES: Record<PopulacePulseId, Omit<PopulacePulse, "id">> = {
+  steady: {
+    label: "Halk şu an arkanızda.",
+    note: "Rıza yerinde ve örgütlü bir muhalefet yok; bu kararın bedeli halkta değil, hazinede ya da savunmada aranmalı.",
+  },
+  grumbling: {
+    label: "Halk bunu hoş karşılamaz.",
+    note: "Rıza zaten muhalefetin beslendiği bandın içinde; böyle bir karar kahvedeki fısıltıyı büyütür.",
+  },
+  hostile: {
+    label: "Halk buna açıkça karşı çıkar.",
+    note: "Muhalefetin bir elebaşısı var ve sözü dinleniyor; bu karar onun elini güçlendirir, garnizonun zapt gücünü daha da zayıflatır.",
+  },
+  breaking: {
+    label: "Halk bunu bir kopuş sayar.",
+    note: "Muhalefet meydanda açıkça toplanıyor; bu kararın ardından Kral'ın elinde halkı yatıştıracak bir kuvvet kalmaz, yalnızca rızayı yükseltmek kalır.",
+  },
+};
+
+/**
+ * Halkın nabzı. Saf ve sayısız; girdiler bozuk gelirse en yumuşak kademeye
+ * düşer (`steady`), çünkü bilgisi olmayan bir gösterge Kral'ı korkutmamalı.
+ *
+ * Sıra ANLAMLIDIR: baskı büyükten küçüğe sınanır, en sonda "gidişat kötü ama
+ * henüz örgüt yok" hâli gelir.
+ */
+export function populacePulse(popularity: number, pressure: number): PopulacePulse {
+  const level = Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(pressure) || 0));
+  const drift = factionTarget(Number.isFinite(popularity) ? popularity : 50);
+  const id: PopulacePulseId = level >= FACTION_THRESHOLDS.defiant ? "breaking"
+    : level >= FACTION_THRESHOLDS.organized ? "hostile"
+    // Ya baskı kıpırdanmaya başladı ya da rıza muhalefetin beslendiği bandın
+    // içine düştü (yani baskı henüz 0 olsa bile hedef sıfırdan büyük).
+    : level >= FACTION_THRESHOLDS.stirring || drift > 0 ? "grumbling"
+    : "steady";
+  return { id, ...PULSES[id] };
+}
+
 // --- Elebaşının adı --------------------------------------------------------
 
 const LEADERS = [
