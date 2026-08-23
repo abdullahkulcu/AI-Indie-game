@@ -8,6 +8,7 @@ import {
   garrisonVetoes, openDemands, renderDemands,
 } from "../engine/populace-voice";
 import { SOLDIER_THRESHOLDS } from "../engine/populace";
+import { COMPARE_BETTER, type CompareMetric } from "../engine/comparison";
 import type { Game } from "../engine/types";
 
 const T0 = 1_800_000_000_000;
@@ -94,6 +95,169 @@ test("askeri olmayan krallıkta maaş talebi doğmaz", () => {
 test("maaş talebinin sesi garnizondur, halk değil", () => {
   const demand = derivePopulaceDemands(good({ soldierUnrest: 40 })).find(item => item.kind === "wage");
   assert.equal(demand?.voice, "garrison");
+});
+
+// --- Sessiz kıyaslama (Fikir 13) -------------------------------------------
+
+/**
+ * Kıyas girdisi: kendi değerlerimiz + channel'ın anonim ortalaması. İkisi de
+ * `engine/comparison.ts` → `compareValuesOf` ölçeğinde gelir.
+ */
+const compare = (
+  mine: Partial<Record<CompareMetric, number>>,
+  averages: Partial<Record<CompareMetric, number>> | null,
+): NonNullable<VoiceSignals["comparison"]> => {
+  const base: Record<CompareMetric, number> = { popularity: 65, foodRation: 100, taxRate: 15, factionPressure: 0 };
+  return {
+    mine: { ...base, ...mine },
+    averages: averages ? { ...base, ...averages } : null,
+  };
+};
+
+const kiyasOf = (signals: VoiceSignals) => derivePopulaceDemands(signals).find(demand => demand.kind === "kiyas");
+
+test("kıyas girdisi hiç yoksa kıyas talebi açılmaz", () => {
+  assert.equal(kiyasOf(good()), undefined);
+  assert.equal(kiyasOf(good({ comparison: null })), undefined);
+});
+
+test("ortalama yoksa (gizlilik alt sınırı) kıyas talebi KESİNLİKLE açılmaz", () => {
+  // Değirmen dersinin buradaki karşılığı: dayanağı olmayan kıyas Kralı
+  // ölçüsüz bir işe çağırır. Kendi hâlimiz ne kadar kötü olsun, ortalama
+  // `null` ise talep doğmaz.
+  const signals = good({
+    popularity: 20, servedFood: 40, taxRate: 45,
+    comparison: compare({ popularity: 20, foodRation: 40, taxRate: 45, factionPressure: 80 }, null),
+  });
+  assert.equal(kiyasOf(signals), undefined);
+});
+
+test("kendi değerlerimiz ortalamadan iyiyse kıyas talebi açılmaz", () => {
+  const signals = good({
+    comparison: compare(
+      { popularity: 80, foodRation: 100, taxRate: 8, factionPressure: 0 },
+      { popularity: 45, foodRation: 80, taxRate: 30, factionPressure: 40 },
+    ),
+  });
+  assert.equal(kiyasOf(signals), undefined);
+});
+
+test("tek ölçütte geride olmak kıyas talebi açmaz", () => {
+  // Yüksek vergi bilinçli bir tercih olabilir; halk tek kalemden yola çıkmaz.
+  const signals = good({
+    comparison: compare({ taxRate: 30 }, { taxRate: 15 }),
+  });
+  assert.equal(kiyasOf(signals), undefined);
+  assert.equal(VOICE_THRESHOLDS.kiyas.metrics, 2);
+});
+
+test("eşik farkının tam altında talep açılmaz, tam üstünde açılır", () => {
+  const margin = VOICE_THRESHOLDS.kiyas.margin;
+  const under = compare(
+    { popularity: 65 - margin.popularity + 1, foodRation: 100 - margin.foodRation + 1 },
+    { popularity: 65, foodRation: 100 },
+  );
+  assert.equal(kiyasOf(good({ comparison: under })), undefined);
+  const over = compare(
+    { popularity: 65 - margin.popularity, foodRation: 100 - margin.foodRation },
+    { popularity: 65, foodRation: 100 },
+  );
+  assert.ok(kiyasOf(good({ comparison: over })));
+});
+
+test("ortalamadan belirgin kötüysek ve süre şartı dolduysa kıyas talebi açılır", () => {
+  const signals = good({
+    comparison: compare(
+      { popularity: 40, foodRation: 80, taxRate: 35, factionPressure: 30 },
+      { popularity: 62, foodRation: 98, taxRate: 14, factionPressure: 0 },
+    ),
+  });
+  const demand = kiyasOf(signals);
+  assert.ok(demand);
+  assert.equal(demand.voice, "commons");
+  assert.equal(demand.minGameHours, VOICE_THRESHOLDS.kiyas.hours);
+  // Süre şartı: tek tick'lik dalgalanma talep açmaz.
+  const candidates = derivePopulaceDemands(signals);
+  assert.deepEqual(openDemands(candidates, { kiyas: VOICE_THRESHOLDS.kiyas.hours - .1 }), []);
+  assert.equal(openDemands(candidates, { kiyas: VOICE_THRESHOLDS.kiyas.hours }).length, 1);
+});
+
+test("kıyas talebi asla acil olmaz: somut taleplerin önüne geçmez", () => {
+  const signals = good({
+    servedFood: 40,
+    comparison: compare(
+      { popularity: 20, foodRation: 40, taxRate: 45, factionPressure: 70 },
+      { popularity: 62, foodRation: 98, taxRate: 14, factionPressure: 0 },
+    ),
+  });
+  assert.equal(kiyasOf(signals)?.severity, "normal");
+});
+
+test("BİLGİ SINIRI: kıyas metni hiçbir krallık adı ya da sayı içermez", () => {
+  // Bilgi akışı TEK YÖNLÜ: halk kıyaslar, Krala baskı olarak gelir. Kral bu
+  // yolla komşunun verisine ASLA erişmemeli. Metin bu yüzden ne isim ne sayı
+  // taşır; yalnızca nitel bir kıyas kurar.
+  const names = ["Demirkale", "Sınır Boyu", "Akçakale", "Karahisar"];
+  const signals = good({
+    comparison: compare(
+      { popularity: 30, foodRation: 55, taxRate: 44, factionPressure: 65 },
+      { popularity: 66, foodRation: 99, taxRate: 12, factionPressure: 3 },
+    ),
+  });
+  const demand = kiyasOf(signals);
+  assert.ok(demand);
+  // Dört ölçütte birden geride olmak kıyasın en geniş hâli: metin bu hâlde de
+  // sayı taşımıyorsa hiçbir hâlde taşımaz.
+  assert.equal(demand.text.match(/\d/), null, `metinde sayı var: ${demand.text}`);
+  assert.doesNotMatch(demand.text, /%/);
+  for (const name of names) assert.ok(!demand.text.includes(name), `metinde krallık adı var: ${name}`);
+  // Ortalamanın kendisi de metne sızmasın: hiçbir ölçüt değeri geçmiyor.
+  for (const value of [30, 55, 44, 65, 66, 99, 12, 3]) {
+    assert.ok(!demand.text.includes(String(value)), `metinde ölçüt değeri var: ${value}`);
+  }
+});
+
+test("kıyas talebi aynı MAX_OPEN_DEMANDS tavanını paylaşır", () => {
+  // Acil bir talep (açlık) varken kıyas tavandaki yeri ondan almaz ve tavan
+  // aşılmaz: kıyas için ayrı bir kategori/tavan açılmadı.
+  const signals = good({
+    servedFood: 40, soldierUnrest: 90,
+    comparison: compare(
+      { popularity: 20, foodRation: 40, taxRate: 45, factionPressure: 70 },
+      { popularity: 62, foodRation: 98, taxRate: 14, factionPressure: 0 },
+    ),
+  });
+  const candidates = derivePopulaceDemands(signals);
+  assert.ok(candidates.some(demand => demand.kind === "kiyas"));
+  const open = openDemands(candidates, { bread: 99, wage: 99, kiyas: 99 });
+  assert.equal(open.length, MAX_OPEN_DEMANDS);
+  assert.ok(!open.some(demand => demand.kind === "kiyas"), "acil talepler varken kıyas tavana giremez");
+  // Tek başına kaldığında ise açılır.
+  const alone = openDemands(candidates.filter(demand => demand.kind === "kiyas"), { kiyas: 99 });
+  assert.deepEqual(alone.map(demand => demand.kind), ["kiyas"]);
+});
+
+test("kıyas talebi yalnızca geride olduğumuz ölçütün emriyle kapanır", () => {
+  // Değirmen dersi: talep, Kralı ilgisiz bir masrafa çağırmaz.
+  const signals = good({
+    comparison: compare({ foodRation: 80, taxRate: 30 }, { foodRation: 98, taxRate: 14 }),
+  });
+  const demand = kiyasOf(signals);
+  assert.ok(demand);
+  assert.deepEqual([...demand.satisfiedBy.actions].sort(), ["set_food_ration", "set_tax_rate"]);
+  assert.deepEqual(demandsSatisfiedBy([demand], [{ name: "set_tax_rate", arguments: { rate_percent: 10 } }]), ["kiyas"]);
+  assert.deepEqual(demandsSatisfiedBy([demand], [{ name: "train_unit", arguments: {} }]), []);
+});
+
+test("kıyas ölçütlerinin yönü motorun tek kaynağından okunur", () => {
+  // Yüksek vergi ve yüksek muhalefet baskısı KÖTÜ yöndedir: ortalamadan
+  // YÜKSEK olmak bizi geride bırakır, düşük olmak bırakmaz.
+  assert.equal(COMPARE_BETTER.taxRate, "low");
+  assert.equal(COMPARE_BETTER.factionPressure, "low");
+  const worse = compare({ taxRate: 30, factionPressure: 30 }, { taxRate: 14, factionPressure: 0 });
+  assert.ok(kiyasOf(good({ comparison: worse })));
+  const better = compare({ taxRate: 5, factionPressure: 0 }, { taxRate: 30, factionPressure: 40 });
+  assert.equal(kiyasOf(good({ comparison: better })), undefined);
 });
 
 // --- Spam frenleri ---------------------------------------------------------

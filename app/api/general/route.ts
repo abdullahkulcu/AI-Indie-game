@@ -405,9 +405,10 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
 async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: number) {
   const populace = body.kingdom?.populace;
   if (!populace) return { lines: [] as string[], open: [] as OpenDemand[] };
-  const [row] = await getDb().select({ speed: channels.speed })
-    .from(channelMembers).innerJoin(channels, eq(channels.id, channelMembers.channelId))
-    .where(and(eq(channelMembers.userId, userId), eq(channelMembers.status, "active"))).limit(1);
+  // Üyelik TEK KAYNAKTAN okunur (`activeMembershipOf`): burada eskiden aynı
+  // sorgunun elle yazılmış, channel'ın kendi durumunu hiç sormayan ve sırasız
+  // bir kopyası vardı — kayıt bir channel'a, halkın sesi başkasına bakabilirdi.
+  const membership = await activeMembershipOf(userId);
   const { open } = await syncPopulaceDemands(userId, {
     servedFood: Number(populace.servedFood ?? populace.foodRation) || 0,
     livingCost: Number(populace.livingCost ?? 1) || 1,
@@ -418,9 +419,36 @@ async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: numb
     soldierUnrest: Number(populace.soldierUnrest) || 0,
     army: Number(populace.army) || 0,
     buildings: body.kingdom?.buildings ?? [],
-    channelSpeed: row?.speed ?? (Number(body.kingdom?.channelSpeed) || 1),
+    channelSpeed: membership?.channelSpeed ?? (Number(body.kingdom?.channelSpeed) || 1),
+    comparison: membership ? await loadComparison(userId, membership.channelId, membership.channelName, now) : null,
   }, now);
   return { lines: renderPopulaceVoice(open, now), open };
+}
+
+/**
+ * SESSİZ KIYASLAMA girdisi (plan belgesindeki Fikir 13).
+ *
+ * RİTİM SAPMASI — bilinçli ve belgeli: kararda "kıyaslama saatlik cron turunda
+ * yenilenir" yazıyor, ama `syncPopulaceDemands` bugün YALNIZCA buradan (Kral
+ * General'le konuştuğunda) çağrılıyor; `app/api/cron/route.ts` halk taleplerine
+ * hiç dokunmuyor. Kıyas bu yüzden cron'a değil TALEP SENKRONUNUN RİTMİNE
+ * bağlandı. Üç gerekçe: (a) cron'a oyuncu-başına saatlik bir talep turu eklemek
+ * anlamlı yeni bir maliyet ve karmaşıklık, (b) kararın "saatlik" vurgusu her
+ * tick'te yeniden hesaplamama amacını taşıyordu ve bu yol onu zaten sağlıyor,
+ * (c) diğer TÜM talepler de yalnızca Kral konuşurken açılıyor; kıyası ayrı bir
+ * ritme koymak halkın sesinde iki farklı davranış yaratırdı.
+ * SONUÇ: Kral uzun süre General'le konuşmazsa kıyas talebi de o süre boyunca
+ * yenilenmez — bugün bütün talepler için geçerli olan davranışın aynısı.
+ *
+ * Sorgu channel'ın aktif üyelerinin kayıtlarını TEK turda okur; kendi kaydımız
+ * da o listenin içinde olduğu için kıyasın iki tarafı aynı boru hattından geçer
+ * (bkz. `server/world-projection.ts` → `populaceComparison`).
+ */
+async function loadComparison(userId: string, channelId: string, channelName: string, now: number) {
+  const rows = await getDb().select({ userId: channelMembers.userId, gameState: gameSaves.gameState })
+    .from(channelMembers).innerJoin(gameSaves, eq(gameSaves.userId, channelMembers.userId))
+    .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.status, "active")));
+  return populaceComparison({ channelName, userId, rows, now });
 }
 
 /**
@@ -652,7 +680,7 @@ export async function POST(request: Request) {
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
+import { channelMembers, gameSaves, llmCredentials, pendingDecisions, standingOrders } from "../../../db/schema";
 import { NEGOTIATION_DOCTRINE, renderNegotiationLines, renderNegotiationTranscript } from "../../../server/negotiation-brief";
 // Şema sınırları motordan TÜRETİLİR; elle yazılan tavan motorunkinden sessizce sapar.
 import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, NEGOTIATION_TOPICS, TRIBUTE_RESOURCES } from "../../../engine/negotiation";
@@ -665,6 +693,7 @@ import { type OpenDemand, renderPopulaceVoice, syncPopulaceDemands } from "../..
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { activeMembershipOf } from "../../../server/active-membership";
+import { populaceComparison } from "../../../server/world-projection";
 import { decryptByok } from "../../../server/byok-crypto";
 import { inferFallbackAction, stripPseudoToolMarkup } from "../../../server/general-action-fallback";
 import { RATE_LIMITS, consumeRateLimit } from "../../../server/rate-limit";

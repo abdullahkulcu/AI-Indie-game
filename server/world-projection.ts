@@ -112,8 +112,12 @@ export function isStaleReport(takenAt: number, now: number) {
  * beslenir (bkz. `docs/plans/2026-08-22-canli-dunya-ve-halk-ai-vizyonu.md`):
  *  - Fikir 1  — "diyar" sekmesindeki kıyas paneli (bugün uygulanan tüketici).
  *  - Fikir 13 — sessiz kıyaslama: Halk'ın komşularla kendini kıyaslayıp yeni
- *    bir talep açması; kararı gereği saatlik cron turunda, yani bu hesabın
- *    ritmiyle aynı yerde çalışır.
+ *    bir talep açması. Aynı hesabı `populaceComparison` üzerinden paylaşır.
+ *    RİTİM SAPMASI: kararda "saatlik cron turunda" yazıyordu; uygulama talep
+ *    senkronunun ritmine bağlandı (Kral General'le konuştuğunda), çünkü
+ *    `syncPopulaceDemands` bugün YALNIZCA oradan çağrılıyor ve cron'a
+ *    oyuncu-başına saatlik bir talep turu eklemek yeni bir maliyet/karmaşıklık
+ *    olurdu. Gerekçenin tamamı `updates/2026-08-22-sessiz-kiyaslama.md`'de.
  *  - Fikir 24 — channel-geneli pazar endeksi; kararı gereği bağımsız bir
  *    agregasyon kurmaz, bunu paylaşır.
  * Yeni bir tüketici kendi ortalamasını hesaplamaz; bu fonksiyonu çağırır.
@@ -174,4 +178,39 @@ export function channelAverages(input: {
   const averages = { ...totals };
   for (const metric of COMPARE_METRICS) averages[metric] = totals[metric] / counted;
   return { counted, protectedOut, averages };
+}
+
+/**
+ * HALKIN KIYAS GİRDİSİ (plan belgesindeki Fikir 13) — `engine/populace-voice.ts`
+ * → `VoiceSignals.comparison` alanının TEK üreticisi.
+ *
+ * Neden burada ve neden ayrı bir fonksiyon: kıyasın İKİ tarafı da aynı
+ * boru hattından geçmek zorunda — kayıt `parseStoredSave` ile okunur, değerler
+ * `compareValuesOf` ile çıkarılır. "Bizdeki değer"i istemcinin gönderdiği
+ * bağlamdan okusaydık ortalama ile aynı ölçeği kaybederdik (istemci bağlamında
+ * muhalefet baskısı hiç yok, istihkak ise kâğıt üstündeki değil FİİLEN
+ * dağıtılan oran) ve halk kendini yanlış ölçekle kıyaslardı.
+ *
+ * `rows` çağıranın ZATEN okuduğu channel satırlarıdır; kendi kaydımız da o
+ * listenin içindedir, yani bu hesap için ayrı bir DB turu açılmaz.
+ *
+ * `null` döner (ve talep hiç açılmaz) üç durumda: kaydımız okunamıyorsa,
+ * kaydımız bu channel'a ait değilse, ya da ortalama gizlilik alt sınırının
+ * altında kaldıysa.
+ */
+export function populaceComparison(input: {
+  channelName: string;
+  userId: string;
+  rows: ReadonlyArray<{ userId: string; gameState: string }>;
+  now: number;
+}): { mine: Record<CompareMetric, number>; averages: Record<CompareMetric, number> | null } | null {
+  const own = input.rows.find(row => row.userId === input.userId);
+  if (!own) return null;
+  const save = parseStoredSave(own.gameState);
+  if (!save || save.channel !== input.channelName) return null;
+  const { averages } = channelAverages({
+    channelName: input.channelName, excludeUserId: input.userId, rows: input.rows, now: input.now,
+  });
+  if (!averages) return null;
+  return { mine: compareValuesOf(save), averages };
 }

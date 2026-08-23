@@ -1,3 +1,4 @@
+import { COMPARE_BETTER, COMPARE_METRICS, type CompareMetric } from "./comparison";
 import { SOLDIER_THRESHOLDS } from "./populace";
 
 /**
@@ -22,7 +23,7 @@ import { SOLDIER_THRESHOLDS } from "./populace";
  * (bkz. server/populace-voice.ts).
  */
 
-export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage";
+export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas";
 
 export type DemandSeverity = "normal" | "urgent";
 
@@ -58,6 +59,41 @@ export const VOICE_THRESHOLDS = {
   roof: { occupancy: .95, urgent: 1, hours: 2 },
   joy: { mood: 38, ration: 90, urgent: 25, hours: 2 },
   wage: { unrest: SOLDIER_THRESHOLDS.demand, urgent: SOLDIER_THRESHOLDS.desertion, hours: 2 },
+  /**
+   * SESSİZ KIYASLAMA (plan belgesindeki Fikir 13). Diğer kalemler krallığın
+   * MUTLAK hâline bakar; bu kalem tek istisnadır: halk kendini komşuların
+   * anonim ortalamasıyla kıyaslar.
+   *
+   * `margin` — bir ölçütte "belirgin geride" saymak için ortalamayla aramızdaki
+   * en küçük fark. Ölçekler ortak değil (rıza ve istihkak 0-100, vergi 0-50,
+   * muhalefet baskısı 0-100) ve eşikleri tek bir sayıya indirmek yanlış
+   * sonuç verirdi, bu yüzden ölçüt başına ayrı yazılır. Değerler her ölçütün
+   * kendi ölçülmüş bandından türer:
+   *  - rıza 10  → normal krallık 42-46, iyi krallık 62-67'de oturuyor; 20
+   *    puanlık bu bandın yarısı, "ölçüm gürültüsü değil, gerçekten geride".
+   *  - istihkak 10 → `bread` talebinin eşiğiyle (100 → 85) aynı mertebe.
+   *  - vergi 6  → 0-50 bandının yaklaşık sekizde biri; halkın kesesinde
+   *    fiilen hissettiği en küçük fark.
+   *  - muhalefet 15 → `FACTION_THRESHOLDS.stirring` (20) bir tık altı; iyi
+   *    yönetilen krallıkta baskı 0 olduğu için bu fark ancak bizde gerçekten
+   *    örgütlenme varken doğar.
+   * `metrics` — talebin açılması için kaç ölçütte birden geride olmamız
+   * gerektiği. 2 seçildi: TEK ölçütte geride olmak meşru bir tercih olabilir
+   * (Kral bilinçli olarak yüksek vergiyle inşaat yapıyordur); iki ölçütte
+   * birden geride olmak ise halkın hayatının gerçekten daha zor olması demek.
+   * `hours` — 8 oyun saati, listenin en uzunu (`bread`in iki katı). Kıyas bir
+   * ACİLİYET değil arka plan sinyali; ayrıca ortalama komşular oynadıkça
+   * kayar, kısa bir süre şartı komşunun tek hamlesini bizim halkımızın
+   * talebine çevirirdi.
+   *
+   * `urgent` YOK ve bu KASITLI: kıyas talebi hiçbir zaman acil olmaz, bkz.
+   * `comparisonDemand`.
+   */
+  kiyas: {
+    margin: { popularity: 10, foodRation: 10, taxRate: 6, factionPressure: 15 } as Record<CompareMetric, number>,
+    metrics: 2,
+    hours: 8,
+  },
 } as const;
 
 /** Aynı anda açık kalabilecek en fazla talep. Kralı yormamanın asıl freni bu. */
@@ -81,6 +117,23 @@ export type VoiceSignals = {
   soldierUnrest: number;
   army: number;
   buildings: Array<{ type?: string; level?: number }>;
+  /**
+   * SESSİZ KIYASLAMA girdisi — DIŞARIDAN gelir, motor veritabanı okumaz
+   * (bkz. `server/world-projection.ts` → `populaceComparison`).
+   *
+   * `mine` ve `averages` AYNI okuyucudan (`engine/comparison.ts` →
+   * `compareValuesOf`) doğmak zorundadır; iki taraf ayrı okunsaydı "istihkak
+   * kayıtta yoksa varsayılanı kaç" sorusu iki yerde ayrı cevaplanır ve kıyas
+   * ölçeğini kaybederdi. Bu yüzden tek bir alan olarak, çift hâlinde taşınır.
+   *
+   * Alan opsiyoneldir: kıyas girdisi olmayan çağıran (test, eski kayıt, kıyas
+   * hesabı yapılamayan istek) için talep hiç açılmaz.
+   */
+  comparison?: {
+    mine: Record<CompareMetric, number>;
+    /** Gizlilik alt sınırının altındaysa `null` — o durumda talep AÇILMAZ. */
+    averages: Record<CompareMetric, number> | null;
+  } | null;
 };
 
 const levelOf = (signals: VoiceSignals, type: string) =>
@@ -176,7 +229,78 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
     });
   }
 
+  // Kıyas EN SONDA: plan belgesinin kendi açık sorusu ("kıyas talebi diğer daha
+  // somut taleplerin önüne geçip yer kaplayabilir") burada iki tedbirle
+  // cevaplanıyor — sırada en arkada durur ve asla `urgent` olmaz.
+  const comparison = comparisonDemand(signals);
+  if (comparison) demands.push(comparison);
+
   return demands;
+}
+
+/** Geride olduğumuz ölçütün halkın dilindeki NİTEL karşılığı — sayı YOK. */
+const COMPARE_COMPLAINT: Record<CompareMetric, string> = {
+  popularity: "orada halkın yüzü daha gülüyormuş",
+  foodRation: "oradaki sofralar bizimkinden dolu",
+  taxRate: "oradaki vergi yükü bizimki kadar ağır değil",
+  factionPressure: "orada muhalefetin sesi bizdeki kadar yüksek değil",
+};
+
+/**
+ * Bir ölçütteki geriliği kapatabilecek emirler. Talep yalnızca GERÇEKTEN geride
+ * olduğumuz ölçütlerin emirleriyle kapanır: "değirmen dersi"nin bu talepteki
+ * karşılığı, Kralı ilgisiz bir masrafa çağırmamaktır.
+ */
+const COMPARE_REMEDY: Record<CompareMetric, string[]> = {
+  popularity: ["host_festival", "set_ale_ration"],
+  foodRation: ["set_food_ration"],
+  taxRate: ["set_tax_rate"],
+  // Muhalefet baskısı yalnızca rıza yükselince erir (bkz. engine/faction.ts:
+  // bastırma emri YOK), o yüzden çare rızayı yükselten emirlerdir.
+  factionPressure: ["host_festival", "set_ale_ration", "set_tax_rate"],
+};
+
+/**
+ * SESSİZ KIYASLAMA (plan belgesindeki Fikir 13) — halk kendi mutlak hâline
+ * değil, komşu sancakların ANONİM ortalamasına da bakar.
+ *
+ * BİLGİ AKIŞI TEK YÖNLÜ. Halk kıyaslar, sonuç Krala BASKI olarak gelir; Kral bu
+ * yolla komşunun verisine ASLA erişmez. Bu yüzden metnin iki kesin sınırı var
+ * ve `tests/populace-voice.test.ts` ikisini de doğruluyor:
+ *  1) hiçbir krallık adı/kimliği geçmez — ortalama isimsizdir, cümle de
+ *     isimsiz kalır ("komşu sancaklarda");
+ *  2) HİÇ SAYI geçmez — "komşu sancakta vergi %12" cümlesi Krala komşunun
+ *     verisini birebir verirdi. Yalnızca NİTEL bir kıyas kurulur.
+ * Diğer taleplerin metni sayı taşır (istihkak %70, huzursuzluk 90 puan) çünkü
+ * o sayılar Kralın KENDİ krallığına ait; burada sayı karşı tarafa ait olurdu.
+ *
+ * "DEĞİRMEN DERSİ" burada da geçerli ve en sert hâliyle: ortalama YOKSA
+ * (`averages: null`, yani gizlilik alt sınırının altındaki channel) talep
+ * KESİNLİKLE açılmaz. Dayanağı olmayan bir kıyas Kralı ölçüsüz bir işe çağırır;
+ * üstelik sayı üretilmediği için halkın kıyaslayacağı bir şey de yoktur.
+ */
+function comparisonDemand(signals: VoiceSignals): DemandCandidate | null {
+  const comparison = signals.comparison;
+  if (!comparison || !comparison.averages) return null;
+  const averages = comparison.averages;
+  const rule = VOICE_THRESHOLDS.kiyas;
+  // Hangi ölçütte "iyi" hangi yöndedir sorusu MOTORDA TEK YERDE duruyor
+  // (`COMPARE_BETTER`); burada yeniden yazılsaydı yeni bir ölçüt eklendiğinde
+  // halk yüksek vergiyi iyi sayabilirdi.
+  const behind = COMPARE_METRICS.filter(metric => {
+    const gap = averages[metric] - (Number(comparison.mine[metric]) || 0);
+    return (COMPARE_BETTER[metric] === "high" ? gap : -gap) >= rule.margin[metric];
+  });
+  if (behind.length < rule.metrics) return null;
+  return {
+    kind: "kiyas", voice: "commons",
+    // ASLA `urgent` olmaz: açlık ya da firar gibi bir acil talep varken kıyas
+    // tavandaki yeri ondan almasın (bkz. `openDemands` sıralaması).
+    severity: "normal",
+    minGameHours: rule.hours,
+    text: `Halk komşu sancaklarla kendini kıyaslıyor: ${behind.map(metric => COMPARE_COMPLAINT[metric]).join(", ")} diyorlar. Aynı düzeni kendi kapılarında istiyorlar.`,
+    satisfiedBy: { actions: [...new Set(behind.flatMap(metric => COMPARE_REMEDY[metric]))] },
+  };
 }
 
 /**
