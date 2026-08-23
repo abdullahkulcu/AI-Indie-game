@@ -3,7 +3,8 @@ import { MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCo
 import { agitationEffect, feltUnrest } from "./agitation";
 import { advanceFaction, factionNotice, factionPressureOf } from "./faction";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood, orderPayout } from "./market";
-import { armySize, approachMood, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { armySize, approachMood, deliberateExodus, EXODUS_PENALTY, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { STARTING_REPUTATION } from "./founding";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import { applySpoilage, storageCaps } from "./storage";
 import type { Game, Key, Res } from "./types";
@@ -343,6 +344,26 @@ export function tick(g: Game, now: number): Game {
   const moved = settled - g.population;
   let drift = (g.migrationDrift ?? 0) + moved;
   let joined = g.peopleJoined ?? 0, left = g.peopleLeft ?? 0;
+  /**
+   * KRALIN KENDİ HALKINI FEDA ETMESİNİN BEDELİ (plan belgesi Fikir 18).
+   *
+   * Göç Kralın KENDİ kararından doğduysa (istihkakı tam payın altına kendi
+   * eliyle indirmiş ya da vergiyi nötr noktanın üstüne çıkarmış) halk bunu
+   * fark eder ve itibar zedelenir. Karar `engine/populace.ts` →
+   * `deliberateExodus` içinde saf olarak yaşıyor; burada yalnızca uygulanır.
+   *
+   * CEZA KİŞİ BAŞINADIR VE BU KISIT #2'NİN GEREĞİ, üslup değil. Bildirim
+   * `drift <= -LEDGER_STEP` eşiğinde tetiklendiği için OLAY SAYISI adım
+   * bölünmesine bağlıdır: sunucunun tek büyük adımı bir kez, istemcinin
+   * saniyelik adımları birden çok kez tetikler. Ceza olay başına olsaydı iki
+   * taraf farklı itibar hesaplardı. Kişi başına olduğunda toplam ceza
+   * `gone`ların toplamıyla, yani `peopleLeft`in artışıyla doğru orantılı kalır
+   * ve adım bölünmesinden bağımsızdır (doğrusal birikim tam bölünebilir).
+   *
+   * `Math.max(0, ...)` taban kırpması da bölünebilirliği bozmaz: azalış tek
+   * yönlü olduğu için tabana çarpma noktası adım büyüklüğünden bağımsızdır.
+   */
+  let reputation = Number.isFinite(g.reputation) ? g.reputation : STARTING_REPUTATION;
   if (drift <= -LEDGER_STEP) {
     const gone = Math.floor(-drift);
     left += gone; drift += gone;
@@ -350,10 +371,14 @@ export function tick(g: Game, now: number): Game {
     // kalemlerin en ağırı gerekçe olarak yazılır. Kral neyi düzelteceğini
     // bilmeden nüfusunun eridiğini görüyordu.
     const grievance = heaviestGrievance(moodInput);
+    const deliberate = deliberateExodus({ foodRation: rations.food, taxRate: g.taxRate });
+    if (deliberate) {
+      reputation = Math.max(0, reputation - gone * EXODUS_PENALTY.reputationPerPerson);
+    }
     notices = [{
       kind: "GÖÇ",
       text: grievance
-        ? `${gone} kişi krallığı terk etti; ${grievance.label} gerekçe gösterdiler. Geriye ${Math.round(settled)} kişi kaldı.`
+        ? `${gone} kişi krallığı terk etti; ${grievance.label} gerekçe gösterdiler.${deliberate ? " Gidenler sebebi kalenin kendi kararında görüyor; itibarımız zedelendi." : ""} Geriye ${Math.round(settled)} kişi kaldı.`
         : `${gone} kişi krallığı terk etti; geriye ${Math.round(settled)} kişi kaldı.`,
       at: now,
     }, ...notices].slice(0, 20);
@@ -372,6 +397,11 @@ export function tick(g: Game, now: number): Game {
     ...g,
     commons,
     marketOrders,
+    // Fikir 18: itibar artık `tick()` içinde de değişebiliyor. `serverDerived`
+    // itibarı KENDİ `tick(previous)` sonucundan yazdığı için istemcinin
+    // bildirdiği değer zaten yok sayılıyor; iki taraf aynı motoru çalıştırdığı
+    // için sonuç da aynı.
+    reputation,
     lastSpoilNoticeAt: spoilNoticeAt,
     peopleJoined: joined,
     peopleLeft: left,
