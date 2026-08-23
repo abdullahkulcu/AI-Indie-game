@@ -130,7 +130,9 @@ test("aday sayısı gizlilik alt sınırının altındaysa sayı hiç üretilmez
 
 test("boş channel'da ortalama yok ama hesap patlamaz", () => {
   const result = channelAverages({ channelName: "Sınır Boyu", excludeUserId: "kral", now: NOW, rows: [] });
-  assert.deepEqual(result, { counted: 0, protectedOut: 0, averages: null });
+  // `market` de `averages` ile aynı kapıdan geçer (Fikir 24): aday yoksa
+  // pazar endeksinin girdisi de üretilmez.
+  assert.deepEqual(result, { counted: 0, protectedOut: 0, averages: null, market: null });
 });
 
 /**

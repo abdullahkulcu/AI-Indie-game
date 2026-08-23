@@ -9,6 +9,8 @@
  */
 
 import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, type CompareMetric } from "../engine/comparison";
+import { TRADED_KEYS, commonsReference, isTraded } from "../engine/market";
+import type { TradeKey } from "../engine/types";
 import { parseStoredSave } from "./save-validation";
 
 export type PublicKingdom = {
@@ -118,8 +120,10 @@ export function isStaleReport(takenAt: number, now: number) {
  *    `syncPopulaceDemands` bugün YALNIZCA oradan çağrılıyor ve cron'a
  *    oyuncu-başına saatlik bir talep turu eklemek yeni bir maliyet/karmaşıklık
  *    olurdu. Gerekçenin tamamı `updates/2026-08-22-sessiz-kiyaslama.md`'de.
- *  - Fikir 24 — channel-geneli pazar endeksi; kararı gereği bağımsız bir
- *    agregasyon kurmaz, bunu paylaşır.
+ *  - Fikir 24 — channel-geneli pazar endeksi (uygulandı). Kararı gereği
+ *    bağımsız bir agregasyon KURMAZ: aşağıdaki `market` alanı aynı döngüde,
+ *    aynı süzgeçlerle birikir ve `engine/market.ts` → `channelPriceIndex`
+ *    onu fiyat çarpanına çevirir.
  * Yeni bir tüketici kendi ortalamasını hesaplamaz; bu fonksiyonu çağırır.
  *
  * Ölçüt listesi, "iyi" yönü ve gizlilik alt sınırı motordadır
@@ -135,6 +139,21 @@ export type ChannelAverages = {
    * Sayı o durumda istemciye HİÇ inmez — sınır burada, veri katmanında çizilir.
    */
   averages: Record<CompareMetric, number> | null;
+  /**
+   * PAZAR ENDEKSİNİN GİRDİSİ (Fikir 24). Ortalamalarla AYNI taramadan,
+   * aynı süzgeçlerden (kendisi hariç, kuruluş koruması hariç) ve aynı
+   * gizlilik alt sınırından geçer — ikinci bir channel taraması yok.
+   *
+   * Ham toplam döner, çarpan DÖNMEZ: çarpana çeviren kural motorda tek
+   * kaynakta yaşıyor (`engine/market.ts` → `channelPriceIndex`), çünkü eşiğin
+   * ölçeği bir DENGE kararıdır ve veri katmanında ikinci bir kopyası olmamalı.
+   */
+  market: {
+    /** Açık emirlerin net akışı: + satış (bolluk), − alım (kıtlık). */
+    netFlow: Record<TradeKey, number>;
+    /** Sayılan sancakların normal kilerinin toplamı; eşiğin ölçeği. */
+    reference: Record<TradeKey, number>;
+  } | null;
 };
 
 export function channelAverages(input: {
@@ -147,6 +166,9 @@ export function channelAverages(input: {
   now: number;
 }): ChannelAverages {
   const totals: Record<CompareMetric, number> = { popularity: 0, foodRation: 0, taxRate: 0, factionPressure: 0 };
+  // Pazar endeksinin toplamları AYNI döngüde birikir; ikinci bir tarama yok.
+  const netFlow = Object.fromEntries(TRADED_KEYS.map(key => [key, 0])) as Record<TradeKey, number>;
+  const marketReference = Object.fromEntries(TRADED_KEYS.map(key => [key, 0])) as Record<TradeKey, number>;
   let counted = 0, protectedOut = 0;
   for (const row of input.rows) {
     // Kralın kendisi İLK elenir: kendi koruma durumu "hariç tutulan komşu"
@@ -170,14 +192,34 @@ export function channelAverages(input: {
     // okur, yoksa iki taraf farklı ölçek gösterirdi.
     const values = compareValuesOf(save);
     for (const metric of COMPARE_METRICS) totals[metric] += values[metric];
+
+    /**
+     * PAZAR ENDEKSİ (Fikir 24) — bu sancağın açık emirleri ve normal kileri.
+     *
+     * YALNIZCA HÂLÂ AÇIK OLAN emir sayılır (`completesAt > now`). Bu şart
+     * gerekli: kapanma vakti geçmiş bir teklif ancak O OYUNCUNUN istemcisi
+     * `tick()` attığında kayıttan düşer, yani terk edilmiş bir krallığın
+     * kaydında SONSUZA KADAR durur. Süzülmeseydi bir daha hiç oynamayan tek
+     * bir sancak channel'ın fiyatını kalıcı olarak eğecekti. Şart aynı
+     * zamanda endeksin kendi kendine sönmesini sağlar: emirler kapandıkça
+     * akış doğal olarak sıfıra döner, ayrı bir sönüm terimi gerekmez.
+     */
+    for (const order of save.marketOrders ?? []) {
+      if (!isTraded(order.resource) || order.completesAt <= input.now) continue;
+      netFlow[order.resource] += order.direction === "sell" ? order.amount : -order.amount;
+    }
+    const reference = commonsReference(save.population);
+    for (const key of TRADED_KEYS) marketReference[key] += reference[key];
     counted++;
   }
-  if (counted < COMPARE_MIN_SAMPLE) return { counted, protectedOut, averages: null };
+  if (counted < COMPARE_MIN_SAMPLE) return { counted, protectedOut, averages: null, market: null };
   // Yuvarlama arayüzün işi: hesap tam kalır ki sayıyı doğrudan kullanacak
   // tüketiciler (Fikir 24'ün pazar endeksi) yuvarlama hatası devralmasın.
   const averages = { ...totals };
   for (const metric of COMPARE_METRICS) averages[metric] = totals[metric] / counted;
-  return { counted, protectedOut, averages };
+  // Pazar toplamları da aynı gizlilik kapısından geçer: iki komşunun net emir
+  // akışı, kendi emirlerini bilen bir Kral için tek komşunun defterini çözer.
+  return { counted, protectedOut, averages, market: { netFlow, reference: marketReference } };
 }
 
 /**

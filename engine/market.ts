@@ -22,7 +22,23 @@ import type { Commons, Game, Key, MarketOrder, TradeKey } from "./types";
  * ayrı bir iştir; burada olan bitenin tamamı iktisattır.
  *
  * Channel çapındaki oyuncular arası pazar AYRI bir iştir; orada fiyatı
- * oyuncular belirler. Bu dosya yalnızca krallık içini ilgilendirir.
+ * oyuncular belirler. Bu dosya ESAS OLARAK krallık içini ilgilendirir.
+ *
+ * TEK İSTİSNA — CHANNEL PAZAR ENDEKSİ (plan belgesi Fikir 24). Yukarıdaki
+ * "yalnızca krallık içi" ilkesi artık TAM DEĞİL: komşuların açık emir akışı
+ * `channelPriceIndex` ile küçük bir çarpana dönüşür ve yerel fiyatı ±%6
+ * kadar oynatır. Bu BİLİNÇLİ bir tercihtir (bkz. plan belgesi, "Karar
+ * (2026-08-22)") ve sınırları dar çizilmiştir:
+ *   · endeks fiyat çarpanını YALNIZCA mevcut [PRICE_FLOOR, PRICE_CEILING]
+ *     aralığının İÇİNDE oynatır — yani `orderGoldBounds` hiç genişlemez,
+ *     meşru hiçbir emir yeni bir 409 riski almaz,
+ *   · endeks `livingCost`'a GİRMEZ: geçim endeksi, dolayısıyla rıza ve
+ *     `tick()` channel'dan tamamen bağımsız kalır (`commonsGlut` ile aynı
+ *     ayrım, aynı gerekçe),
+ *   · endeksin girdisi SUNUCUDA toplanır (`server/world-projection.ts` →
+ *     `channelAverages`) ve istemcinin bildirdiği hiçbir alandan okunmaz.
+ * Fiyatı yine halkın kendi defteri belirler; endeks onun üstüne binen ince
+ * bir sızıntıdır, ayrı bir pazar değildir.
  */
 
 export type { Commons, TradeKey } from "./types";
@@ -138,9 +154,79 @@ export function priceMultiplier(coverage: number) {
   return Math.max(PRICE_FLOOR, Math.min(PRICE_CEILING, raw));
 }
 
+/**
+ * CHANNEL PAZAR ENDEKSİ (Fikir 24) — komşuların emir akışının yerel fiyata
+ * sızması. Sabitler BURADA, tek kaynakta; sunucu da arayüz de buradan okur.
+ *
+ * `share` EŞİKTİR ve sabit bir birim sayısı DEĞİLDİR: channel'ın kendi normal
+ * kilerinin (sayılan sancakların nüfusundan doğan referans stok) bir oranıdır.
+ * Böylece 3 küçük sancaklı bir channel'da 500 birim akış uçları görürken,
+ * 20 büyük sancaklı bir channel'da aynı 500 birim gürültü kalır — eşik
+ * channel büyüklüğüyle KENDİLİĞİNDEN ölçeklenir.
+ *
+ * Hız da eşiği böler: `marketDuration` süreyi hıza bölüyor, yani hızlı bir
+ * channel'da teklifler daha çabuk kapanır ve aynı ticaret yoğunluğu her an
+ * daha KÜÇÜK bir açık emir havuzu gösterir. Eşik hızla küçülmeseydi hızlı
+ * channel'lar endeksi hiç kıpırdatamazdı.
+ *
+ * `reach` etkinin tamamıdır: en uçta bile fiyat ±%6 oynar. "Küçük bir
+ * sızıntı/yayılma etkisi" kararı budur — SPREAD (1.6) bunun çok üstünde
+ * kaldığı için endeks hiçbir yönde tur atma (arbitraj) kapısı açmaz.
+ */
+export const MARKET_INDEX = {
+  /** Endeksi uca taşıyan net akış, channel'ın normal kilerinin oranı olarak. */
+  share: .25,
+  /** Fiyatta açılabilecek en büyük sapma (±). */
+  reach: .06,
+} as const;
+
+/** Endeksin nötr hâli: çarpan 1, yani bugünkü davranışın birebir aynısı. */
+export const NEUTRAL_INDEX: Commons = build(() => 1);
+
+/**
+ * Net akıştan fiyat çarpanı. İşARET: satış emri halkın eline mal geçirir, yani
+ * channel çapında BOLLUKTUR ve fiyatı düşürür; alım emri malı çeker, kıtlıktır
+ * ve fiyatı yükseltir. Yön yerel eğrinin (`priceMultiplier`) yönüyle aynıdır.
+ *
+ * Saf ve zamansız: aynı girdi her zaman aynı çarpanı verir.
+ */
+export function channelPriceIndex(input: {
+  /** Sayılan komşuların açık emirlerinin net akışı (+ satış, − alım). */
+  netFlow: Partial<Record<TradeKey, number>>;
+  /** Aynı komşuların normal kilerinin toplamı; eşiğin ölçeği budur. */
+  reference: Partial<Record<TradeKey, number>>;
+  channelSpeed: number;
+}): Commons {
+  const speed = Math.max(1, Number(input.channelSpeed) || 1);
+  return build(key => {
+    const reference = Math.max(0, Number(input.reference[key]) || 0);
+    const threshold = reference * MARKET_INDEX.share / speed;
+    // Eşik yoksa (nüfus okunamadı) endeks nötrdür: bilinmeyen bir sayı fiyatı
+    // oynatmaz.
+    if (!(threshold > 0)) return 1;
+    const flow = Number(input.netFlow[key]) || 0;
+    const pressure = Math.max(-1, Math.min(1, flow / threshold));
+    return 1 - pressure * MARKET_INDEX.reach;
+  });
+}
+
+/**
+ * Fiyat çarpanı + channel endeksi, AYNI TAVAN VE TABANLA kırpılmış.
+ *
+ * Kırpmanın aralığı bilerek değişmedi: `orderGoldBounds` bu aralıktan doğuyor
+ * ve emrin kabul aralığını çiziyor. Endeks aralığı genişletseydi ya meşru bir
+ * emir tavanı aşıp 409 alırdı (CLAUDE.md #2, ilerleme kaybı) ya da tavanı
+ * yükseltmek zorunda kalırdık — ki bu her emir için istismar payını
+ * büyütürdü. Endeks bu yüzden aralığın İÇİNDE oynar.
+ */
+export function indexedMultiplier(coverage: number, index = 1) {
+  const factor = Number.isFinite(index) && index > 0 ? index : 1;
+  return Math.max(PRICE_FLOOR, Math.min(PRICE_CEILING, priceMultiplier(coverage) * factor));
+}
+
 /** Anlık birim satış fiyatı (Kral satarsa alacağı). Alışta ayrıca SPREAD uygulanır. */
-export function unitPrice(key: TradeKey, stock: number, reference: number) {
-  return BASE_PRICE[key] * priceMultiplier(coverageOf(stock, reference));
+export function unitPrice(key: TradeKey, stock: number, reference: number, index = 1) {
+  return BASE_PRICE[key] * indexedMultiplier(coverageOf(stock, reference), index);
 }
 
 /**
@@ -169,10 +255,18 @@ export const pricingCoverage = (commons: number, reference: number, glut = 0) =>
  *
  * `glut` verilirse SATIŞ fiyatı düşer — bu, arayüzün de bozulmuş pazarı
  * göstermesini sağlar; Kral neden az altın aldığını görmeden yönetemez.
+ *
+ * `index` verilirse komşuların akışı da fiyata girer (Fikir 24); nötr hâlde
+ * (verilmezse) bugünkü fiyatın birebir aynısı çıkar.
  */
-export function marketPrices(commons: Commons, reference: Commons, glut?: Partial<Record<TradeKey, number>>): Record<string, number> {
+export function marketPrices(
+  commons: Commons,
+  reference: Commons,
+  glut?: Partial<Record<TradeKey, number>>,
+  index?: Partial<Record<TradeKey, number>>,
+): Record<string, number> {
   return Object.fromEntries(TRADED_KEYS.map(key =>
-    [key, unitPrice(key, pricingStock(commons[key], glut?.[key] ?? 0), reference[key])]));
+    [key, unitPrice(key, pricingStock(commons[key], glut?.[key] ?? 0), reference[key], index?.[key] ?? 1)]));
 }
 
 /** Halktan bir seferde alınabilecek en büyük miktar. */
@@ -215,18 +309,26 @@ export function fillOrder(
    * hiç okunmaz, yoksa hedef bedavaya yakın fiyattan mal alıp ambarına koyardı.
    */
   glut = 0,
+  /**
+   * Channel pazar endeksi (Fikir 24). Yığının TERSİNE İKİ KOLA DA girer:
+   * channel çapındaki kıtlık alırken de pahalıdır, satarken de. Tek yönlü
+   * olsaydı Kral endeksin lehine olduğu kolu seçerek onu bedava bir indirime
+   * çevirirdi; iki yönlü olduğu için endeks bir fırsat değil, bir hava
+   * durumudur. Nötr (1) verildiğinde bu fonksiyon bugünkü sonucu verir.
+   */
+  index = 1,
 ): Fill {
   const total = Math.max(0, Math.floor(amount));
   // Fiyat penceresi satışta yığını da içerir; hareket eden stok her zaman
   // halkın gerçek malıdır.
   const offset = direction === "sell" ? Math.max(0, glut) : 0;
-  const from = unitPrice(key, stock + offset, reference);
+  const from = unitPrice(key, stock + offset, reference, index);
   let held = Math.max(0, stock), gold = 0, left = total;
 
   while (left > 0) {
     const lot = Math.min(LOT, left);
     const middle = direction === "sell" ? held + offset + lot / 2 : Math.max(0, held - lot / 2);
-    gold += lot * unitPrice(key, middle, reference) * (direction === "buy" ? SPREAD : 1);
+    gold += lot * unitPrice(key, middle, reference, index) * (direction === "buy" ? SPREAD : 1);
     held = direction === "sell" ? held + lot : Math.max(0, held - lot);
     left -= lot;
   }
@@ -240,7 +342,7 @@ export function fillOrder(
     // sayı ile hazineye giren sayı birbirini tutsun.
     average: total > 0 ? settled / total : from,
     from,
-    to: unitPrice(key, held + offset, reference),
+    to: unitPrice(key, held + offset, reference, index),
   };
 }
 
@@ -344,6 +446,14 @@ export function advanceCommons(
  *
  * Yalnızca yiyecek ve bira sayılır: taşın fiyatı kimsenin karnını ilgilendirmez.
  * Ekmek ağır basar (0.7'ye 0.3), çünkü bira lüks, ekmek zorunludur.
+ *
+ * NE YIĞIN NE CHANNEL ENDEKSİ BURAYA GİRER — ikisi de bilerek dışarıda.
+ * `priceMultiplier` doğrudan çağrılır, `indexedMultiplier` DEĞİL. Gerekçe
+ * determinizmdir: bu sayı `tick()` içinde rızaya (`popularity`) dönüşüyor ve
+ * `tick()` hem istemcide saniyelik adımlarla hem sunucuda tek adımda
+ * çalışıyor (CLAUDE.md #2). Channel'dan gelen bir çarpan pencere içinde
+ * değişirse iki taraf ayrı sayıya varır ve meşru kayıt 409 alır. Halkın
+ * sofrasının bedeli bu yüzden YALNIZCA halkın kendi stoğundan okunur.
  */
 export const LIVING_WEIGHTS = { food: .7, ale: .3 } as const;
 

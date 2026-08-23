@@ -1,12 +1,12 @@
 import { feltUnrest, glutStock } from "./agitation";
 import { catalog, keepSeconds, MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
-import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, orderCost, SPREAD, TRADED_KEYS } from "./market";
+import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, NEUTRAL_INDEX, orderCost, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
 import { garrisonRefusal } from "./populace-voice";
 import { POLICY_LIMITS } from "./policy";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, keepCostFor, materialScaleOf, rates, tick } from "./tick";
-import type { Game, GameAction, Key, Res } from "./types";
+import type { Game, GameAction, Key, Res, TradeKey } from "./types";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
 export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms", "send_purse"];
@@ -98,8 +98,16 @@ const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? 
  *
  * `commons`, `reference` ve `coverage` arayüzün halkın durumunu gösterebilmesi
  * için dışarı verilir: Kral neye baktığını görmeden fiyatı yönetemez.
+ *
+ * `index` CHANNEL PAZAR ENDEKSİDİR (Fikir 24) ve tek bir yerden gelir:
+ * sunucunun `GET /api/world` yanıtı. Kaydın İÇİNDE DEĞİLDİR ve istemcinin
+ * bildirdiği hiçbir alandan okunmaz — bu bilinçli, `commons` istismarının
+ * dersi (bkz. server/save-validation.ts, "HALKIN DEFTERİ SUNUCUNUN").
+ * Verilmediğinde nötrdür, yani bu fonksiyon bugünkü sonucu birebir verir;
+ * gece vardiyası (`app/api/cron`) endeksi hiç vermez ve vermesi de gerekmez,
+ * çünkü General'in gece araçları arasında pazar emri yoktur.
  */
-export function marketState(game: Game, now: number) {
+export function marketState(game: Game, now: number, index?: Partial<Record<TradeKey, number>>) {
   const level = game.buildings.find(building => building.type === "market")?.level ?? 0;
   const open = game.marketOrders ?? [];
   const fresh = now - (game.marketDayAt ?? 0) >= 86_400_000;
@@ -114,11 +122,15 @@ export function marketState(game: Game, now: number) {
     level, used, limit,
     left: Math.max(0, limit - used),
     dayAt: fresh ? now : game.marketDayAt ?? now,
-    price: marketPrices(commons, reference, glut),
+    price: marketPrices(commons, reference, glut, index),
     spread: SPREAD,
     open, slots: level,
     freeSlots: Math.max(0, level - open.length),
     commons, reference, glut,
+    /** Channel endeksinin bu andaki çarpanları; arayüz sızıntıyı böyle gösterir. */
+    index: index ?? NEUTRAL_INDEX,
+    /** Endeks fiyatı gerçekten oynatıyor mu? Kral sebebini görmeden yönetemez. */
+    indexed: TRADED_KEYS.some(key => Math.abs((index?.[key] ?? 1) - 1) > 1e-9),
     /** Pazar bozulmuş mu? Kral az altın aldığını görmeden yönetemez. */
     glutted: TRADED_KEYS.some(key => glut[key] > 0),
     coverage: Object.fromEntries(TRADED_KEYS.map(key => [key, coverageOf(commons[key], reference[key])])) as Record<string, number>,
@@ -126,7 +138,12 @@ export function marketState(game: Game, now: number) {
   };
 }
 
-export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
+/**
+ * `channelIndex` — Fikir 24'ün pazar endeksi. Yalnızca pazar emrinin fiyatına
+ * girer; verilmezse (gece vardiyası, testler, eski çağrılar) endeks nötrdür ve
+ * sonuç bugünküyle birebir aynıdır.
+ */
+export function applyActions(base: Game, actions: GameAction[], now: number, channelIndex?: Partial<Record<TradeKey, number>>): ApplyResult {
   let next = tick(base, now);
   const results: string[] = [], remote: GameAction[] = [];
   // Kral, General'in itirazını ezerek emri uygulattıysa sadakat düşer.
@@ -241,7 +258,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const resource = String(action.arguments?.resource ?? "");
       const amount = Math.floor(Number(action.arguments?.amount) || 0);
       const buying = String(action.arguments?.direction ?? "sell") === "buy";
-      const market = marketState(next, now);
+      const market = marketState(next, now, channelIndex);
 
       if (!isTraded(resource)) { blocked(`Pazar emri geçersiz: ${resource || "kaynak"} pazarda işlem görmez. Yalnızca yiyecek, odun, taş, demir ve bira alınıp satılır.`); continue; }
       if (market.level < 1) { blocked("Pazar emri engellendi: Pazarımız yok. Önce Pazar kurulmalı (Kale Sv.2)."); continue; }
@@ -261,7 +278,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       // Fiyat emrin İÇİNDE hareket eder: emir parçalara bölünür, her parça o
       // andaki stoğa göre fiyatlanır. Büyük emir kendi fiyatını bozar.
       // Yığın yalnızca satış kolunda fiyatı düşürür; alışta hiç okunmaz.
-      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0);
+      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0, market.index[resource] ?? 1);
       const minutes = marketDuration(amount, next.speed);
       // Teklif kimliği deterministik: aynı girdi aynı kimliği üretir, motor saf kalır.
       const id = `${buying ? "b" : "s"}-${resource}-${amount}-${now}`;
