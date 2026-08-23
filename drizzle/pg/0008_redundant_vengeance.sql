@@ -1,0 +1,1 @@
+ALTER TABLE "intel_missions" ADD COLUMN "kind" text DEFAULT 'scout' NOT NULL;

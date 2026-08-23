@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { POPULACE_PERSONA_IDS } from "../engine/populace-persona";
 import { DEMAND_TONES } from "../engine/populace-voice";
+import { INTEL_MISSION_KINDS } from "../engine/intel";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -141,6 +142,14 @@ export const intelMissions = pgTable("intel_missions", {
   sourceUserId: text("source_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   targetUserId: text("target_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status", { enum: ["pending", "succeeded", "failed", "detected"] }).notNull().default("pending"),
+  /**
+   * Görev türü (plan belgesi Fikir 5). `scout` standart keşif, `deep` derin
+   * gözetleme: pahalı, daha düşük ihtimalli ve başarılı olursa rapora hedef
+   * halkın KABA moral etiketini ekleyen ayrı bir görev. Liste motordan gelir
+   * (`engine/intel.ts` → `INTEL_MISSION_KINDS`); varsayılan `scout` olduğu
+   * için bu sütun eklenmeden önce yazılmış bütün satırlar keşif sayılır.
+   */
+  kind: text("kind", { enum: INTEL_MISSION_KINDS }).notNull().default("scout"),
   successChance: integer("success_chance").notNull(),
   detectionChance: integer("detection_chance").notNull(),
   completesAt: bigint("completes_at", { mode: "number" }).notNull(),
@@ -160,6 +169,20 @@ export const sharedMines = pgTable("shared_mines", {
   oreRemaining: integer("ore_remaining").notNull().default(100000),
   extractedOre: integer("extracted_ore").notNull().default(0),
   lastTickAt: bigint("last_tick_at", { mode: "number" }).notNull(),
+  /**
+   * BÖLGE SAHİBİ (plan belgesi Fikir 22) ve sahipliğin tartıldığı pencere.
+   *
+   * Sahiplik ANLIK hesaplanmaz, madenin satırında DURUR: mutlak zamana oturan
+   * pencerelerin başında bir kez tartılır (`engine/mine.ts` →
+   * `influenceWindowAt`) ve pencere boyunca değişmez. Bu bir denge kararıdır
+   * (sahiplik kapma yarışını önler) ve aynı zamanda kısıt #2'nin gereği:
+   * hesap kaç parçaya bölünürse bölünsün sahip aynı kalsın.
+   *
+   * `set null`: sahibin hesabı silinirse sütun boşa düşer, madenin satırı
+   * silinmez.
+   */
+  influenceUserId: text("influence_user_id").references(() => users.id, { onDelete: "set null" }),
+  influenceWindow: bigint("influence_window", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("idx_shared_mines_channel").on(table.channelId)]);
 
@@ -181,9 +204,52 @@ export const sharedMineWorkers = pgTable("shared_mine_workers", {
   workers: integer("workers").notNull().default(5),
   pendingOre: doublePrecision("pending_ore").notNull().default(0),
   deliveredOre: integer("delivered_ore").notNull().default(0),
+  /**
+   * NÜFUZ ÖLÇÜTÜ (Fikir 22): zaman ağırlıklı ortalama işçi sayısı. ANLIK
+   * `workers` değil bu sütun tartılır; anlık olsaydı krallıklar her hesapta
+   * işçi sayısını oynatıp sahiplik kapma yarışına girerdi. Kapalı çözümlü
+   * üstel olarak ilerler (`engine/mine.ts` → `advanceWorkerAvg`), yani
+   * hesabın kaç adıma bölündüğü sonucu değiştirmez. Varsayılan 0: sütun
+   * eklenmeden önceki satırlar sahipliği sıfırdan kazanır.
+   */
+  workerAvg: doublePrecision("worker_avg").notNull().default(0),
   lastDeliveryAt: bigint("last_delivery_at", { mode: "number" }).notNull().default(0),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
+
+/**
+ * DAMAR TÜKENİNCE ÇIKAN FIRSAT (plan belgesi Fikir 23).
+ *
+ * NEDEN AYRI TABLO, `shared_mines`e YENİ SATIR DEĞİL: plan notu "mevcut UNIQUE
+ * index kaldırılmalı ya da aktif bir durum alanı eklenmeli" diyordu, çünkü
+ * `idx_shared_mines_channel` channel başına TEK maden satırına izin veriyor.
+ * Index KALDIRILMADI: o index madenin tekilliğini DB seviyesinde tutan şey ve
+ * `app/api/mine/route.ts` madeni `mine:<channelId>` kimliğiyle upsert ediyor;
+ * kaldırmak, yıkıcı olmayan bir migrasyonu yıkıcı bir belirsizliğe çevirirdi.
+ * Fırsat ayrı bir tabloda durunca migrasyon tamamen additive kalıyor ve
+ * madenin kendi kurallarına hiç dokunulmuyor.
+ *
+ * TÜR/MİKTAR/KONUM BU TABLODA YOK: yalnızca tohumun girdileri (`channel_id` +
+ * `depleted_at`) saklanır, geri kalanı `engine/mine.ts` → `mineFindOf` her
+ * okumada türetir. Sayıyı tabloya yazmak ikinci bir kopya olurdu; böyle
+ * olunca istemcinin şişirebileceği bir alan hiç var olmuyor.
+ *
+ * TEK KAZANAN: `status` üzerinden koşullu UPDATE ile alınır
+ * (`where status = 'pending'`), yani yarışan iki istekte kazanan
+ * veritabanında belirlenir. Kaçırılan fırsat `pending` kalır ve sonradan da
+ * alınabilir (plan kararı: affedici tasarım).
+ */
+export const sharedMineFinds = pgTable("shared_mine_finds", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  mineId: text("mine_id").notNull().references(() => sharedMines.id, { onDelete: "cascade" }),
+  /** Tohumun anı; kaba bir kovaya yuvarlanır (bkz. `mineFindSeedAt`). */
+  depletedAt: bigint("depleted_at", { mode: "number" }).notNull(),
+  status: text("status", { enum: ["pending", "claimed"] }).notNull().default("pending"),
+  claimedBy: text("claimed_by").references(() => users.id, { onDelete: "set null" }),
+  claimedAt: bigint("claimed_at", { mode: "number" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("idx_shared_mine_finds_mine").on(table.mineId, table.status)]);
 
 // Kralın gece emri. Kayıt yoksa General arka planda hiç uyanmaz.
 // Bir Kralın birden fazla kalıcı emri olabilir. Eskiden user_id birincil

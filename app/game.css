@@ -235,3 +235,34 @@
 .compare-grid b.worse{color:#8f3512}
 .compare-grid em{font-style:normal;font-size:.82rem;color:#7a6540}
 .compare-note{display:block;margin-top:8px;font-size:.66rem;line-height:1.5;color:#7a6540}
+
+/* DERİN GÖZETLEME (plan belgesi Fikir 5) — komşu kartındaki İKİNCİ emir.
+   Bedava keşif ile bedelli gözetleme yan yana durur; kartın ızgarası
+   bozulmasın diye düğmeler kendi sütununda tek bir kutuya alındı. Moral
+   satırı bilinçli olarak SAYISIZ: yalnızca kaba etiket vurgulanır. */
+.kingdom-contact .intel-actions{grid-column:2;grid-row:1/4;display:grid;gap:4px;align-content:center}
+.kingdom-contact .intel-actions button{grid-column:auto;grid-row:auto}
+.kingdom-contact button.deep-scout{background:#3b2a46;border-color:#6d5583;color:#eadcf3}
+.kingdom-contact small.intel-mood{grid-column:1/2;color:#5d4326}
+.kingdom-contact small.intel-mood b{color:#7d2930;font-weight:700;letter-spacing:.06em}
+
+/* NÜFUZ MÜCADELESİ (plan belgesi Fikir 22) — ortak madende bölge sahipliği.
+   Sahiplik satırı kendi sancağımızsa vurgulanır; sahibin rozeti listede de
+   işaretlenir. Ortalama işçi sayısı bilinçli olarak GÖSTERİLMEZ. */
+.shared-mine small.mine-influence{color:#5e4a2f}
+.shared-mine small.mine-influence b{color:#7d2930;font-weight:700}
+.shared-mine small.mine-influence.mine{color:#3f5f2c}
+.shared-mine small.mine-influence.mine b{color:#3f5f2c}
+.shared-mine i.owner{background:#7d2930;box-shadow:inset 0 -2px #d2a64d}
+
+/* DAMAR TÜKENİNCE ÇIKAN FIRSAT (plan belgesi Fikir 23). Tükenme bir son değil
+   yeni bir olay: panel bu yüzden madenin kendi kutusundan görsel olarak
+   AYRILIR. Alınmış fırsat soluklaşır ama panelde kalır — kimin kazandığı
+   channel'ın hafızasıdır. */
+.shared-mine .mine-find{display:grid;gap:4px;margin-top:6px;padding:9px 10px;background:#3b2f1c;color:#f0dfb9;box-shadow:inset 4px 0 #d2a64d}
+.shared-mine .mine-find>span{font:600 7px JetBrains Mono;color:#d2a64d;letter-spacing:.08em}
+.shared-mine .mine-find>b{font:600 12px Cinzel}
+.shared-mine .mine-find>small{font:7px/1.5 JetBrains Mono;color:#d8c9a5}
+.shared-mine .mine-find>button{justify-self:start;margin-top:4px}
+.shared-mine .mine-find.claimed{background:#2c2620;box-shadow:inset 4px 0 #7a6a4a;opacity:.85}
+.shared-mine .mine-find small.mine-find-owner{color:#e6c98a}

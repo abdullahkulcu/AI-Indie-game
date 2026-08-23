@@ -11,6 +11,8 @@
 import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, type CompareMetric } from "../engine/comparison";
 import { victoryScore, type VictoryPurse } from "../engine/victory";
 import { TRADED_KEYS, commonsReference, isTraded } from "../engine/market";
+import { armySize, moodState, suppression } from "../engine/populace";
+import { factionPressureOf } from "../engine/faction";
 import type { TradeKey } from "../engine/types";
 import { parseStoredSave } from "./save-validation";
 
@@ -68,12 +70,25 @@ export function projectPublicKingdom(userId: string, gameState: string, expected
  * ortadan kaldırır.
  *
  * RAPOR VERİR   : hükümdar, arazi, kale seviyesi, nüfus, yapı sayısı, ordu.
- * RAPOR VERMEZ  : ambar, nöbet oranı, asker maaşı, halkın rızası, sadakat,
- *                 hazine, kalan koruma süresi, gece emirleri.
+ * RAPOR VERMEZ  : ambar, nöbet oranı, asker maaşı, halkın rızasının SAYISI,
+ *                 sadakat, hazine, kalan koruma süresi, gece emirleri.
+ *
+ * TEK İSTİSNA — `mood` (plan belgesi Fikir 5, "derin gözetleme"): yalnızca
+ * `deep` türü bir görev başarıya ulaştığında dolar ve o zaman bile SAYI değil
+ * kaba bir DURUM ETİKETİ taşır ("Huzursuz" gibi). Standart keşif raporunda bu
+ * alan `null` kalır; karar buydu ve sınır tek yerde, aşağıdaki fonksiyonda
+ * çizilir.
  */
-export type IntelReport = Omit<PublicKingdom, "id">;
+export type IntelReport = Omit<PublicKingdom, "id"> & {
+  /**
+   * Halkın kaba moral etiketi. `null` = bu görev derin gözetleme değildi.
+   * `undefined` gelebilir: bu alan eklenmeden önce yazılmış eski raporlar
+   * (`intel_missions.report` içindeki JSON) bu alanı hiç taşımıyor.
+   */
+  mood?: string | null;
+};
 
-export function intelReportOf(kingdom: PublicKingdom): IntelReport {
+export function intelReportOf(kingdom: PublicKingdom, mood: string | null = null): IntelReport {
   // Alanlar TEK TEK yazılır: `...kingdom` yayılsaydı `PublicKingdom` ileride
   // büyüdüğünde yeni alan rapora kendiliğinden sızardı — bu kusurun aynısı
   // ambarla bir kez yaşandı.
@@ -85,7 +100,53 @@ export function intelReportOf(kingdom: PublicKingdom): IntelReport {
     population: kingdom.population,
     buildingCount: kingdom.buildingCount,
     army: kingdom.army,
+    // `mood` alanı YALNIZCA derin gözetlemede EKLENİR — `null` geçtiğinde
+    // anahtar hiç yazılmaz. Gerekçesi bir istismar/sızma disiplini: standart
+    // keşif raporunun alan listesi bu maddeden ÖNCEKİ hâliyle bit düzeyinde
+    // aynı kalıyor, yani "raporda hangi alanlar var" güvencesini tutan mevcut
+    // test (tests/world-projection.test.ts → "ajan raporu ambarı vermez")
+    // gevşetilmek zorunda kalmadı ve ileride başka bir alan sessizce
+    // eklenirse yine kırılacak.
+    ...(mood ? { mood } : {}),
   };
+}
+
+/**
+ * DERİN GÖZETLEMENİN TEK ÇIKTISI — hedef halkın kaba moral etiketi.
+ *
+ * NEDEN BU ASİMETRİK BİLGİ KISITINI İHLAL ETMEZ (plan belgesi §2, karar 2):
+ * burada Halk-AI'sı kendi krallığından bilgi SIZDIRMIYOR. Bu, Kral'ın KENDİ
+ * istihbarat aracıyla (zarlı, bedelli, tespit edilebilir bir ajan göreviyle)
+ * RAKİBİN halkını gözetlemesidir — tamamen farklı bir kanal. Halkın kendi
+ * kıyaslaması hâlâ tek yönlü akıyor; General hâlâ halka gidip soramıyor.
+ *
+ * SAYI DEĞİL ETİKET: yalnızca `MoodState.label` döner (beş kademe:
+ * Memnun → Huzursuz → Kaynıyor → İş bırakma → İsyan). Rızanın sayısı,
+ * asker huzursuzluğu ve muhalefet baskısı hesaba GİRER ama dışarıya ÇIKMAZ —
+ * `intelReportOf`'un "kesin sayı değil, kaba çerçeve" felsefesi budur.
+ *
+ * Etiketin BİLEŞİMİ (rıza + askerin bastırma gücü) hedefin kendi arayüzünde
+ * gördüğü bileşimin aynısıdır (`components/KingdomGame.tsx` → `mood`): ajan
+ * sokakta ne görüyorsa onu getirir, yani bastırılmış bir huzursuzluk raporda
+ * da bastırılmış görünür. Kademelerin kendisi motorda tek kaynaktır
+ * (`engine/populace.ts` → `STATES`); burada yeni bir eşik UYDURULMAZ.
+ */
+export function moodLabelOf(gameState: string, expectedChannelName: string): string | null {
+  const save = parseStoredSave(gameState);
+  if (!save || save.channel !== expectedChannelName) return null;
+  return moodOf(save).label;
+}
+
+/** Girdi `parseStoredSave` çıktısıdır; `Game` yerine yapısal tip, çünkü şema
+ * bazı alanları isteğe bağlı (eski kayıt) bırakır. */
+function moodOf(save: {
+  popularity: number; population: number;
+  units?: Record<string, number>; soldierUnrest?: number; factionPressure?: number;
+}) {
+  return moodState(
+    save.popularity,
+    suppression(armySize(save.units ?? {}), save.population, save.soldierUnrest ?? 0, factionPressureOf(save)),
+  );
 }
 
 /**

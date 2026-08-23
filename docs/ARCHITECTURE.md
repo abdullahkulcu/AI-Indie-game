@@ -121,9 +121,10 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `game_saves` | Krallığın TEK kaydı: `gameState` (istemcide hesaplanan JSON blob), `revision` (iyimser kilit), `updatedAt`. |
 | `llm_credentials` | BYOK: sağlayıcı, model, AES-256-GCM şifreli anahtar + IV + `additionalData` sürüm etiketi. |
 | `intel_defenses` | Karşı-istihbarat seviyesi ve aktif olduğu süre (casus tespiti ve kese ifşası buradan okunur). |
-| `intel_missions` | Gönderilen ajan görevi: başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
-| `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher. |
-| `shared_mine_workers` | Bir krallığın madendeki işçisi ve henüz teslim edilmemiş kesirli cevheri (`pendingOre`). |
+| `intel_missions` | Gönderilen ajan görevi: TÜR (`kind`: `scout` / `deep`), başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
+| `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher, **bölge sahibi** (`influence_user_id`) ve sahipliğin tartıldığı pencere (`influence_window`). |
+| `shared_mine_workers` | Bir krallığın madendeki işçisi, henüz teslim edilmemiş kesirli cevheri (`pendingOre`) ve nüfuz ölçütü olan zaman ağırlıklı ortalama işçi sayısı (`worker_avg`). |
+| `shared_mine_finds` | Damar tükendiğinde ortaya çıkan fırsat (define / yıkık kale / terk edilmiş galeri): yalnızca TOHUMUN girdileri (`channel_id` + `depleted_at`) ve durumu; tür/miktar/konum `engine/mine.ts` → `mineFindOf` ile türetilir. Tek kazanan, koşullu UPDATE ile belirlenir. |
 | `standing_orders` | Kralın gece vardiyası için verdiği kalıcı emir: otonomi (`autonomous`/`ask`), günlük eylem tavanı, durum. |
 | `pending_decisions` | General'in riskli bulup Kral'ın teyidine sunduğu tek bekleyen emir. |
 | `general_ledger` | General'in Kral hakkındaki kalıcı hafızası; aynı olay türü tek satırda `weight` ile birikir. |
@@ -216,11 +217,35 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   birikir (10 dk'da bir tam sayıya döner), damar bitince üretim durur,
   sıra deterministik (userId'ye göre) olduğu için "son cevher kime gider"
   sorusu her zaman aynı cevabı verir.
+- **NÜFUZ MÜCADELESİ (plan belgesi Fikir 22):** damarda açık üstünlüğü olan
+  krallık "bölge sahibi" olur ve ÖTEKİLERİN aktif üretiminden `INFLUENCE_CUT`
+  kadar pay alır — dosyanın kuruluşundan beri taşıdığı "kimse başkasının
+  payını yemez" ilkesine getirilen BİLİNÇLİ istisna (dosyanın kendi yorumu da
+  bu yüzden güncellendi). Ölçüt anlık işçi sayısı DEĞİL, kapalı çözümlü üstel
+  bir zaman ağırlıklı ortalamadır (`advanceWorkerAvg`, `worker_avg` sütunu);
+  sahiplik ayrıca mutlak zamana oturan pencerelere KİLİTLİDİR
+  (`influenceWindowAt`, akın penceresinin deseni) ve pencere içinde
+  değişmez. İki fren: nüfuz cevher ÜRETMEZ (pay yalnızca yer değiştirir,
+  damardan çıkan toplam aynı kalır) ve madende o an işçisi olmayan krallık
+  pay alamaz. Kısıt #2 buradan geçer: ortalamanın kapalı çözümü + pencere
+  kilidi, hesabın kaç adıma bölündüğünün sonucu değiştirmemesini sağlar
+  (`tests/mine-influence.test.ts` iki ayrı senaryoyla tutar).
 - **Sarma:** `app/api/mine/route.ts` doğrudan çağırır; ayrı bir `server/`
   dosyası yoktur (route kısa ve odaklı).
-- **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al —
-  sürüm korumalı `writeSaveIfUnchanged` ile `game_saves`'e GERÇEKTEN yazılır).
-- **UI:** `diyar` sekmesi (ortak maden paneli).
+- **TÜKENME-SONRASI FIRSAT (plan belgesi Fikir 23):** damar bitince aynı
+  bölgede tohumlu bir keşif belirir (`mineFindOf`; tohum = channel + KABA bir
+  kovaya yuvarlanmış tükenme anı, çünkü son cevheri alan oyuncu yoklama anını
+  bir ölçüde seçebilir). GERÇEK BİR YARIŞ: tek kazanan tüm fırsatı alır ve
+  kazanan uygulama katmanında değil VERİTABANINDA belirlenir (`status`
+  üzerinden koşullu UPDATE). Fırsata ulaşmak için madende işçi bulundurmak
+  şarttır; kaçırılırsa `pending` kalır ve sonradan da alınabilir. Fırsat
+  CRON'a değil madenin kendi TEMBEL ritmine bağlı (maden yalnızca birisi
+  sayfaya baktığında ilerler); yeni bir cron adımı eklenmedi.
+- **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al,
+  `claim_find` ile fırsatı al — hepsi sürüm korumalı `writeSaveIfUnchanged`
+  ile `game_saves`'e GERÇEKTEN yazılır).
+- **UI:** `diyar` sekmesi (ortak maden paneli, bölge sahipliği satırı, fırsat
+  kutusu).
 
 ### 3.6 Yerel pazar (market)
 
@@ -284,17 +309,28 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 
 ### 3.10 Casusluk / karşı-istihbarat (intel)
 
-- **Motor/veri:** `db/schema.ts` → `intel_missions`, `intel_defenses`.
-  Başarı/tespit ihtimali zarla belirlenir (bu, `engine/`'in DIŞINDA —
-  `app/api/world/route.ts` içinde `crypto.getRandomValues` ile — çünkü
-  saf/deterministik olma zorunluluğu yalnızca `engine/`'e aittir, tek seferlik
-  sunucu tarafı bir olaydır, istemci-sunucu senkronizasyonu gerekmez).
+- **Motor/veri:** `engine/intel.ts` (görev türleri TEK KAYNAK: bedel,
+  başarı/tespit ihtimalleri, yol süresi ve TOHUMLU zar `resolveIntelMission`),
+  `db/schema.ts` → `intel_missions`, `intel_defenses`. Zar `engine/raids.ts`'in
+  `rand01` desenini kullanır ve tohumun öngörülemez parçası SUNUCUDA üretilen
+  görev kimliğidir (istemciye hiç inmez); böylece sonuç oyuncu için tahmin
+  edilemez ama testte tekrar oynatılabilir. (Eskiden zar route'un içinde
+  `crypto.getRandomValues` ileydi.)
+- **İki görev türü:** `scout` (bedava keşif) ve `deep` (DERİN GÖZETLEME, plan
+  belgesi Fikir 5): daha pahalı — bedeli gönderenin kaydından TEK İŞLEMDE
+  düşer, dış kesenin omurgası —, daha düşük başarı ihtimalli, daha kolay
+  tespit edilen ve başarılı olursa rapora hedef halkın KABA moral etiketini
+  ("Huzursuz") ekleyen ayrı bir görev. Sayı asla verilmez.
 - **Sarma:** `server/world-projection.ts` (`projectPublicKingdom`,
   `intelReportOf` — rapor İÇERİĞİ TEK YERDE kararlaşır, hedefin ambarı asla
-  sızmaz).
-- **API:** `POST /api/world` (ajan gönder), `GET /api/world`
-  (`resolveDueMissions`, biten görevleri çözer).
-- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu).
+  sızmaz; `moodLabelOf` yalnızca `deep` başarıya ulaşırsa çağrılır ve
+  `mood` alanı yalnızca o zaman rapora EKLENİR, standart raporun alan listesi
+  hiç değişmez).
+- **API:** `POST /api/world` (`scout` / `deep_scout`), `GET /api/world`
+  (`resolveDueMissions`, biten görevleri çözer; `intel.deepCost` panelin
+  bedeli sabit kodlamaması için iner).
+- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu, "DERİN GÖZETLEME"
+  düğmesi ve moral satırı).
 
 ### 3.11 General — BYOK LLM entegrasyonu
 

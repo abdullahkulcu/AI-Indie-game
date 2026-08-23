@@ -1,11 +1,12 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, gameSaves, sharedMines, sharedMineWorkers } from "../../../db/schema";
+import { channelMembers, channels, gameSaves, sharedMineFinds, sharedMines, sharedMineWorkers } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { projectPublicKingdom } from "../../../server/world-projection";
 import { CAPS, parseStoredSave } from "../../../server/save-validation";
 import { writeSaveIfUnchanged } from "../../../server/save-write";
-import { MINE_TICK_MIN_MS, oreRate, settleMine } from "../../../engine/mine";
+import { INFLUENCE_CUT, INFLUENCE_WINDOW_GAME_HOURS, MINE_TICK_MIN_MS, influenceWindowMs, mineFindOf, mineFindSeedAt, oreRate, settleMine } from "../../../engine/mine";
+import type { Game } from "../../../engine/types";
 
 /** Madende çalışabilecek halkın oranı ve channel genelindeki toplam yuva. */
 const PERSONAL_SHARE = .2;
@@ -79,8 +80,12 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
   // süre `lastTickAt` üzerinde bekler, hiçbir cevher kaybolmaz.
   if (!options.forceUserId && now - mine.lastTickAt < MINE_TICK_MIN_MS) return { ...mine, totalWorkers };
   const settlement = settleMine(
-    crew.map(row => ({ userId: row.userId, workers: row.workers, pendingOre: row.pendingOre, lastDeliveryAt: row.lastDeliveryAt })),
-    { speed, hours: (now - mine.lastTickAt) / 3_600_000, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null },
+    crew.map(row => ({ userId: row.userId, workers: row.workers, pendingOre: row.pendingOre, lastDeliveryAt: row.lastDeliveryAt, workerAvg: row.workerAvg })),
+    { speed, hours: (now - mine.lastTickAt) / 3_600_000, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null,
+      // NÜFUZ (Fikir 22): sahiplik madenin satırında DURUR ve pencere sınırında
+      // motorda yeniden tartılır. Burada hesaplanmaz — istemci de, route da bu
+      // kararı vermez.
+      influence: { userId: mine.influenceUserId, window: mine.influenceWindow } },
   );
 
   const claimed = await getDb().update(sharedMines)
@@ -88,6 +93,8 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
       lastTickAt: now,
       oreRemaining: mine.oreRemaining - settlement.extracted,
       extractedOre: mine.extractedOre + settlement.extracted,
+      influenceUserId: settlement.influence.userId,
+      influenceWindow: settlement.influence.window,
     })
     .where(and(eq(sharedMines.id, mine.id), eq(sharedMines.lastTickAt, mine.lastTickAt)))
     .returning({ id: sharedMines.id });
@@ -98,10 +105,12 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
 
   let returned = 0;
   for (const share of settlement.shares) {
+    // Ortalama her hesapta geri yazılır: nüfuz ölçütü satırda yaşar, anlık
+    // işçi sayısından türetilmez (bkz. db/schema.ts → `worker_avg`).
     await getDb().update(sharedMineWorkers)
       .set(share.delivered > 0
-        ? { pendingOre: share.pendingOre, deliveredOre: sql`${sharedMineWorkers.deliveredOre} + ${share.delivered}`, lastDeliveryAt: now }
-        : { pendingOre: share.pendingOre })
+        ? { pendingOre: share.pendingOre, workerAvg: share.workerAvg, deliveredOre: sql`${sharedMineWorkers.deliveredOre} + ${share.delivered}`, lastDeliveryAt: now }
+        : { pendingOre: share.pendingOre, workerAvg: share.workerAvg })
       .where(and(eq(sharedMineWorkers.mineId, mine.id), eq(sharedMineWorkers.userId, share.userId)));
     if (share.delivered <= 0) continue;
     if (await deliverOre(share.userId, share.delivered, mine.name, now)) continue;
@@ -124,9 +133,41 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
     lastTickAt: now,
     oreRemaining: mine.oreRemaining - extracted,
     extractedOre: mine.extractedOre + extracted,
+    influenceUserId: settlement.influence.userId,
+    influenceWindow: settlement.influence.window,
     totalWorkers,
   };
 }
+
+/**
+ * DAMAR TÜKENİNCE ÇIKAN FIRSAT (plan belgesi Fikir 23) — satırı açar ve okur.
+ *
+ * NEDEN CRON DEĞİL: plan "yeni bir cron adımı" diyordu ama maden zaten
+ * TEMBEL ilerliyor (yalnızca birisi sayfaya baktığında, bkz. `tickMine`).
+ * Fırsatı da aynı ritme bağlamak, madenin kendi felsefesini koruyor ve
+ * `app/api/cron/route.ts`'e yeni bir tur eklemiyor. Fırsat kaçırılırsa
+ * BEKLEYEN kalır (plan kararı), yani gecikmenin bir bedeli yok.
+ *
+ * Satır `onConflictDoNothing` ile açılır: yarışan iki yoklama iki fırsat
+ * üretemez. Kimlik madenin kimliğinden türer, damar bir kez tükendiği için
+ * channel başına en fazla bir fırsat vardır.
+ */
+async function findFor(mine: { id: string; channelId: string; oreRemaining: number }, speed: number, now: number) {
+  if (mine.oreRemaining > 0) return null;
+  await getDb().insert(sharedMineFinds).values({
+    id: `find:${mine.id}`, channelId: mine.channelId, mineId: mine.id,
+    // Tohumun anı KABA bir kovaya oturur: damarın son cevherini alan oyuncu
+    // yoklama anını bir ölçüde seçebilir, milisaniye hassasiyetli bir tohum
+    // "hangi anda yoklarsam define çıkar" diye taranabilirdi.
+    depletedAt: mineFindSeedAt(now, speed),
+  }).onConflictDoNothing();
+  const [row] = await getDb().select().from(sharedMineFinds).where(eq(sharedMineFinds.id, `find:${mine.id}`)).limit(1);
+  return row ?? null;
+}
+
+/** Fırsatın içeriği HER OKUMADA tohumdan türer; tabloda ikinci bir kopya yok. */
+const findView = (row: { channelId: string; depletedAt: number; status: string; claimedBy: string | null }) =>
+  ({ ...mineFindOf(`${row.channelId}:${row.depletedAt}`), status: row.status, claimedBy: row.claimedBy, appearedAt: row.depletedAt });
 
 export async function GET(request: Request) {
   const user = await currentUser(request);
@@ -136,11 +177,32 @@ export async function GET(request: Request) {
   const value = await context(user.id, channelId);
   if (!value) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
   const mine = await tickMine(value.mine, value.channel.speed, { now: Date.now() });
+  const findRow = await findFor(mine, value.channel.speed, Date.now());
   const rows = await getDb().select({ userId: sharedMineWorkers.userId, workers: sharedMineWorkers.workers, deliveredOre: sharedMineWorkers.deliveredOre, gameState: gameSaves.gameState }).from(sharedMineWorkers).innerJoin(gameSaves, eq(gameSaves.userId, sharedMineWorkers.userId)).where(eq(sharedMineWorkers.mineId, mine.id));
   const participants = rows.flatMap(row => {
     const kingdom = projectPublicKingdom(row.userId, row.gameState, value.channel.name);
     return kingdom ? [{ id: row.userId, name: kingdom.name, workers: row.workers, deliveredOre: row.deliveredOre, self: row.userId === user.id }] : [];
   });
+  /**
+   * BÖLGE SAHİPLİĞİ (Fikir 22) — panele SALT OKUNUR iner.
+   *
+   * Sahibin ADI iner ama ORTALAMASI (`worker_avg`) İNMEZ: ortalama sahipliğin
+   * ölçütüdür ve sızması "kaç işçiyle geçebilirim" hesabını birebir çözerdi.
+   * Panelin gördüğü şey madenin satırında yazılı olanla aynı; istemcinin
+   * bildirdiği hiçbir sayı bu karara girmez. Pay oranı ve pencere uzunluğu da
+   * motordan okunur, panel kendi kopyasını tutmaz.
+   */
+  const influence = mine.influenceUserId
+    ? {
+      userId: mine.influenceUserId,
+      name: participants.find(row => row.id === mine.influenceUserId)?.name ?? "Bilinmeyen Sancak",
+      self: mine.influenceUserId === user.id,
+      cut: INFLUENCE_CUT,
+      windowGameHours: INFLUENCE_WINDOW_GAME_HOURS,
+      /** Pencerenin bitişi: sahiplik en erken bu anda yeniden tartılır. */
+      windowEndsAt: (mine.influenceWindow + 1) * influenceWindowMs(value.channel.speed),
+    }
+    : null;
   // Tavan oyuncunun kendi kaydından okunur. Eskiden madendeki işçi listesinden
   // aranıyordu; madende işçisi olmayan oyuncu kendi tavanını göremiyordu.
   const [ownSave] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
@@ -152,16 +214,79 @@ export async function GET(request: Request) {
     orePerWorkerHour: oreRate(1, value.channel.speed),
     mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } },
     participants,
+    influence,
+    /**
+     * TÜKENME-SONRASI FIRSAT (Fikir 23). Tür, miktar ve konum tohumdan
+     * TÜRETİLİR; panel sayıyı bildirmez, yalnızca gösterir. Kazananın adı
+     * madende işçisi olan sancaklardan çözülür, yoksa kimliği inmez.
+     */
+    find: findRow ? { ...findView(findRow), claimedName: findRow.claimedBy ? participants.find(row => row.id === findRow.claimedBy)?.name ?? null : null, self: findRow.claimedBy === user.id, canClaim: findRow.status === "pending" && participants.some(row => row.self) } : null,
   });
+}
+
+/**
+ * FIRSATI ALMAK — GERÇEK BİR YARIŞ, tek kazanan (plan kararı, Fikir 23).
+ *
+ * Kazanan UYGULAMA KATMANINDA değil VERİTABANINDA belirlenir: koşullu UPDATE
+ * (`where status = 'pending'`) yalnızca bir isteğe satır döndürür, ikinci
+ * istek boş döner. "Önce oku, sonra yaz" biçiminde yazılsaydı aynı saniyede
+ * gelen iki Kral fırsatı iki kez alırdı.
+ *
+ * ÖDÜL SUNUCU TARAFINDAN YAZILIR (madenin cevher teslimi ve haraç ödemesiyle
+ * aynı desen): miktar tohumdan türer, istemcinin bildirdiği hiçbir sayıya
+ * bakılmaz. Yazma sürüm korumalıdır; iki denemede de tutmazsa fırsat
+ * `pending`e GERİ DÖNER — yoksa ödül ortadan kaybolurdu.
+ *
+ * ŞART: madende işçisi olmak. "İlk ulaşan alır" kararının karşılığı budur —
+ * damar bittikten sonra bile madende adam tutmak küçük bir bahis, fırsat da
+ * o bahsin karşılığı. Damar bittiği için o işçiler zaten cevher üretmiyor.
+ */
+async function claimFind(userId: string, value: { channel: { id: string; name: string; speed: number }; mine: typeof sharedMines.$inferSelect }) {
+  const now = Date.now();
+  const [mine] = await getDb().select().from(sharedMines).where(eq(sharedMines.id, value.mine.id)).limit(1);
+  if (!mine) return response({ error: "Ortak saha bulunamadı." }, 404);
+  const row = await findFor(mine, value.channel.speed, now);
+  if (!row) return response({ error: "Damar hâlâ veriyor; ortaya çıkmış bir fırsat yok." }, 409);
+  if (row.status !== "pending") return response({ error: "Fırsat çoktan alınmış." }, 409);
+  const [crew] = await getDb().select({ workers: sharedMineWorkers.workers }).from(sharedMineWorkers)
+    .where(and(eq(sharedMineWorkers.mineId, mine.id), eq(sharedMineWorkers.userId, userId))).limit(1);
+  if (!crew || crew.workers <= 0) return response({ error: "Fırsata ulaşmak için madende işçiniz olmalı." }, 409);
+
+  const claimed = await getDb().update(sharedMineFinds)
+    .set({ status: "claimed", claimedBy: userId, claimedAt: now })
+    .where(and(eq(sharedMineFinds.id, row.id), eq(sharedMineFinds.status, "pending")))
+    .returning({ id: sharedMineFinds.id });
+  if (!claimed.length) return response({ error: "Başka bir sancak sizden önce ulaştı." }, 409);
+
+  const find = mineFindOf(`${row.channelId}:${row.depletedAt}`);
+  let written = false;
+  for (let attempt = 0; attempt < 2 && !written; attempt += 1) {
+    const [save] = await getDb().select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
+    const game = save ? parseStoredSave(save.gameState) : null;
+    if (!save || !game) break;
+    const next: Game = {
+      ...(game as Game),
+      resources: { ...game.resources, [find.resource]: Math.min(CAPS.resource, game.resources[find.resource] + find.amount) },
+      notices: [{ kind: "FIRSAT", text: `${find.label}: ${find.text} ${find.amount} ${find.resource} ambara indirildi.`, at: now }, ...game.notices].slice(0, 20),
+    };
+    written = await writeSaveIfUnchanged(userId, save.revision, next);
+  }
+  if (!written) {
+    // Ödül yazılamadı: fırsat beklemeye geri döner, kimse kaybetmez.
+    await getDb().update(sharedMineFinds).set({ status: "pending", claimedBy: null, claimedAt: null }).where(eq(sharedMineFinds.id, row.id));
+    return response({ error: "Krallık kaydı bu arada değişti; fırsat beklemede kaldı, tekrar deneyin." }, 409);
+  }
+  return response({ claimed: true, kind: find.kind, label: find.label, resource: find.resource, amount: find.amount });
 }
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return response({ error: "Oturum gerekli." }, 401);
-  const body = await request.json() as { channelId?: string; action?: "join" | "leave"; workers?: number };
+  const body = await request.json() as { channelId?: string; action?: "join" | "leave" | "claim_find"; workers?: number };
   if (!body.channelId) return response({ error: "Channel gerekli." }, 400);
   const value = await context(user.id, body.channelId);
   if (!value) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
+  if (body.action === "claim_find") return claimFind(user.id, value);
   // İşçilerini çeken oyuncuya küsuratı da ödenir: satır birazdan silinecek,
   // beklemeye bırakılan cevher onunla birlikte yok olurdu.
   await tickMine(value.mine, value.channel.speed, { now: Date.now(), forceUserId: body.action === "leave" ? user.id : null });
