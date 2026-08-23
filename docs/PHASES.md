@@ -107,3 +107,31 @@ Bu tabloyu güncellerken:
 - Akıllı Halk projesi dışında yeni bir proje/faz dizisi başladığında: §2'nin
   altına yeni bir bölüm (§4, §5, ...) olarak ekleyin — mevcut tabloyu
   değiştirmeyin.
+
+## 4. "Canlı Dünya ve Halk AI" projesi
+
+Bu dizi, `docs/plans/2026-08-22-canli-dunya-ve-halk-ai-vizyonu.md` içinde
+karara bağlanmış 26 maddenin (Fikir 0-25) hayata geçirilmesini takip eder:
+krallığın izole bir tabelalar tablosu olmaktan çıkıp channel'ın geri kalanıyla
+konuşan, kıyaslanan ve etkileşen bir yere dönüşmesi.
+
+**Numaralandırma notu:** Bu dizide faz numarası UYDURULMAZ; her madde plan
+belgesindeki **Fikir numarasıyla** anılır. İkinci bir numaralandırma açmak,
+Akıllı Halk projesinde yaşanan "hangi commit hangi faza denk geliyordu"
+belirsizliğinin (bkz. §2'nin kaynak notu) aynısını üretirdi.
+
+**Kapsam notu:** Aşağıdaki tablo yalnızca TAMAMLANANLARI listeler. Açık
+maddelerin tanımı, gerekçesi ve kararları plan belgesinde yaşar; buraya
+kopyalanmaz (tek-doğru-kaynak). Bir madde bittiğinde tabloya gerçek commit
+hash'iyle yeni bir satır eklenir.
+
+| Madde | Durum | İçerik | Commit(ler) | Dosyalar |
+| --- | --- | --- | --- | --- |
+| **Fikir 1** | ✅ TAMAM (kesin) | **Channel ortalamasını panelde göstermek.** "Diyar" sekmesi, Kralın dört ölçütünü (rıza, yiyecek istihkakı, vergi oranı, muhalefet baskısı) channel'ın ANONİM ortalamasıyla yan yana gösteriyor. Kimin hangi değere sahip olduğu istemciye hiç inmez; kuruluş koruması süren krallıklar ve Kralın kendisi ortalamaya girmez; aday sayısı gizlilik alt sınırının (3 sancak) altındaysa sunucu sayı üretmez. AI çağrısı yok, yeni DB turu yok — `GET /api/world`'ün zaten okuduğu satırlar üzerinde çalışır. | `2ada90d` | `engine/comparison.ts` (ölçüt listesi, "iyi" yönü, alt sınır), `server/world-projection.ts` (`channelAverages`), `app/api/world/route.ts`, `components/KingdomGame.tsx`, `app/game.css`, `tests/channel-averages.test.ts` |
+
+Fikir 1'in agregasyonu bilinçli olarak **paylaşılan altyapı** hâlinde
+yazıldı: plan belgesinin kararlarına göre Fikir 13 (sessiz kıyaslama, Halkın
+kendi tarafında bir talep olarak) ve Fikir 24 (channel-geneli pazar endeksi)
+kendi ortalamalarını hesaplamaz, `channelAverages`'ı çağırır. O iki madde
+uygulanırken ilk bakılacak yer `server/world-projection.ts` ve
+`engine/comparison.ts`.
