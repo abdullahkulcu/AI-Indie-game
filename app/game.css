@@ -164,3 +164,23 @@
 /* HALK gövdesi kaydırılabilir olmalı: .panel-content overflow:hidden olduğu
    için yükseklik ve kaydırma verilmeyince nüfus defteri ve büyütme
    seçenekleri panelin altında erişilemez kalıyordu. ORDU zaten kaydırıyordu. */
+
+/* ---- Channel kıyası (Diyar sekmesi) ----
+   Anonim ortalama: kimin hangi değere sahip olduğu hiç gelmez. Yön ölçütten
+   ölçüte değişir (yüksek vergi KÖTÜ), o yüzden renk kararı motordan gelen
+   `compareVerdict` sınıfıyla verilir — burada yalnızca boyanır. Rakamlar
+   tabular-nums ile hizalanır ki iki kolon göz kaydırmadan okunsun. */
+.channel-compare{background:#f2e7cb;border:1px solid #cbb488;border-left:3px solid #a9834a;padding:10px 12px}
+.compare-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.compare-head span{font:600 7px JetBrains Mono;letter-spacing:.14em;color:#8c302f}
+.compare-head b{font:600 8px JetBrains Mono;letter-spacing:.1em;color:#7a6540;font-variant-numeric:tabular-nums}
+.compare-grid{display:grid;grid-template-columns:1fr auto auto;gap:5px 12px;align-items:baseline;margin-top:9px}
+.compare-grid i{font-style:normal;font-size:.58rem;letter-spacing:.12em;color:#7a6540}
+.compare-grid i:not(:first-of-type){text-align:right}
+.compare-grid span{font-size:.72rem;color:#4a3a20}
+.compare-grid b,.compare-grid em{text-align:right;font-variant-numeric:tabular-nums}
+.compare-grid b{font-size:.92rem;font-weight:700;color:#3a2f1d}
+.compare-grid b.better{color:#3f6b22}
+.compare-grid b.worse{color:#8f3512}
+.compare-grid em{font-style:normal;font-size:.82rem;color:#7a6540}
+.compare-note{display:block;margin-top:8px;font-size:.66rem;line-height:1.5;color:#7a6540}

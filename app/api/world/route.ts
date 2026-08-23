@@ -2,7 +2,7 @@ import { and, count, desc, eq, gt, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { agitations, channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
+import { channelAverages, intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
 import { sendAgitation } from "../../../server/agitation-desk";
 import { AGITATION, agitationDayStart } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
@@ -88,6 +88,11 @@ export async function GET(request: Request) {
     }];
   });
   return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length,
+    // KIYAS: channel'ın anonim ortalaması. Yukarıdaki `rows` sorgusu channel'ın
+    // tüm aktif üyelerini zaten okuduğu için ikinci bir DB turu yok; kimin hangi
+    // değere sahip olduğu istemciye inmez, yalnızca ortalama iner (ve aday
+    // sayısı gizlilik alt sınırının altındaysa o bile inmez).
+    compare: channelAverages({ channelName: channel.name, excludeUserId: user.id, rows, now }),
     // Dış kese: bedeli, günlük tavanı ve Kralın kendi opt-out durumu. Sabitler
     // motordan okunur; panel kendi kopyasını tutmaz.
     agitation: {
