@@ -22,7 +22,7 @@ import { reputationChange } from "../../../engine/diplomacy";
 import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta } from "../../../server/negotiation-brief";
 // Sağlayıcı çağrısı paylaşılan modülden gelir; bu dosyada artık `fetch` yok.
 import { callProvider } from "../../../server/llm-provider";
-import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
+import { displayNameOf, expireStaleTables, toEngine } from "../../../server/negotiation-desk";
 // PROPAGANDA (plan belgesi Fikir 15): dış kesenin defter satırı ve kişilik
 // çarpanı. Kimlik bilgisi TEK kapıdan çözülür (`populaceCredentialFor`).
 import { agitationNotice, propagandaNarrator } from "../../../server/populace-narrator";
@@ -203,6 +203,11 @@ type TributeRound = { deals: number; paid: number; missed: number; error: string
 
 async function answerNegotiations(now: number): Promise<DeskReport[]> {
   const db = getDb();
+  // Süresi geçmiş masaları KAPAT. Aşağıdaki sorgu onları zaten atlıyordu, ama
+  // atlamak durumu YAZMIYOR: masa Kralın defterinde "açık" kalıyor ve
+  // temizlenemeyen bir "cevap bekliyor" rozeti bırakıyordu. Süpürme channel
+  // geneli, çünkü gece vardiyası tek Kralın defterine değil bütün sezona bakar.
+  await expireStaleTables(now);
   const rows = await db.select({ table: negotiations, channelName: channels.name })
     .from(negotiations)
     .innerJoin(channels, eq(channels.id, negotiations.channelId))

@@ -410,6 +410,56 @@ export const SIGNABLE_STATUS = "awaiting_king" as const;
  */
 export const DECLINABLE_STATUSES = ["open", SIGNABLE_STATUS] as const;
 
+/**
+ * SÜRESİ DOLABİLEN masa durumları — `agreed` ve `declined` NİHAİDİR, süre
+ * dolsa da onlara dokunulmaz (imzalı anlaşma yürürlükte kalır).
+ *
+ * Aynı liste `DECLINABLE_STATUSES` ile birebir aynı; ayrı bir sabit olarak
+ * duruyor çünkü ikisi AYNI ŞEY DEĞİL: biri "Kral bu masayı reddedebilir mi",
+ * öteki "zaman bu masayı kapatır mı". İleride biri değişirse ötekini sessizce
+ * sürüklemesin.
+ */
+export const EXPIRABLE_STATUSES = ["open", SIGNABLE_STATUS] as const;
+
+/**
+ * SÜRE DOLDU MU? `canSpeak`'in eşiğiyle AYNI karşılaştırma (`now >= expiresAt`).
+ *
+ * NEDEN VAR: bu kural bugüne kadar yalnızca `canSpeak` içinde yaşıyordu, yani
+ * yalnızca "konuşmayı engelle" tarafı vardı; masanın DURUMUNU yazan hiçbir yol
+ * yoktu. Sonuç görünür bir hataydı: süresi geçmiş masa Kralın defterinde `open`
+ * kalıyor, arayüz ona tur sayacı gösteriyor ve "cevap bekleyen masa" sayacında
+ * SONSUZA KADAR duruyordu — temizlenemeyen bir bildirim. Kural artık tek yerde
+ * ve hem engelleyen hem yazan taraf onu okuyor.
+ */
+export function isExpired(
+  negotiation: Pick<Negotiation, "status" | "expiresAt">,
+  now: number,
+): boolean {
+  if (!(EXPIRABLE_STATUSES as readonly NegotiationStatus[]).includes(negotiation.status)) return false;
+  return now >= negotiation.expiresAt;
+}
+
+/**
+ * MASA ZAMANLA KAPANDI MI? `isExpired`ten FARKLI bir soru ve ikisini
+ * karıştırmak gerçek bir hataya yol açtı, o yüzden ayrı duruyorlar:
+ *
+ *  · `isExpired` GEÇİŞ kuralıdır: "süpürme bu satırı şimdi kapatmalı mı?"
+ *    Zaten `expired` damgalanmış satır için `false` döner — kapatılacak bir
+ *    şey kalmamıştır.
+ *  · `isTimedOut` DURUM sorusudur: "bu masa zamanla bitmiş mi?" Damgalanmış
+ *    satır için de `true` döner.
+ *
+ * Arayüz yalnızca `isExpired`i okuduğunda, damgalanmış masaya "SÜRESİ DOLDU"
+ * yerine tur sayacı gösteriyordu — yani süpürme çalıştıktan sonra hata geri
+ * geliyordu. Gösterim ve sayaçlar bunu okur.
+ */
+export function isTimedOut(
+  negotiation: Pick<Negotiation, "status" | "expiresAt">,
+  now: number,
+): boolean {
+  return negotiation.status === "expired" || isExpired(negotiation, now);
+}
+
 /** Bu masa reddedilebilir mi? Uçtaki koşullu UPDATE de aynı listeden türer. */
 export function canDecline(status: NegotiationStatus): TurnDecision {
   if ((DECLINABLE_STATUSES as readonly NegotiationStatus[]).includes(status)) return { ok: true };

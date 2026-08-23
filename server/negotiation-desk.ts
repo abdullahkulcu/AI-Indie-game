@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, or } from "drizzle-orm";
 import { getDb } from "../db";
 import { gameSaves, negotiationMessages, negotiations } from "../db/schema";
-import { sideOf, type Negotiation, type Side, type Terms } from "../engine/negotiation";
+import { EXPIRABLE_STATUSES, sideOf, type Negotiation, type Side, type Terms } from "../engine/negotiation";
 import { projectPublicKingdom } from "./world-projection";
 import { briefTable, type DeskMessage, type TableBrief } from "./negotiation-brief";
 
@@ -30,9 +30,37 @@ export function toEngine(row: typeof negotiations.$inferSelect): Negotiation {
   };
 }
 
+/**
+ * SÜRESİ GEÇMİŞ MASALARI KAPATIR. Tek bir koşullu UPDATE; kapatılacak bir şey
+ * yoksa hiçbir satıra dokunmaz, yani okuma yolundan çağrılması güvenlidir.
+ *
+ * NEDEN OKUMA YOLUNDAN DA ÇAĞRILIYOR: gece vardiyası saatte bir dönüyor, ama
+ * Kral masasını açtığı anda doğruyu görmeli. Aksi hâlde süresi biten masa
+ * saatlerce "cevap bekliyor" rozetiyle duruyordu.
+ *
+ * Hangi durumların süresi dolabileceğine motor karar verir
+ * (`EXPIRABLE_STATUSES`): `agreed` ve `declined` NİHAİDİR, imzalı anlaşma
+ * yürürlükte kalır.
+ */
+export async function expireStaleTables(now: number, scope: { channelId?: string } = {}) {
+  const where = [
+    inArray(negotiations.status, [...EXPIRABLE_STATUSES]),
+    lte(negotiations.expiresAt, now),
+  ];
+  if (scope.channelId) where.push(eq(negotiations.channelId, scope.channelId));
+  const closed = await getDb().update(negotiations)
+    .set({ status: "expired" })
+    .where(and(...where))
+    .returning({ id: negotiations.id });
+  return closed.length;
+}
+
 /** Bu Kralın masaları, kanonik sırada (en son konuşulan en üstte). */
 export async function loadTablesFor(userId: string, channelId: string): Promise<DeskRow[]> {
   const db = getDb();
+  // Okumadan ÖNCE kapat: Kral defterini açtığı anda süresi geçmiş masayı
+  // "açık" görmesin. Kapatılacak bir şey yoksa bu çağrı hiçbir satıra dokunmaz.
+  await expireStaleTables(Date.now(), { channelId });
   const rows = await db.select().from(negotiations)
     .where(and(
       eq(negotiations.channelId, channelId),

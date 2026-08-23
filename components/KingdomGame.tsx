@@ -32,7 +32,7 @@ import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
 // Müzakere sınırları TEK kaynaktan gelir. Panelde elle yazılan bir tavan,
 // sunucunun uyguladığı tavandan sapınca Kral reddedilecek bir şart öneriyor.
-import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, carriesTribute, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
+import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, carriesTribute, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
 import type { Game, GameAction, TerrainId as EngineTerrainId } from "@/engine/types";
 
 
@@ -165,7 +165,7 @@ export default function KingdomGame(){
     // Karşı taraftan gelen en yeni sözün zamanı; büyüdüyse Kralı uyarırız.
     const latest=Math.max(0,...tables.flatMap(table=>table.messages.filter(message=>!message.mine).map(message=>message.at)));
     const bekleyenMasa=tables.filter(entry=>entry.canAccept
-      ||(entry.status!=="agreed"&&entry.status!=="declined"&&entry.messages.length>0&&!entry.messages[entry.messages.length-1].mine));
+      ||(entry.status!=="agreed"&&entry.status!=="declined"&&!isTimedOut({status:entry.status as NegotiationStatus,expiresAt:entry.expiresAt},Date.now())&&entry.messages.length>0&&!entry.messages[entry.messages.length-1].mine));
     if(lastEnvoySeen.current===null){
       // Hesaba ilk girişte de haber ver: rozet tek başına gözden kaçıyordu.
       if(bekleyenMasa.length)setToast(`Elçilikte sizi bekleyen ${bekleyenMasa.length} masa var.`);
@@ -454,7 +454,7 @@ async function openNegotiation(){
   // Rozet yalnızca imza bekleyeni sayıyordu; karşı taraftan gelen ve
   // cevaplanmamış mesaj hiç görünmüyordu, Kral masayı açmadan fark etmiyordu.
   const bekleyen=negotiationTables.filter(table=>table.canAccept
-    ||(table.status!=="agreed"&&table.status!=="declined"&&table.messages.length>0&&!table.messages[table.messages.length-1].mine)).length;
+    ||(table.status!=="agreed"&&table.status!=="declined"&&!isTimedOut({status:table.status as NegotiationStatus,expiresAt:table.expiresAt},now)&&table.messages.length>0&&!table.messages[table.messages.length-1].mine)).length;
   const özet=(terms:{resource?:string;tributeAmount?:number;tributeRate?:number;hours?:number;everyHours?:number}|null)=>{
     if(!terms)return "";
     const kaynak=(resourceLabels.find(([id])=>id===terms.resource)?.[1]??terms.resource??"altın").toLocaleLowerCase("tr-TR");
@@ -510,7 +510,7 @@ async function openNegotiation(){
      const haracVar=carriesTribute(table.topic as NegotiationTopic);
      const form=envoyTerm&&envoyTerm.tableId===table.id?envoyTerm:null;
      return <article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
-      <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{table.status==="awaiting_king"?"ŞART SUNULDU":table.status==="agreed"?"ANLAŞILDI":table.status==="declined"?"REDDEDİLDİ":`${table.turns}/${envoyLimits.maxTurns} söz`}</small></div>
+      <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{table.status==="awaiting_king"?"ŞART SUNULDU":table.status==="agreed"?"ANLAŞILDI":table.status==="declined"?"REDDEDİLDİ":isTimedOut({status:table.status as NegotiationStatus,expiresAt:table.expiresAt},now)?"SÜRESİ DOLDU":`${table.turns}/${envoyLimits.maxTurns} söz`}</small></div>
       <div className="envoy-log">{table.messages.slice(-4).map((message,i)=><p className={message.mine?"mine":""} key={i}>{message.body}</p>)}</div>
       {table.proposed&&<div className="envoy-terms"><span>SUNULAN ŞART</span><b>{özet(table.proposed)}</b></div>}
       {table.canAccept&&<div className="envoy-actions">
