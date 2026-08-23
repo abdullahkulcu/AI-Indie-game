@@ -3,6 +3,7 @@ import { and, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
 import { capacityFor, rates, tick } from "../../../engine/tick";
 import { deriveLedgerEvents } from "../../../engine/ledger";
+import { refreshPopulaceVoice, type PopulaceRound } from "../../../server/populace-round";
 import { armySize, rationsOf } from "../../../engine/populace";
 import { appendToLedger } from "../../../server/general-ledger";
 import type { Game, GameAction, Key } from "../../../engine/types";
@@ -865,6 +866,12 @@ export async function POST(request: Request) {
   let migrationRound = { due: 0, landed: 0, lost: 0 };
   try { migrationRound = await settleMigrations(now); }
   catch { migrationRound = { due: 0, landed: 0, lost: 0 }; }
+  // HALKIN SESİ: talep defteri artık Kralın General'le konuşmasını beklemiyor.
+  // Aynı sarma gerekçesi. Bu tur MODEL ÇAĞIRMAZ, sıfır token harcar
+  // (bkz. server/populace-round.ts dosya başı).
+  let populaceRound: PopulaceRound = { considered: 0, spoke: 0, error: null };
+  try { populaceRound = await refreshPopulaceVoice(now); }
+  catch (error) { populaceRound = { considered: 0, spoke: 0, error: `Halkın sesi turu düştü: ${error instanceof Error ? error.message : "bilinmiyor"}` }; }
   // Kral çevrimdışıyken masada bekleyen cevap; imza atılmaz, yalnızca konuşulur.
   let desks: DeskReport[] = [];
   try { desks = await answerNegotiations(now); }
@@ -883,6 +890,7 @@ export async function POST(request: Request) {
     agitations: purses,
     migrations: migrationRound,
     negotiations: { spoke: desks.filter(desk => desk.spoke).length, reports: desks },
+    populace: populaceRound,
     acted: reports.filter(report => report.acted).length,
     llmCalls: reports.filter(report => report.tokensUsed).length + desks.filter(desk => desk.tokensUsed).length,
     reports,

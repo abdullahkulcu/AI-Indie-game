@@ -40,6 +40,32 @@ export type VoiceContext = VoiceSignals & { channelSpeed: number };
  * Kral'a gösterilmiyor, onun için token yakmak boşa masraf olurdu ("değirmen
  * dersi"nin maliyet tarafı).
  */
+/**
+ * AÇIK TALEPLERİ SALT OKUR — yazmaz, model çağırmaz.
+ *
+ * NEDEN AYRI: `syncPopulaceDemands` defteri EŞİTLER (talep açar/kapatır ve
+ * Halk-AI varsa cümle üretir). O iş pahalıdır ve Kralın turuna ya da saatlik
+ * cron turuna bağlıdır. Ama arayüzün halkın sesini GÖSTERMESİ için yazmaya
+ * ihtiyacı yok: 10 saniyede bir dönen dünya yoklamasına eşitleme koymak hem
+ * token yakar hem defteri gereksiz döver.
+ *
+ * `openedAt` boş olan satır Kral'a GÖSTERİLMEZ: aday, süre şartını henüz
+ * geçmemiştir. Eşik kararı eşitleme turunda verilir, burada yalnızca sonucu
+ * okunur.
+ */
+export async function loadOpenDemands(userId: string): Promise<OpenDemand[]> {
+  const rows = await getDb().select().from(populaceDemands).where(eq(populaceDemands.userId, userId));
+  return rows
+    .filter(row => row.openedAt !== null)
+    .map(row => ({
+      kind: row.kind as DemandKind,
+      voice: row.voice as OpenDemand["voice"],
+      text: row.text,
+      severity: row.severity as OpenDemand["severity"],
+      since: row.openedAt as number,
+    }));
+}
+
 export async function syncPopulaceDemands(
   userId: string,
   context: VoiceContext,

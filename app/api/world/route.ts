@@ -10,6 +10,7 @@ import { channelPriceIndex, isTraded } from "../../../engine/market";
 import { INTEL_MISSIONS, intelChances, intelTravelMs, resolveIntelMission, type IntelMissionKind } from "../../../engine/intel";
 import type { Game, TradeKey } from "../../../engine/types";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
+import { loadOpenDemands } from "../../../server/populace-voice";
 
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
@@ -149,6 +150,18 @@ export async function GET(request: Request) {
      * bildirdiği hiçbir sayıya bakmaz.
      */
     intel: { deepCost: INTEL_MISSIONS.deep.goldCost },
+    /**
+     * HALKIN SESİ. Bugüne kadar bu liste istemciye YALNIZCA `/api/general`
+     * üzerinden, yani Kral General'e bir mesaj gönderdiğinde ulaşıyordu —
+     * dolayısıyla General'i hiç bağlamayan Kral halkın sesini HİÇ duymuyordu.
+     * Kuruluş akışı "General sessizken başla" seçeneğini açıkça sunduğu için
+     * bu istisnai bir durum değil, desteklenen bir oyun biçimiydi.
+     *
+     * SALT OKUMA: burada talep açılmaz/kapanmaz ve model çağrılmaz. Eşitleme
+     * Kralın turunda ve saatlik cron turunda yapılır
+     * (bkz. server/populace-round.ts).
+     */
+    populaceDemands: await loadOpenDemands(user.id),
     // Dış kese: bedeli, günlük tavanı ve Kralın kendi opt-out durumu. Sabitler
     // motordan okunur; panel kendi kopyasını tutmaz.
     agitation: {

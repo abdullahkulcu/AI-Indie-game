@@ -1,6 +1,11 @@
 import { COMPARE_BETTER, COMPARE_METRICS, type CompareMetric } from "./comparison";
 import { FACTION_THRESHOLDS } from "./faction";
 import { SOLDIER_THRESHOLDS } from "./populace";
+import { factionLeaderName, factionPressureOf } from "./faction";
+import { commonsOf, commonsReference, livingCost } from "./market";
+import { armySize, rationsOf } from "./populace";
+import { servedRations } from "./tick";
+import type { Game } from "./types";
 
 /**
  * HALKIN SESİ ve GARNİZON VETOSU.
@@ -753,4 +758,52 @@ export function garrisonMood(unrest: number, army: number): GarrisonMood {
     return { id: "demanding", label: "Maaş istiyor", note: "Adamlar maaşını istiyor: yeni asker eğitimi geri çevrilir." };
   }
   return { id: "steady", label: "Sakin", note: "Kışla sakin; bütün emirler yürür." };
+}
+
+/**
+ * KAYITTAN HALKIN SESİ SİNYALLERİ — SAF.
+ *
+ * Motor katmanında duruyor çünkü hiçbir yan etkisi yok: girdisi bir krallık
+ * kaydı, çıktısı `derivePopulaceDemands`in beklediği sinyaller. Veritabanı
+ * okumaz, saate bakmaz.
+ *
+ * NEDEN VAR: bu sinyaller bugüne kadar YALNIZCA istemcinin gönderdiği bağlamdan
+ * kuruluyordu, yani halkın sesi Kralın General'e mesaj göndermesine bağlıydı.
+ * Sunucunun kendi turu (`server/populace-round.ts`) aynı sinyalleri kayıttan
+ * üretebilmek zorunda — ve İKİ YOL AYNI SAYIYI ÜRETMEK ZORUNDA, yoksa aynı
+ * krallık için talep bir yolda açılıp ötekinde açılmaz. Bu yüzden yuvarlamalar
+ * bile istemci bağlamının yaptığıyla birebir aynı tutulur.
+ */
+export function voiceSignalsOf(
+  game: Game,
+  extras: { channelSpeed: number; comparison: VoiceSignals["comparison"] | null },
+): VoiceSignals & { channelSpeed: number } {
+  const army = armySize(game.units ?? {});
+  const pressure = factionPressureOf(game);
+  const rations = rationsOf(game);
+  // Fiilen dağıtılan pay: ambar/hazine yetmiyorsa ilan edilenin altında kalır.
+  // Pencere bir saat — `servedRations`ın varsayılanı ve istemci bağlamının da
+  // kullandığı değer. İKİ YOL AYNI SAYIYI ÜRETMEK ZORUNDA, yoksa aynı krallık
+  // için talep bir yolda açılıp ötekinde açılmaz.
+  const served = servedRations(game);
+  return {
+    servedFood: Math.round(served.food),
+    nominalFood: rations.food,
+    nominalPay: rations.soldierPay,
+    servedPay: Math.round(served.pay),
+    livingCost: livingCost(commonsOf(game), commonsReference(game.population)),
+    taxRate: game.taxRate,
+    // İstemci bağlamı da bunu `Math.round(g.popularity)` olarak gönderiyor;
+    // iki yol aynı sayıyı üretsin diye yuvarlama burada da yapılır.
+    popularity: Math.round(game.popularity),
+    population: game.population,
+    capacity: game.capacity,
+    soldierUnrest: game.soldierUnrest ?? 0,
+    army,
+    factionPressure: Math.round(pressure),
+    factionLeader: factionLeaderName(game.kingdomName, game.foundedAt),
+    buildings: game.buildings,
+    channelSpeed: extras.channelSpeed,
+    comparison: extras.comparison ?? undefined,
+  };
 }
