@@ -1,0 +1,953 @@
+<title>Demirkale Sekme Taslakları</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+/* ============================================================
+   İKİ AYRI PALET
+   1) --d-*  : BELGENİN kendisi. "Çalışma masası". Temaya duyarlı.
+   2) --pk-* : TASLAKLARIN içi. Oyunun parşömeni. Oyunun kendisi tek
+               görünüme bağlı olduğu için bu grup temayla DEĞİŞMEZ —
+               masa kararsa kâğıt kararmaz, üzerinde yatar.
+   Renkler app/game.css ve app/globals.css'ten alındı.
+   ============================================================ */
+:root{
+  /* masa — açık tema: kireç badanalı taş, parşömenden BELİRGİN olarak daha gri */
+  --d-bg:#b7b0a1;
+  --d-bg-2:#c3bcae;
+  --d-ink:#241d15;
+  --d-ink-soft:#4c4335;
+  --d-ink-faint:#665c4c;
+  --d-rule:#9a9284;
+  --d-brass:#7d5c1d;
+  --d-wine:#6d2028;
+  --d-sheet-shadow:rgba(20,14,8,.34);
+  --d-good:#4e6b2a;
+
+  /* parşömen takımı — SABİT */
+  --pk-paper:#e9dbb8;
+  --pk-paper-2:#f2e7cb;
+  --pk-paper-3:#dfcfaa;
+  --pk-ink:#211912;
+  --pk-ink-2:#3a2f1d;
+  --pk-ink-3:#5c4a2c;
+  --pk-mute:#7a6540;
+  --pk-rule:#c1ae85;
+  --pk-rule-2:#cbb488;
+  --pk-dark:#2c221b;
+  --pk-dark-ink:#e5d2ad;
+  --pk-brass:#c2933e;
+  --pk-brass-2:#d2a74f;
+  --pk-wine:#6d2028;
+  --pk-wine-2:#5b2427;
+  --pk-quiet:#3f6b22;
+  --pk-martial:#8f3512;
+  --pk-warn:#8a5a1c;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --d-bg:#15110d;
+    --d-bg-2:#1e1813;
+    --d-ink:#e6dbc3;
+    --d-ink-soft:#bfb29a;
+    --d-ink-faint:#948872;
+    --d-rule:#3b3226;
+    --d-brass:#cfa457;
+    --d-wine:#c8746f;
+    --d-sheet-shadow:rgba(0,0,0,.62);
+    --d-good:#98b86e;
+  }
+}
+:root[data-theme="dark"]{
+  --d-bg:#15110d;
+  --d-bg-2:#1e1813;
+  --d-ink:#e6dbc3;
+  --d-ink-soft:#bfb29a;
+  --d-ink-faint:#948872;
+  --d-rule:#3b3226;
+  --d-brass:#cfa457;
+  --d-wine:#c8746f;
+  --d-sheet-shadow:rgba(0,0,0,.62);
+  --d-good:#98b86e;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--d-bg);
+  color:var(--d-ink);
+  font:400 16px/1.62 "Spectral",Georgia,"Times New Roman",serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1140px;margin:0 auto;padding:0 24px 96px}
+
+/* ---------- belge tipografisi ---------- */
+.eyebrow{
+  font:500 10px/1 "JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.24em;text-transform:uppercase;color:var(--d-brass);margin:0;
+}
+h1{
+  font:600 clamp(34px,5.4vw,60px)/1.04 "Cinzel","Palatino Linotype",Palatino,Georgia,serif;
+  letter-spacing:.02em;margin:14px 0 0;text-wrap:balance;
+}
+h2{
+  font:600 clamp(22px,2.6vw,30px)/1.16 "Cinzel","Palatino Linotype",Palatino,Georgia,serif;
+  margin:0;text-wrap:balance;
+}
+h3{
+  font:600 15px/1.3 "Cinzel","Palatino Linotype",Palatino,Georgia,serif;
+  letter-spacing:.05em;margin:0;
+}
+p{margin:0 0 1em;max-width:66ch}
+p:last-child{margin-bottom:0}
+a{color:var(--d-wine)}
+strong{font-weight:600}
+em.q{font-style:italic;color:var(--d-ink-soft)}
+:focus-visible{outline:2px solid var(--d-brass);outline-offset:3px}
+
+/* ---------- kapak ---------- */
+header.cover{padding:88px 0 40px;border-bottom:1px solid var(--d-rule)}
+.cover .lede{
+  margin-top:26px;font:400 19px/1.6 "Spectral",Georgia,serif;
+  color:var(--d-ink-soft);max-width:64ch;
+}
+.byline{
+  margin-top:30px;display:flex;flex-wrap:wrap;gap:8px 26px;
+  font:400 11px/1.5 "JetBrains Mono",ui-monospace,monospace;
+  letter-spacing:.1em;color:var(--d-ink-faint);
+}
+.byline b{color:var(--d-ink-soft);font-weight:500}
+
+/* ---------- yargı tablosu ---------- */
+.verdicts{margin:56px 0 0;border-top:1px solid var(--d-rule)}
+.vrow{
+  display:grid;grid-template-columns:126px 96px 1fr;gap:0 20px;align-items:baseline;
+  padding:14px 0;border-bottom:1px solid var(--d-rule);
+}
+.vrow>.tab{
+  font:500 12px/1.4 "JetBrains Mono",ui-monospace,monospace;
+  letter-spacing:.14em;color:var(--d-ink);
+}
+.chip{
+  justify-self:start;
+  font:500 9px/1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.14em;
+  padding:5px 7px;border:1px solid currentColor;white-space:nowrap;
+}
+.chip.keep{color:var(--d-good)}
+.chip.fix{color:var(--d-brass)}
+.chip.kill{color:var(--d-wine)}
+.vrow>.say{font-size:15px;line-height:1.5;color:var(--d-ink-soft)}
+.vrow>.say b{color:var(--d-ink);font-weight:600}
+
+/* ---------- bölüm ---------- */
+section.case{padding:76px 0 0}
+.case-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px}
+.case-head .num{
+  font:500 11px/1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.2em;
+  color:var(--d-brass);
+}
+.case-lede{margin-top:18px;color:var(--d-ink-soft);font-size:17px}
+.case-lede b{color:var(--d-ink);font-weight:600}
+
+/* ---------- karşılaştırma ızgarası ---------- */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:34px;margin-top:34px;align-items:start}
+@media (max-width:900px){.compare{grid-template-columns:1fr}}
+.side{min-width:0}
+.side>figcaption{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--d-rule);
+}
+.side>figcaption>b{
+  font:500 11px/1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.18em;
+  color:var(--d-ink);
+}
+.side>figcaption>span{
+  font:400 11px/1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.08em;
+  color:var(--d-ink-faint);
+}
+.side.now>figcaption>b{color:var(--d-ink-faint)}
+.side.next>figcaption>b{color:var(--d-wine)}
+
+/* gerekçe */
+.why{
+  margin-top:30px;padding:20px 0 0;border-top:2px solid var(--d-ink);
+  display:grid;grid-template-columns:auto 1fr;gap:0 22px;
+}
+.why>span{
+  font:500 10px/1.6 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.2em;
+  color:var(--d-brass);white-space:nowrap;
+}
+.why p{grid-column:2;font-size:16px;color:var(--d-ink-soft)}
+.why p b{color:var(--d-ink);font-weight:600}
+@media (max-width:640px){.why{grid-template-columns:1fr;gap:10px}.why p{grid-column:1}}
+
+/* ============================================================
+   PARŞÖMEN TASLAK TAKIMI  (.mk-*)
+   Konsey paneli oyunda 388 px genişliğinde ve sabit. Taslaklar o
+   ölçüde çizildi; yalnızca en küçük mono etiketler bu sayfada
+   okunabilsin diye ~1 px büyütüldü.
+   ============================================================ */
+.mk{
+  width:100%;max-width:392px;
+  background:linear-gradient(135deg,#eadfbe,#d5c39d);
+  border:1px solid #bd934d;
+  box-shadow:0 12px 30px var(--d-sheet-shadow),inset 0 0 0 4px #eaddbc;
+  color:var(--pk-ink);
+  font:400 12px/1.5 "Spectral",Georgia,serif;
+  padding:5px;
+}
+.mk *{box-sizing:border-box}
+.mk-inner{background:transparent}
+
+/* sekme şeridi */
+.mk-tabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));height:34px;border-bottom:1px solid #9b7d50}
+.mk-tabs i{
+  display:grid;place-items:center;border-right:1px solid #b49e75;background:#cbb991;
+  color:#5b4935;font:600 8px/1 "Cinzel",Palatino,Georgia,serif;letter-spacing:.02em;
+  font-style:normal;overflow:hidden;white-space:nowrap;padding:0 2px;
+}
+.mk-tabs i:last-child{border-right:0}
+.mk-tabs i.on{background:#f1e5c4;color:var(--pk-wine);box-shadow:inset 0 -3px var(--pk-wine)}
+.mk-tabs i.sm{font-size:6.6px}
+
+/* koyu bölüm başlığı */
+.mk-head{
+  min-height:34px;padding:7px 11px;display:flex;align-items:center;justify-content:space-between;
+  gap:10px;background:var(--pk-dark);color:var(--pk-dark-ink);
+  font:600 9px/1.3 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.1em;
+}
+.mk-head b{color:var(--pk-brass-2);font-weight:600;white-space:nowrap}
+.mk-head b.q{color:#8fc05c}
+.mk-head b.m{color:#e08a5a}
+
+.mk-body{padding:10px;display:flex;flex-direction:column;gap:9px;background:transparent}
+
+/* genel kart */
+.mk-card{background:var(--pk-paper-2);border:1px solid var(--pk-rule-2);padding:9px 10px}
+.mk-card.wine{background:#f3e4bb;border:0;border-left:3px solid #9b3439}
+.mk-card.dim{background:#e3d7b4}
+.mk-lbl{
+  display:block;font:600 8px/1.4 "JetBrains Mono",ui-monospace,monospace;
+  letter-spacing:.16em;color:var(--pk-mute);
+}
+.mk-lbl.red{color:#8c302f}
+.mk-lbl.q{color:var(--pk-quiet)}
+.mk-lbl.m{color:var(--pk-martial)}
+.mk-t{display:block;font:600 11.5px/1.3 "Cinzel",Palatino,Georgia,serif;color:var(--pk-ink-2);margin:3px 0}
+.mk-p{margin:0;font:400 10.5px/1.5 "Spectral",Georgia,serif;color:var(--pk-ink-3)}
+.mk-s{display:block;margin-top:4px;font:400 9px/1.5 "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+
+/* düğme */
+.mk-b{
+  display:inline-block;border:1px solid #6e4e2d;background:var(--pk-wine);color:#f0dfb7;
+  padding:6px 10px;font:600 8.5px/1 "Cinzel",Palatino,Georgia,serif;letter-spacing:.08em;
+  white-space:nowrap;
+}
+.mk-b.ghost{background:transparent;border-color:#8a714c;color:#58432e}
+.mk-b.off{background:#d9c9a4;border-color:#b6a07a;color:#8b7c62}
+.mk-b.sm{padding:4px 8px;font-size:8px}
+
+/* danışman satırı */
+.mk-adv{display:flex;align-items:center;gap:9px;padding:11px 11px;border-bottom:1px solid #b7a47c;background:transparent}
+.mk-por{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--pk-wine);color:#ead8ae;border:2px solid #c49b4e;font:600 13px "Cinzel",serif;flex:0 0 auto}
+.mk-adv h4{margin:0;font:600 11.5px "Cinzel",Palatino,serif;color:var(--pk-ink-2)}
+.mk-adv small{display:block;margin-top:2px;font:400 8.5px/1.3 "JetBrains Mono",ui-monospace,monospace;color:#786246}
+.mk-dot{margin-left:auto;color:#9c3437;font-size:13px;line-height:1}
+.mk-dot.on{color:#4b875c}
+
+/* boşluk göstergesi */
+.mk-void{
+  border:1px dashed #a8926a;display:grid;place-items:center;text-align:center;padding:22px 14px;
+  background:repeating-linear-gradient(135deg,transparent 0 9px,rgba(120,95,55,.07) 9px 18px);
+}
+.mk-void span{
+  font:400 9px/1.7 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.1em;color:#8b7757;
+}
+
+/* sohbet girişi */
+.mk-form{display:flex;height:38px;border:1px solid #9a7b4b;background:#f3e8ca;margin-top:2px}
+.mk-form span{flex:1;display:flex;align-items:center;padding:0 10px;font:400 10.5px "Spectral",Georgia,serif;color:#9a8763}
+.mk-form i{width:38px;display:grid;place-items:center;background:var(--pk-wine);color:#e9c370;font-size:14px;font-style:normal}
+.mk-form.off{border-color:#b6a07a;background:#ddceac}
+.mk-form.off i{background:#b09a72;color:#e6d9bb}
+
+/* gündem satırı */
+.mk-item{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;background:var(--pk-paper-2);border:1px solid var(--pk-rule-2);padding:9px 10px}
+.mk-item.hot{border-left:3px solid #9b3439}
+.mk-item .mk-say{
+  grid-column:1/-1;margin:5px 0 0;padding:7px 9px;background:#e2d3ae;border-left:2px solid var(--pk-brass);
+  font:italic 400 10.5px/1.5 "Spectral",Georgia,serif;color:#4a3a20;
+}
+
+/* ölçü satırları (istihkak/vergi) */
+.mk-lever{background:var(--pk-paper-2);border:1px solid var(--pk-rule-2);padding:9px 10px}
+.mk-lever .r1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.mk-lever .r1 b{font:600 11.5px "Cinzel",Palatino,serif;color:var(--pk-ink-2)}
+.mk-lever .r1 strong{font:600 15px "Spectral",Georgia,serif;color:#6d3325;font-variant-numeric:tabular-nums}
+.mk-bar{height:5px;background:#dbc9a2;margin:7px 0 5px}
+.mk-bar i{display:block;height:100%;background:linear-gradient(90deg,#8a6a12,#c2a24d)}
+.mk-bar i.g{background:linear-gradient(90deg,#5d8a3a,#7fa84e)}
+.mk-bar i.r{background:linear-gradient(90deg,#9e3f1c,#c15f31)}
+.mk-lever .acts{display:flex;gap:6px;margin-top:7px}
+.mk-lever .acts .mk-b{flex:1;text-align:center}
+.mk-eff{display:flex;justify-content:space-between;gap:8px;font:400 8.5px/1.5 "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+.mk-eff em{font-style:normal;color:var(--pk-quiet)}
+.mk-eff em.bad{color:var(--pk-martial)}
+
+/* rıza manşeti */
+.mk-mood{background:var(--pk-paper-2);border:1px solid var(--pk-rule-2);border-left:4px solid #b26a1f;padding:11px 12px}
+.mk-mood .top{display:flex;align-items:flex-end;gap:10px}
+.mk-mood .big{font:600 30px/1 "Cinzel",Palatino,serif;color:#9c5510;font-variant-numeric:tabular-nums}
+.mk-mood .st{font:600 13px/1.1 "Cinzel",Palatino,serif;color:#9c5510;letter-spacing:.04em}
+.mk-mood .of{margin-left:auto;font:400 8.5px/1.4 "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute);text-align:right}
+.mk-mood p{margin:8px 0 0;font:400 11px/1.55 "Spectral",Georgia,serif;color:#4a3a20}
+.mk-mood p b{color:#8f3512;font-weight:600}
+
+/* zafer terazisi */
+.mk-scale{background:var(--pk-paper-2);border:1px solid var(--pk-rule-2)}
+.mk-scale .beam{display:grid;grid-template-columns:5fr 2fr;border-bottom:1px solid #dccba2}
+.mk-scale .beam>div{padding:10px 11px}
+.mk-scale .beam>div:first-child{border-right:1px solid #dccba2;background:rgba(63,107,34,.07)}
+.mk-scale .beam>div:last-child{background:rgba(143,53,18,.07)}
+.mk-scale .beam .cap{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.mk-scale .beam .cap span{font:600 8px/1.3 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.12em}
+.mk-scale .beam .cap i{font-style:normal;font:400 7.5px/1 "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+.mk-scale .beam b{display:block;margin-top:5px;font:600 26px/1 "Cinzel",Palatino,serif;font-variant-numeric:tabular-nums}
+.mk-scale .beam .q span{color:var(--pk-quiet)} .mk-scale .beam .q b{color:var(--pk-quiet)}
+.mk-scale .beam .m span{color:var(--pk-martial)} .mk-scale .beam .m b{color:var(--pk-martial)}
+.mk-total{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:6px 11px;border-bottom:1px solid #dccba2;background:#e6d8b3}
+.mk-total span{font:400 8px/1.3 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.12em;color:var(--pk-mute)}
+.mk-total b{font:600 13px "Cinzel",Palatino,serif;color:var(--pk-ink-2);font-variant-numeric:tabular-nums}
+.mk-group{padding:0 11px}
+.mk-group>.gh{
+  display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  padding:8px 0 5px;border-bottom:1px solid #d3c096;
+  font:600 8px/1.3 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.14em;
+}
+.mk-group.q>.gh{color:var(--pk-quiet)}
+.mk-group.m>.gh{color:var(--pk-martial);margin-top:6px}
+.mk-line{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #e6d6ae}
+.mk-line:first-of-type{border-top:0}
+.mk-line b{display:block;font:600 10.5px "Cinzel",Palatino,serif;color:var(--pk-ink-2)}
+.mk-line small{display:block;margin-top:2px;font:400 8.5px/1.45 "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+.mk-line strong{font:600 12px "Spectral",Georgia,serif;color:var(--pk-mute);font-variant-numeric:tabular-nums}
+.mk-line strong.gain{color:var(--pk-quiet)}
+.mk-line strong.loss{color:var(--pk-martial)}
+.mk-flat{padding:2px 11px 6px}
+
+/* eski üç sütun */
+.mk-cols3{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid #dccba2;background:var(--pk-paper-2)}
+.mk-cols3>div{padding:9px 8px;border-right:1px solid #dccba2;text-align:center}
+.mk-cols3>div:last-child{border-right:0}
+.mk-cols3 span{display:block;font:400 7.5px/1.3 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.1em;color:var(--pk-mute)}
+.mk-cols3 b{display:block;margin-top:4px;font:600 19px/1 "Cinzel",Palatino,serif;font-variant-numeric:tabular-nums}
+.mk-cols3 .q b{color:var(--pk-quiet)} .mk-cols3 .m b{color:var(--pk-martial)} .mk-cols3 .t b{color:var(--pk-ink-2)}
+
+/* kaynak şeridi + defter satırları */
+.mk-ribbon{display:flex;background:linear-gradient(#e7dab9,#d4c197);border:1px solid #967548;border-left:0;border-right:0}
+.mk-ribbon div{flex:1;padding:8px 6px;border-right:1px solid #bca779;text-align:left;min-width:0}
+.mk-ribbon div:last-child{border-right:0}
+.mk-ribbon span{display:block;font:600 7px/1.2 "JetBrains Mono",ui-monospace,monospace;color:#735c3d;letter-spacing:.06em}
+.mk-ribbon b{display:block;margin-top:2px;font:600 13px "Spectral",Georgia,serif;font-variant-numeric:tabular-nums}
+.mk-ribbon i{font-style:normal;font:400 7px "JetBrains Mono",ui-monospace,monospace;color:#376b4c}
+.mk-led{display:grid;grid-template-columns:1fr auto 54px;align-items:baseline;padding:9px 12px;border-bottom:1px dotted #a99771}
+.mk-led span{font:600 9.5px "Cinzel",Palatino,serif}
+.mk-led strong{font:600 15px "Spectral",Georgia,serif;text-align:right;font-variant-numeric:tabular-nums}
+.mk-led small{text-align:right;font:400 8px "JetBrains Mono",ui-monospace,monospace;color:#3c7653}
+.mk-slider{padding:11px 12px}
+.mk-slider label{display:flex;justify-content:space-between;font:400 9.5px "JetBrains Mono",ui-monospace,monospace;color:var(--pk-ink-3)}
+.mk-track{height:4px;background:#b6a179;margin:9px 0;position:relative}
+.mk-track i{position:absolute;top:-4px;left:30%;width:12px;height:12px;border-radius:50%;background:#a9946e}
+
+/* vakayiname */
+.mk-day{display:flex;align-items:center;gap:8px;margin-top:3px;padding:5px 0 4px;border-bottom:1px solid #c4b088}
+.mk-day b{font:600 9.5px "Cinzel",Palatino,serif;letter-spacing:.1em;color:var(--pk-ink-2)}
+.mk-day span{margin-left:auto;font:400 8px "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+.mk-entry{display:grid;grid-template-columns:58px 1fr;gap:0 9px;padding:7px 0;border-bottom:1px solid #e0cfa6}
+.mk-entry>i{font-style:normal;font:600 7.5px/1.5 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.1em;color:#8c302f;padding-top:2px}
+.mk-entry>i.n{color:#4a6b8a}
+.mk-entry>i.g{color:var(--pk-quiet)}
+.mk-entry>i.w{color:var(--pk-warn)}
+.mk-entry p{margin:0;font:400 10.5px/1.5 "Spectral",Georgia,serif;color:#3f3324}
+.mk-entry time{display:block;margin-top:2px;font:400 8px "JetBrains Mono",ui-monospace,monospace;color:var(--pk-mute)}
+.mk-filters{display:flex;flex-wrap:wrap;gap:5px;padding:2px 0 4px}
+.mk-filters i{font-style:normal;font:600 7.5px/1 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.1em;padding:5px 7px;border:1px solid var(--pk-rule);color:var(--pk-ink-3);background:#e3d5b1}
+.mk-filters i.on{background:var(--pk-wine);border-color:var(--pk-wine);color:#f0dfb7}
+
+/* açıklama balonu (taslağın dışında) */
+.pin{
+  margin-top:12px;display:grid;grid-template-columns:auto 1fr;gap:0 10px;
+  font:400 12.5px/1.6 "Spectral",Georgia,serif;color:var(--d-ink-soft);max-width:392px;
+}
+.pin>b{
+  font:500 9px/1.9 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.16em;
+  color:var(--d-wine);white-space:nowrap;
+}
+.pin.q>b{color:var(--d-brass)}
+.pin em{font-style:italic;color:var(--d-ink)}
+
+/* dört ses paneli */
+.voices{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px;margin-top:30px;background:var(--d-rule)}
+.voice{background:var(--d-bg-2);padding:18px 18px 20px}
+.voice>b{
+  display:block;font:500 9px/1.5 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.16em;
+  color:var(--d-brass);margin-bottom:9px;
+}
+.voice>p{margin:0;font:italic 400 14.5px/1.55 "Spectral",Georgia,serif;color:var(--d-ink)}
+.voice>span{display:block;margin-top:11px;font:400 11px/1.5 "JetBrains Mono",ui-monospace,monospace;color:var(--d-ink-faint)}
+
+/* şerit önerisi */
+.strips{display:grid;gap:22px;margin-top:30px}
+.strip{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:center}
+.strip>b{font:500 10px/1.5 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.16em;color:var(--d-ink-faint);white-space:nowrap}
+.strip .mk{max-width:none;padding:0;box-shadow:none;border:0;background:none}
+@media (max-width:760px){.strip{grid-template-columns:1fr;gap:8px}}
+
+footer{margin-top:88px;padding-top:26px;border-top:1px solid var(--d-rule);
+  font:400 12px/1.7 "JetBrains Mono",ui-monospace,monospace;color:var(--d-ink-faint)}
+footer p{max-width:74ch}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="cover">
+  <p class="eyebrow">Demirkale · oyun tasarımı denetimi · 23 Ağustos 2026</p>
+  <h1>Yedi sekme, yeniden</h1>
+  <p class="lede">Canlı oyun gerçek tarayıcıda gezildi. Aşağıda dört sekmenin
+  <b>bugünkü hâli</b> ile <b>önerilen hâli</b> yan yana duruyor. Taslaklar oyunun
+  kendi paletiyle ve konsey panelinin gerçek genişliğinde (392 px) çizildi —
+  çünkü asıl kısıt bu: her karar bu sütuna sığmak zorunda.</p>
+  <div class="byline">
+    <span><b>Gezilen</b> 7 sekme · 1440×950, 1280×800, 1024×768</span>
+    <span><b>Ölçüt</b> kolay kullanım, sonra gerçekçilik</span>
+    <span><b>Taslak</b> 4 sekme</span>
+  </div>
+</header>
+
+<!-- ================= YARGI TABLOSU ================= -->
+<section class="case" style="padding-top:56px">
+  <div class="case-head"><span class="num">ÖZET</span><h2>Yedi sekmenin durumu</h2></div>
+  <p class="case-lede">Yedi sekme fazla değil. <b>Altı doğru sekme ve bir yanlış
+  sekme</b> var: DEFTER, üst şeritte zaten duran altı sayıyı tekrar ediyor;
+  krallığın gerçek defteri ise DİYAR'ın en dibinde duruyor.</p>
+
+  <div class="verdicts">
+    <div class="vrow"><span class="tab">MECLİS</span><span class="chip fix">BOŞ ODA</span>
+      <span class="say">Oyunun kalbi ve en zayıf ekran: <b>540 piksel boşluk</b> ve ne yazacağını söylemeyen bir metin kutusu.</span></div>
+    <div class="vrow"><span class="tab">BİNALAR</span><span class="chip fix">GRUPLANMALI</span>
+      <span class="say">On yedi eşit satır, sekiz kez tekrar eden kategori etiketi, İngilizce maliyet anahtarları. Karar değil katalog.</span></div>
+    <div class="vrow"><span class="tab">HALK</span><span class="chip fix">SIRASI TERS</span>
+      <span class="say">Rızanın kendisi bu sekmede yok; ilk öğrenilen şey <b>“üretim çarpanı ×1.00”</b>. Kollar bin piksel aşağıda.</span></div>
+    <div class="vrow"><span class="tab">ORDU</span><span class="chip fix">BOŞU FAZLA</span>
+      <span class="say">Sıfır ordu için altı panel, altı kez “yok”. Tek çıkış yolu (kışla) yazılı ama tıklanamıyor.</span></div>
+    <div class="vrow"><span class="tab">İSTİHBARAT</span><span class="chip fix">ADI YANLIŞ</span>
+      <span class="say">Oyunun tezi burada — ve iki sütun eşit ağırlıkta duruyor. Ajan gönderme ise DİYAR'da.</span></div>
+    <div class="vrow"><span class="tab">DEFTER</span><span class="chip kill">HAK ETMİYOR</span>
+      <span class="say">Üst şeridin kopyası + yanlış bir vergi açıklaması + 230 piksel boşluk.</span></div>
+    <div class="vrow"><span class="tab">DİYAR</span><span class="chip keep">ÇALIŞIYOR</span>
+      <span class="say">Boş durumları oyunun en iyi yazılmış metinleri. Yalnızca iki yükü devretmeli.</span></div>
+  </div>
+</section>
+
+<!-- ================= DÖRT SES ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">EN CİDDİ PROBLEM</span><h2>Vergiyi kim çeviriyor?</h2></div>
+  <p class="case-lede">Demirkale'nin bütün cazibesi “Kral doğrudan yönetmez,
+  Generalini ikna eder” fikri. Vergi de en sık dokunulan kol. Oyun bugün, aynı
+  anda, <b>dört farklı cevap</b> veriyor — dördü de ekranda:</p>
+
+  <div class="voices">
+    <div class="voice"><b>HALK SEKMESİ</b><p>“Vergi oranı %15”</p>
+      <span>ve altında çalışan −5 / +5 düğmeleri. Kral doğrudan çeviriyor.</span></div>
+    <div class="voice"><b>DEFTER SEKMESİ</b><p>“Değiştirmek için General'i ikna etmelisin.”</p>
+      <span>Kaydırıcı devre dışı. Kral çeviremiyor.</span></div>
+    <div class="voice"><b>REHBER · IV. ADIM</b><p>“Vergiyi düğmeyle değiştirmezsin.”</p>
+      <span>Oyunun kendi öğreticisi, HALK sekmesindeki düğmeyi yok sayıyor.</span></div>
+    <div class="voice"><b>“GENERALİN YETKİLERİ” KARTI</b><p>“Vergi ayarla” … “Vergi ve istihkakları Kral doğrudan çevirir”</p>
+      <span>Aynı kart, kendisiyle çelişiyor.</span></div>
+  </div>
+
+  <div class="why"><span>NİÇİN ÖNEMLİ</span>
+    <p>Bu bir yazım hatası değil, <b>oyunun sözleşmesinin dört sürümü</b>. Oyuncu
+    ilk saatinde en sık kullanacağı kolun kime ait olduğunu öğrenemiyorsa, oyunun
+    temel gerilimini öğrenemiyor. Kodun davranışı tek ve net: vergi ve istihkaklar
+    <b>Kralın fermanı</b>, yapılar ve asker <b>Generalin işi</b>. Öteki üç metin bu
+    cümleye çekilmeli — taslakların hepsi bu kabulle çizildi.</p></div>
+</section>
+
+<!-- ================= 01 · MECLİS ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">TASLAK · MECLİS</span><h2>Boş odayı gündemle doldur</h2></div>
+  <p class="case-lede">Ölçtüm: 1440×950'de MECLİS'in ortasında <b>540 piksel
+  boşluk</b> var. Yazı kutusuna “Kışla kur.” yazıp gönderdim — cevap
+  <em class="q">“General bağlantısı etkin değil. Hesabındaki BYOK bağlantısını
+  yenilemelisin.”</em> oldu ve ekranın ortasına bir modal açıldı. Yani kutu, hiç
+  çalışmayacağı hâlde yazılabilir durumda.</p>
+
+  <div class="compare">
+    <figure class="side now" style="margin:0">
+      <figcaption><b>BUGÜN BÖYLE</b><span>ölçülen</span></figcaption>
+      <div class="mk">
+        <div class="mk-tabs"><i class="on">MECLİS</i><i>BİNALAR</i><i>HALK</i><i>ORDU</i><i class="sm">İSTİHBARAT</i><i>DEFTER</i><i>DİYAR</i></div>
+        <div class="mk-adv">
+          <div class="mk-por">E</div>
+          <div><h4>General sessiz</h4><small>BYOK bağlantısı bekleniyor</small></div>
+          <span class="mk-b sm" style="margin-left:auto">BAĞLA</span>
+          <span class="mk-dot">●</span>
+        </div>
+        <div class="mk-body">
+          <div style="display:flex;gap:7px">
+            <span class="mk-b ghost sm">◆ İlk hedef</span>
+            <span class="mk-b ghost sm">◆ Generalin yetkileri</span>
+          </div>
+          <div class="mk-void" style="min-height:250px">
+            <span>540 piksel<br>boşluk</span>
+          </div>
+          <div class="mk-form"><span>Generalinize buyruğunuzu iletin…</span><i>✦</i></div>
+        </div>
+      </div>
+      <div class="pin"><b>SORUN</b><div>Oyuncu ne yazabileceğini bilmiyor.
+      <em>“Kışla kur”</em> mu, <em>“Kışla kurmayı düşünüyorum, ne dersin?”</em> mü,
+      <em>“Kuzeye karşı savunma istiyorum”</em> mu — üçü çok farklı oyunlar. Arayüz
+      üçünü de mümkün kılıyor, hiçbirini önermiyor.</div></div>
+    </figure>
+
+    <figure class="side next" style="margin:0">
+      <figcaption><b>ÖNERİM</b><span>divan + gündem</span></figcaption>
+      <div class="mk">
+        <div class="mk-tabs"><i class="on">MECLİS</i><i>HALK</i><i>BİNALAR</i><i>ORDU</i><i>DİYAR</i><i class="sm">SESSİZ SAVAŞ</i><i class="sm">VAKAYİNAME</i></div>
+        <div class="mk-head"><span>DİVAN · GÜN 1</span><b>3 MESELE</b></div>
+        <div class="mk-body">
+          <div class="mk-card wine">
+            <span class="mk-lbl red">DİVAN KAPALI</span>
+            <span class="mk-t">Generalin sessiz</span>
+            <p class="mk-p">Yapı, asker ve ajan emirleri işlemez. Vergi ve istihkak
+            fermanların çalışmaya devam eder.</p>
+            <div style="margin-top:8px"><span class="mk-b">GENERALİ BAĞLA</span></div>
+          </div>
+
+          <div class="mk-head" style="min-height:0;padding:6px 10px"><span>GÜNDEM</span><b>KRALIN SÖZÜ BEKLENİYOR</b></div>
+
+          <div class="mk-item hot">
+            <div>
+              <span class="mk-lbl red">NÜFUS · 4 GÜN</span>
+              <span class="mk-t">Kapasite dolmak üzere</span>
+              <span class="mk-s">100 / 150 · boş konut 49 kişilik</span>
+            </div>
+            <span class="mk-b off sm">SÖZ AL</span>
+            <p class="mk-say">“Meydan kurulmasını istiyorum; halk sığmayacak.”</p>
+          </div>
+
+          <div class="mk-item">
+            <div>
+              <span class="mk-lbl">İKTİSAT</span>
+              <span class="mk-t">Yiyecek fazlası var</span>
+              <span class="mk-s">+14.5 /sa · ambarda 504 · günlük ihtiyaç 84</span>
+            </div>
+            <span class="mk-b off sm">SÖZ AL</span>
+            <p class="mk-say">“Yiyecek güvende. Artık taşa ve demire dönebiliriz.”</p>
+          </div>
+
+          <div class="mk-item">
+            <div>
+              <span class="mk-lbl">SAVUNMA</span>
+              <span class="mk-t">Kışla yok, savunma gücü 0</span>
+              <span class="mk-s">koruma bitişine 95sa 42dk</span>
+            </div>
+            <span class="mk-b off sm">SÖZ AL</span>
+            <p class="mk-say">“Koruma bitmeden bir kışla ve nöbet istiyorum.”</p>
+          </div>
+
+          <div class="mk-card dim">
+            <span class="mk-lbl">GECE VARDİYASI · SON</span>
+            <p class="mk-p">Krallık kuruldu, ova parseli tahsis edildi. Akın gelmedi,
+            haraç ödenmedi.</p>
+            <span class="mk-s">Tamamı için → VAKAYİNAME</span>
+          </div>
+
+          <div class="mk-form off"><span>General bağlı değil — divan toplanamıyor</span><i>✦</i></div>
+        </div>
+      </div>
+      <div class="pin q"><b>NE DEĞİŞTİ</b><div>Boşluğun yerine <em>gündem</em> geldi:
+      krallığın şu andaki üç açık meselesi ve her birinin yanında Kralın
+      söyleyebileceği hazır bir söz. Kutu, General kapalıyken kapanıyor ve
+      niçin kapandığını kendi üstünde yazıyor.</div></div>
+    </figure>
+  </div>
+
+  <div class="why"><span>GEREKÇE</span>
+    <p>Hazır sözler oyuncuya <b>ne yazabileceğini öğretir ama ne yazacağını
+    dayatmaz</b> — kutu hâlâ açık, hazır söz yalnızca bir başlangıç. İkinci
+    kazanç gerçekçilik: “Meclis” bir oda vaat ediyor, oda ise gündemiyle vardır.
+    Bugünkü ekran bir sohbet penceresi; gündemli hâli bir divan oturumu. Üçüncüsü:
+    oyuncu artık kutuya yazıp göndermeden önce Generalin kapalı olduğunu
+    öğreniyor, sonra değil.</p></div>
+</section>
+
+<!-- ================= 02 · HALK ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">TASLAK · HALK</span><h2>Rıza bir gösterge değil, bir ilişki</h2></div>
+  <p class="case-lede">HALK sekmesinin panel içeriği <b>1770 piksel</b>; görünen
+  pencere 675. Yani ekranın gördüğü ilk üçte bir her şeye karar veriyor — ve o
+  üçte birde rızanın kendisi <b>yok</b>. Sayı 50 ve durum “Huzursuz”, ekranın öbür
+  ucundaki üst şeritte, sekiz punto bir etikette duruyor.</p>
+
+  <div class="compare">
+    <figure class="side now" style="margin:0">
+      <figcaption><b>BUGÜN BÖYLE</b><span>ilk 675 piksel</span></figcaption>
+      <div class="mk">
+        <div class="mk-head"><span>HALKIN DURUMU · RAPOR</span><b>Huzursuz</b></div>
+        <div class="mk-body">
+          <div class="mk-card">
+            <span class="mk-t" style="margin-top:0">Ferman senin, uygulama Generalin</span>
+            <p class="mk-p">Vergi ve istihkakları doğrudan çevirirsin; General uygulamaz
+            ama her değişiklikte görüşünü söyler. Asker maaşı ve yapılar emirle yürür.</p>
+          </div>
+          <div class="mk-card">
+            <div class="mk-head" style="margin:-9px -10px 9px"><span>HALKIN SESİ</span><b>Sessiz</b></div>
+            <p class="mk-p">Halkın Kraldan açık bir isteği yok. Talep ancak bir eşik
+            saatlerce aşılı kalırsa açılır; anlık dalgalanma masaya gelmez.</p>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div class="mk-card" style="text-align:left"><span class="mk-lbl">ÜRETİM ÇARPANI</span><b style="display:block;margin-top:5px;font:600 16px 'Cinzel',serif;color:#3a2f1d">×1.00</b></div>
+            <div class="mk-card"><span class="mk-lbl">NÜFUS</span><b style="display:block;margin-top:5px;font:600 16px 'Cinzel',serif;color:#3a2f1d">100/150</b></div>
+            <div class="mk-card"><span class="mk-lbl">GÜNLÜK YİYECEK</span><b style="display:block;margin-top:5px;font:600 16px 'Cinzel',serif;color:#3a2f1d">84</b></div>
+          </div>
+          <div class="mk-card dim">
+            <div class="mk-head" style="margin:-9px -10px 9px"><span>NÜFUS DEFTERİ</span><b>+14 kişi/gün</b></div>
+            <p class="mk-p">Kuruluştan beri yerleşen +0 · göç eden −0 · boş konut 49
+            kişilik · madende 0 · silah altında 0</p>
+          </div>
+          <div class="mk-void"><span>istihkak · vergi · asker maaşı · şenlik<br>≈ 1000 piksel aşağıda</span></div>
+        </div>
+      </div>
+      <div class="pin"><b>SORUN</b><div>Oyuncunun ilk öğrendiği şey
+      <em>“üretim çarpanı ×1.00”</em>. Bu, halkı bir <em>verimlilik parametresi</em>
+      olarak sunmak: “insanlarım şu anda ×1.00 verimli”. Bir hükümdar halkını çarpan
+      olarak düşünmez; kimin neye kızgın olduğunu düşünür.</div></div>
+    </figure>
+
+    <figure class="side next" style="margin:0">
+      <figcaption><b>ÖNERİM</b><span>manşet · kollar · defter</span></figcaption>
+      <div class="mk">
+        <div class="mk-head"><span>HALK · RIZA VE FERMAN</span><b>3 KOL ELİNDE</b></div>
+        <div class="mk-body">
+          <div class="mk-mood">
+            <div class="top">
+              <span class="big">50</span><span class="st">HUZURSUZ</span>
+              <span class="of">100 / 150 nüfus<br>üretim ×1.00</span>
+            </div>
+            <div class="mk-bar" style="margin:9px 0 0"><i class="r" style="width:50%"></i></div>
+            <p>Halk <b>huzursuz</b>: karnı tok ama kesesi boş ve eğlencesi yok.
+            Vergi %15, bira yok, konut 4 gün içinde dolacak.</p>
+          </div>
+
+          <div class="mk-head" style="min-height:0;padding:6px 10px"><span>FERMANLAR · DOĞRUDAN ÇEVİRİRSİN</span><b>3</b></div>
+
+          <div class="mk-lever">
+            <div class="r1"><b>Yiyecek istihkakı</b><strong>%100</strong></div>
+            <div class="mk-bar"><i class="g" style="width:50%"></i></div>
+            <div class="mk-eff"><span>84 yiyecek/gün · ambarda 504</span><em>tam doyum</em></div>
+            <div class="acts"><span class="mk-b ghost sm">−25</span><span class="mk-b ghost sm">+25</span></div>
+          </div>
+
+          <div class="mk-lever">
+            <div class="r1"><b>Vergi oranı</b><strong>%15</strong></div>
+            <div class="mk-bar"><i style="width:30%"></i></div>
+            <div class="mk-eff"><span>3 altın/sa · %15 nötr sayılır</span><em class="bad">%40 üstü isyan</em></div>
+            <div class="acts"><span class="mk-b ghost sm">−5</span><span class="mk-b ghost sm">+5</span></div>
+          </div>
+
+          <div class="mk-lever" style="opacity:.72">
+            <div class="r1"><b>Bira istihkakı</b><strong>—</strong></div>
+            <div class="mk-bar"><i style="width:0"></i></div>
+            <div class="mk-eff"><span>Bira Evi kurulmadı · Kale Sv.2 gerekir</span><em>kilitli</em></div>
+            <div class="acts"><span class="mk-b off sm" style="flex:1;text-align:center">BİRA EVİ İÇİN GENERALE SÖZ VER</span></div>
+          </div>
+
+          <div class="mk-card">
+            <div class="mk-head" style="margin:-9px -10px 9px"><span>HALKIN SESİ</span><b>Sessiz</b></div>
+            <p class="mk-p">Halkın Kraldan açık bir isteği yok. Talep ancak bir eşik
+            saatlerce aşılı kalırsa açılır; anlık dalgalanma masaya gelmez.</p>
+          </div>
+
+          <div class="mk-card dim">
+            <span class="mk-lbl">NÜFUS DEFTERİ · +14 KİŞİ/GÜN</span>
+            <span class="mk-s">Yerleşen +0 · göç eden −0 · boş konut 49 · madende 0 ·
+            silah altında 0 &nbsp;&nbsp;<b style="color:#6d3325">AÇ ▾</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="pin q"><b>NE DEĞİŞTİ</b><div>Rıza <em>bir sayı</em> olarak değil
+      <em>bir cümle</em> olarak açılıyor: durum, sebep, ve elindeki kollar. Kollar
+      manşetin hemen altında; nüfus defteri kapanıp en alta indi. Kilitli kol,
+      kilidin sebebini kendi satırında söylüyor.</div></div>
+    </figure>
+  </div>
+
+  <div class="why"><span>GEREKÇE</span>
+    <p>Üç değişiklik, aynı kafa karışıklığını çözüyor: <b>“halkım ne hâlde ve ne
+    yapmam gerekiyor?”</b>. Bugün bu sorunun cevabı iki parçaya bölünmüş — durum
+    üst şeritte, kollar bin piksel aşağıda — ve arada bir katsayı duruyor. Manşet
+    ikisini birleştirir. “Sebep” cümlesi ayrıca oyunu <b>öğretir</b>: oyuncu rızanın
+    yiyecek, vergi, bira ve konuttan doğduğunu bir tabloyu okuyarak değil, bir
+    cümleyi okuyarak öğrenir. <em>Not:</em> sebep cümlesi motorun rıza bileşenlerinden
+    kurulmalı, arayüzde elle yazılmamalı.</p></div>
+</section>
+
+<!-- ================= 03 · İSTİHBARAT ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">TASLAK · İSTİHBARAT</span><h2>Oyunun tezi ekranda görünmüyor</h2></div>
+  <p class="case-lede">Bu sekmenin bütün varlık nedeni tek bir cümle:
+  <b>asker olmadan da kazanılır</b>. Motor bunu ciddiye alıyor —
+  <code style="font:500 13px 'JetBrains Mono',monospace">engine/victory.ts</code>'te
+  askersiz sütunu <b>beş kalem</b>, askerî sütunu <b>iki kalem</b> besliyor. Ekran
+  ise üç eşit sütun ve yedi düz satır gösteriyor; hangi kalemin hangi sütuna
+  yazıldığını taşıyan tek şey, iki neredeyse aynı kahverenginin farkı.</p>
+
+  <div class="compare">
+    <figure class="side now" style="margin:0">
+      <figcaption><b>BUGÜN BÖYLE</b><span>üç eşit sütun</span></figcaption>
+      <div class="mk">
+        <div class="mk-head"><span>İSTİHBARAT · ASKERSİZ SAVAŞ</span><b>0 PUAN</b></div>
+        <div class="mk-body">
+          <div class="mk-scale">
+            <div class="mk-head" style="min-height:0;padding:7px 10px"><span>ZAFER SKORU · SEZON ÖLÇÜTÜ</span><b>HENÜZ ÖLÇÜLEN BİR ŞEY YOK</b></div>
+            <div class="mk-cols3">
+              <div class="q"><span>ASKERSİZ<br>ÜSTÜNLÜK</span><b>0</b></div>
+              <div class="m"><span>ASKERİ<br>KATKI</span><b>0</b></div>
+              <div class="t"><span>TOPLAM</span><b>0</b></div>
+            </div>
+            <p class="mk-p" style="padding:8px 11px;border-bottom:1px solid #dccba2">Ne sessiz bir hamle ne püskürtülen bir akın var; defter boş.</p>
+            <div class="mk-flat">
+              <div class="mk-line"><div><b>Sessiz kese</b><small>Komşuya ulaşan kese yok</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Yakalanan kese</b><small>Hiçbir kesemiz yakalanmadı</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Karşı-istihbarat</b><small>Nöbet henüz kimseyi yakalamadı</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Nüfus defteri (net)</b><small>+0 kişi · 0 geldi / 0 gitti</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>İtibar</b><small>Kuruluş değerine göre +0 puan</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b style="color:#6d3325">Püskürtülen akın</b><small>Henüz püskürtülen akın yok</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b style="color:#6d3325">Yarılan savunma</b><small>Savunma hiç yarılmadı</small></div><strong>0</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pin"><b>SORUN</b><div>TOPLAM bir bileşen değil, ikisinin toplamı —
+      ama üçüncü bir kardeş gibi duruyor; oyuncu “üç ölçütüm var” diye okuyor.
+      “İtibar”ın <em>askersiz</em> sütuna yazıldığı hiçbir yerde yazmıyor. Oysa
+      öğrenmesi gereken tam olarak bu: <em>itibar bir savaş aracı.</em></div></div>
+    </figure>
+
+    <figure class="side next" style="margin:0">
+      <figcaption><b>ÖNERİM</b><span>terazi · 5'e 2</span></figcaption>
+      <div class="mk">
+        <div class="mk-head"><span>SESSİZ SAVAŞ · SEZON ÖLÇÜTÜ</span><b>0 PUAN</b></div>
+        <div class="mk-body">
+          <div class="mk-scale">
+            <p class="mk-p" style="padding:10px 11px 9px;border-bottom:1px solid #dccba2;font-size:11px">
+              <b style="font:600 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#8c302f;display:block;margin-bottom:4px">HENÜZ ÖLÇÜLEN BİR ŞEY YOK</b>
+              Ne sessiz bir hamle ne püskürtülen bir akın var; defter boş.
+              <b style="display:block;margin-top:5px;font-weight:400;color:#6d5a35">Bu sezon ölçütü asker saymıyor: kalemlerin beşi
+              kılıç dışında kazanılır, ikisi surdan gelir.</b>
+            </p>
+            <div class="beam">
+              <div class="q"><div class="cap"><span>ASKERSİZ ÜSTÜNLÜK</span><i>5 kalem</i></div><b>0</b></div>
+              <div class="m"><div class="cap"><span>ASKERİ</span><i>2</i></div><b>0</b></div>
+            </div>
+            <div class="mk-total"><span>TOPLAM · İKİSİNİN TOPLAMI</span><b>0</b></div>
+
+            <div class="mk-group q">
+              <div class="gh"><span>ASKERSİZ ÜSTÜNLÜK · 5 KALEM</span><span>0</span></div>
+              <div class="mk-line"><div><b>Sessiz kese</b><small>Komşuya ulaşan kese yok</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Yakalanan kese</b><small>Hiçbir kesemiz yakalanmadı</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Karşı-istihbarat</b><small>Nöbet henüz kimseyi yakalamadı</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Nüfus defteri (net)</b><small>+0 kişi · 0 geldi / 0 gitti</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>İtibar</b><small>Kuruluş değerine göre +0 puan</small></div><strong>0</strong></div>
+            </div>
+
+            <div class="mk-group m">
+              <div class="gh"><span>ASKERİ KATKI · 2 KALEM</span><span>0</span></div>
+              <div class="mk-line"><div><b>Püskürtülen akın</b><small>Henüz püskürtülen akın yok</small></div><strong>0</strong></div>
+              <div class="mk-line"><div><b>Yarılan savunma</b><small>Savunma hiç yarılmadı</small></div><strong>0</strong></div>
+            </div>
+
+            <span class="mk-s" style="padding:8px 11px 9px">Sıra en az 4 sancakla açıklanır;
+            kuruluş koruması süren sancaklar sayılmaz. Skor bir göstergedir: sezonu bitirmez.</span>
+          </div>
+
+          <div class="mk-card dim">
+            <span class="mk-lbl">ÖRNEK · DOLU BİR SEZONDA NASIL OKUNUR</span>
+            <div class="mk-scale" style="margin-top:7px;border-color:#c9b58c">
+              <div class="beam">
+                <div class="q"><div class="cap"><span>ASKERSİZ ÜSTÜNLÜK</span><i>5 kalem</i></div><b>74</b></div>
+                <div class="m"><div class="cap"><span>ASKERİ</span><i>2</i></div><b>11</b></div>
+              </div>
+              <div class="mk-total"><span>SESSİZ ÜSTÜNLÜK · doktrin tuttu</span><b>85</b></div>
+            </div>
+            <span class="mk-s">Sayılar uydurma, yalnızca okunuşu göstermek için.
+            Terazi yana yattığında oyuncu doktrinini <em>görüyor.</em></span>
+          </div>
+        </div>
+      </div>
+      <div class="pin q"><b>NE DEĞİŞTİ</b><div>Üç sütun ikiye indi ve TOPLAM altına,
+      küçültülerek geçti. Sütun genişlikleri <em>5'e 2</em>: oyun askersiz yolu
+      gerçekten ödüllendiriyor, artık ekran da öyle diyor. Yedi kalem, iki sütunun
+      <em>altında</em> gruplandı — üyelik artık renk değil yapı.</div></div>
+    </figure>
+  </div>
+
+  <div class="why"><span>GEREKÇE</span>
+    <p>Bir sekmenin tezi, o sekmenin en büyük görsel kararı olmalı. Bugün tez
+    metinde (“ASKERSİZ SAVAŞ”) yazıyor ama <b>düzende görünmüyor</b> — üç eşit
+    sütun tam tersini söylüyor: “üç eşit şey”. Terazi ve 5'e 2 genişlik, oyuncuya
+    hiçbir metin okumadan doğru şeyi söylüyor. İkinci kazanç: doktrin okuması
+    (<em>SESSİZ ÜSTÜNLÜK / KILIÇ VE SUR / İKİ ELLE</em>) koyu şeridin sağ ucundaki
+    minik etiketten çıkıp <b>manşete</b> taşındı — “senin oyun tarzın şu” diyen tek
+    cümle, en gözden kaçan noktada duramaz.</p>
+    <p style="margin-top:.8em"><b>Ve sekmenin adı:</b> “İSTİHBARAT” içeriğin yarısını
+    anlatıyor; ajan göndermek DİYAR'da, karşı-istihbarat burada. <b>SESSİZ SAVAŞ</b>
+    hem içeriği doğru anlatır hem şeritteki en uzun etiketi kısaltır — bugün
+    “İSTİHBARAT” düğmesinin yazısı, sığması için diğerlerinden küçültülmüş durumda.</p></div>
+</section>
+
+<!-- ================= 04 · DEFTER ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">TASLAK · DEFTER</span><h2>Adı defter, içi bakiye</h2></div>
+  <p class="case-lede">DEFTER sekmesi tam olarak şunu içeriyor: <b>üst şeritte
+  zaten duran altı sayının kopyası</b>, devre dışı bir vergi kaydırıcısı ve 230
+  piksel boşluk. Krallığın gerçek vakayinamesi ise DİYAR'ın en dibinde, ortak
+  maden ve komşu listesinin arkasında duruyor; akın kayıtları da üçüncü bir
+  yerde, ORDU'da.</p>
+
+  <div class="compare">
+    <figure class="side now" style="margin:0">
+      <figcaption><b>BUGÜN BÖYLE</b><span>şeritle birlikte</span></figcaption>
+      <div class="mk">
+        <div class="mk-ribbon">
+          <div><span>ALTIN</span><b>1.001</b><i>+3.3/sa</i></div>
+          <div><span>YİYECEK</span><b>504</b><i>+14.5/sa</i></div>
+          <div><span>TAŞ</span><b>300</b><i>+0.0/sa</i></div>
+          <div><span>ODUN</span><b>304</b><i>+14.3/sa</i></div>
+        </div>
+        <div class="pin" style="margin:6px 6px 8px;max-width:none"><b>ÜST ŞERİT</b>
+          <div style="font-size:11px;line-height:1.5">Her sekmede, her an görünür.</div></div>
+        <div class="mk-head"><span>HAZİNE VE HALK · RAPOR</span><b>Tick canlı</b></div>
+        <div style="padding:0">
+          <div class="mk-led"><span>ALTIN</span><strong>1.001</strong><small>3.3/sa</small></div>
+          <div class="mk-led"><span>YİYECEK</span><strong>504</strong><small>14.5/sa</small></div>
+          <div class="mk-led"><span>TAŞ</span><strong>300</strong><small>0.0/sa</small></div>
+          <div class="mk-led"><span>ODUN</span><strong>304</strong><small>0.0/sa</small></div>
+          <div class="mk-led"><span>DEMİR</span><strong>100</strong><small>0.0/sa</small></div>
+          <div class="mk-led"><span>BİRA</span><strong>0</strong><small>0.0/sa</small></div>
+          <div class="mk-slider">
+            <label><span>Mevcut vergi oranı</span><b>%15</b></label>
+            <div class="mk-track"><i></i></div>
+            <span class="mk-s" style="color:#8c302f">Değiştirmek için General'i ikna etmelisin.</span>
+          </div>
+          <div class="mk-void" style="border:0;padding:26px 14px"><span>230 piksel boşluk</span></div>
+        </div>
+      </div>
+      <div class="pin"><b>SORUN</b><div>Altı satır, yukarıdaki şeridin birebir
+      kopyası. Kaydırıcı ise HALK sekmesindeki çalışan −5/+5 düğmeleriyle
+      <em>çelişiyor</em>. “Defter” bu oyunun en güçlü kelimesi ve bir bakiyeye
+      harcanmış.</div></div>
+    </figure>
+
+    <figure class="side next" style="margin:0">
+      <figcaption><b>ÖNERİM</b><span>gerçek vakayiname</span></figcaption>
+      <div class="mk">
+        <div class="mk-head"><span>VAKAYİNAME · KÂTİBİN KAYDI</span><b>GÜN 1</b></div>
+        <div class="mk-body">
+          <div class="mk-filters">
+            <i class="on">HEPSİ</i><i>AKIN</i><i>GECE</i><i>HARAÇ</i><i>PAZAR</i><i>HALK</i>
+          </div>
+
+          <div>
+            <div class="mk-day"><b>GÜN 1</b><span>bugün · 4 kayıt</span></div>
+            <div class="mk-entry"><i class="w">PAZAR</i>
+              <div><p>Örnek: 120 odun 96 altına satıldı; fiyat 0.83'ten 0.79'a indi.</p><time>14:20</time></div></div>
+            <div class="mk-entry"><i class="n">GECE</i>
+              <div><p>Örnek: gece vardiyası işledi. Vergi 3 altın/sa, halk tam istihkak aldı, akın gelmedi.</p><time>03:00</time></div></div>
+            <div class="mk-entry"><i class="g">ARAZİ</i>
+              <div><p>OVA parseli tahsis edildi: Dengeli üretim · normal hareket.</p><time>11:48</time></div></div>
+            <div class="mk-entry"><i>KURULUŞ</i>
+              <div><p>Krallığınız dış çeperdeki boş parsele kuruldu. Dört günlük korumanız başladı.</p><time>11:48</time></div></div>
+          </div>
+
+          <div class="mk-card dim">
+            <span class="mk-lbl">BU SEKMEDEN KALDIRILANLAR</span>
+            <span class="mk-s">Altı kaynak satırı → üst şeritte, her sekmede duruyor.<br>
+            Vergi kaydırıcısı → HALK sekmesindeki ferman koluna. Tek yerde.</span>
+          </div>
+          <div class="mk-card dim">
+            <span class="mk-lbl">BURAYA TAŞINANLAR</span>
+            <span class="mk-s">Akın kayıtları → ORDU'daki <b>.raid-log</b>'dan.<br>
+            Kuruluş/arazi/haraç kayıtları → DİYAR'ın dibinden.</span>
+          </div>
+        </div>
+      </div>
+      <div class="pin q"><b>NE DEĞİŞTİ</b><div>Sekme, adının söylediği şeyi
+      yapmaya başladı: <em>ne oldu, kimin eliyle, ne zaman.</em> Günlere ayrılmış,
+      türüne göre işaretlenmiş, süzülebilir bir kayıt akışı. Kalıcı bir oyunda
+      oyuncunun ilk sorusu budur: <em>“ben yokken ne oldu?”</em></div></div>
+    </figure>
+  </div>
+
+  <div class="why"><span>GEREKÇE</span>
+    <p>Kalıcı ve çok oyunculu bir oyunda oyuncu günde bir kere bakar ve ilk
+    sorduğu şey <b>“ben yokken ne oldu”</b> olur. Bugün bu sorunun cevabı hiçbir
+    sekmenin adında yazmıyor: üç ayrı yere bölünmüş, en çoğu da DİYAR'ın dibinde.
+    Bu değişiklik yeni bir sekme eklemiyor — <b>var olan yanlış sekmeyi doğru
+    içerikle dolduruyor</b>, dolayısıyla şerit yedide kalıyor. Gerçekçilik kazancı
+    da açık: bir hükümdarın defteri anlık bakiye değil, kâtibin gün gün yazdığı
+    tutanaktır.</p>
+    <p style="margin-top:.8em"><em class="q">Not: yukarıdaki PAZAR ve GECE kayıtları
+    “örnek” diye işaretli — bu test channel'ında henüz o türden bir kayıt
+    üretilmedi. Kuruluş ve arazi kayıtları oyundan birebir alındı.</em></p></div>
+</section>
+
+<!-- ================= ŞERİT ================= -->
+<section class="case">
+  <div class="case-head"><span class="num">SON</span><h2>Şeridin sırası, günün sırası olsun</h2></div>
+  <p class="case-lede">Oyuncunun günlük döngüsü şu: <b>ben yokken ne oldu →
+  halkım ne hâlde → ne inşa edeceğim → dışarıda ne var → Generale ne
+  söyleyeceğim.</b> Bugünkü şerit bunun tersini öneriyor: meclisle başlıyor
+  (ve meclis boş), vakayinamenin adı ise hiç geçmiyor.</p>
+
+  <div class="strips">
+    <div class="strip"><b>BUGÜN</b>
+      <div class="mk"><div class="mk-tabs" style="border:1px solid #9b7d50">
+        <i class="on">MECLİS</i><i>BİNALAR</i><i>HALK</i><i>ORDU</i><i class="sm">İSTİHBARAT</i><i>DEFTER</i><i>DİYAR</i>
+      </div></div></div>
+    <div class="strip"><b>ÖNERİM</b>
+      <div class="mk"><div class="mk-tabs" style="border:1px solid #9b7d50">
+        <i class="on">MECLİS</i><i>HALK</i><i>BİNALAR</i><i>ORDU</i><i>DİYAR</i><i class="sm">SESSİZ SAVAŞ</i><i class="sm">VAKAYİNAME</i>
+      </div></div></div>
+  </div>
+
+  <div class="why" style="margin-top:34px"><span>GEREKÇE</span>
+    <p>MECLİS birinci sırada kalıyor — orası oyunun kimliği ve ilk açılan sekme
+    olması doğru. Ama o zaman MECLİS'in kendisi “ben yokken ne oldu” sorusuna bir
+    özetle cevap vermeli (taslakta <b>GECE VARDİYASI</b> kartı). Ardından içe bakan
+    sekmeler (HALK, BİNALAR, ORDU), sonra dışa bakanlar (DİYAR, SESSİZ SAVAŞ), en
+    sonda kayıt. <b>Sayı yedide kalıyor</b>; değişen tek şey sıra ve iki ad.</p></div>
+</section>
+
+<footer>
+  <p>Yöntem: canlı oyun (127.0.0.1:3001) Playwright + Chromium ile gezildi; yedi
+  sekme 1440×950, 1280×800 ve 1024×768'te açıldı, panel yükseklikleri ve düğme
+  durumları ölçüldü, Meclis'te gerçek bir emir gönderildi. Konsolda hata,
+  4xx/5xx istek ya da yatay taşma görülmedi.</p>
+  <p style="margin-top:1em">Sınırlar: test channel'ında tek krallık var, defterler
+  boş, kışla ve pazar kurulmamış, General bağlı değil — yani incelenen ekranlar
+  oyunun birinci günü. Boş durumlar hakkındaki yargılar bu yüzden güçlü; dolu
+  panellerin sıkışması hakkındaki yargılar çıkarımdır. Google Fonts bu ortamda
+  kapalı olduğu için tipografi yedek yığında görüldü; taslaklardaki yargılar
+  punto ölçülerine değil hiyerarşinin yapısına dayanıyor.</p>
+  <p style="margin-top:1em">Taslakların içi oyunun paletiyle çizildi
+  (app/game.css, app/globals.css) ve tema ile değişmez — oyunun paneli tek
+  görünüme bağlıdır. Sayfa çevresi, okuyucunun temasına uyar.</p>
+</footer>
+
+</div>
