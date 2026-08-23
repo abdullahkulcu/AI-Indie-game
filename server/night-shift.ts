@@ -86,6 +86,29 @@ export function shouldWake(order: StandingOrder, game: Game, now: number): WakeD
   };
 }
 
+/**
+ * BU UYANIŞTA KAÇ HAMLE YAPILABİLİR?
+ *
+ * `maxActionsPerWake` sütunu (varsayılan 1) ve bu dosyadaki tip baştan beri
+ * vardı ama HİÇBİR YERDE OKUNMUYORDU: `app/api/cron` her uyanışta örtük olarak
+ * bir hamle varsayıyordu, yani Kral "gece en fazla üç iş yap" dese de bir iş
+ * yapılıyordu. Ayar oyuncuya yalan söylüyordu.
+ *
+ * Bütçe İKİ tavanın küçüğü: Kralın uyanış başına verdiği hak ve günlük
+ * tavandan KALAN. İkincisi olmadan "uyanışta 3, günde 8" diyen bir Kralda
+ * günlük tavan aşılabilirdi.
+ *
+ * En az 1 döner: buraya gelindiğinde `shouldWake` zaten "hamle yapılabilir"
+ * demiştir, dolayısıyla sıfır bütçe o kararla çelişirdi. Günlük tavan gerçekten
+ * dolmuşsa hamleyi `shouldWake` engeller, burası değil — tek kapı iki yere
+ * yazılmasın.
+ */
+export function wakeBudget(order: Pick<StandingOrder, "maxActionsPerWake" | "dailyActionCap">, actionsToday: number) {
+  const remainingToday = Math.max(0, order.dailyActionCap - actionsToday);
+  const perWake = Math.max(1, Math.floor(order.maxActionsPerWake) || 1);
+  return Math.max(1, Math.min(perWake, remainingToday || 1));
+}
+
 /** Günlük sayaç penceresi dolduysa sıfırlanır. */
 export function rollDailyWindow(order: StandingOrder, now: number) {
   return now - order.dayStartedAt >= DAY_MS

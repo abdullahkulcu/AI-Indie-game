@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import { and, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { applyActions } from "../../../engine/actions";
-import { capacityFor, tick } from "../../../engine/tick";
+import { capacityFor, rates, tick } from "../../../engine/tick";
+import { deriveLedgerEvents } from "../../../engine/ledger";
+import { armySize, rationsOf } from "../../../engine/populace";
+import { appendToLedger } from "../../../server/general-ledger";
 import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
 import { agitations, agreements, channelMembers, channels, gameSaves, intelDefenses, llmCredentials, migrations, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
@@ -31,7 +34,7 @@ import { decryptByok } from "../../../server/byok-crypto";
 import { pruneExpiredSessions } from "../../../server/account-auth";
 import { noteToKing } from "../../../server/king-notice";
 import { pruneRateLimits } from "../../../server/rate-limit";
-import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
+import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder, type WakeDecision, wakeBudget } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
 // Koşullu (sürüm korumalı) yazma tek kopyadır; ortak maden de aynı kapıyı kullanır.
 import { writeSaveIfUnchanged } from "../../../server/save-write";
@@ -108,77 +111,164 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
   const [credential] = await db.select().from(llmCredentials).where(eq(llmCredentials.userId, row.userId)).limit(1);
   if (!credential) return finish("BYOK bağlantısı yok; General sessiz.", false, false);
 
-  let proposed: GameAction | null = null;
-  try {
-    const apiKey = await decryptByok(credential.encryptedKey, credential.iv, env.BYOK_MASTER_KEY, row.userId, credential.provider, credential.model, credential.keyVersion);
-    proposed = await callProvider({
-      provider: credential.provider, model: credential.model, apiKey,
-      system: NIGHT_PROMPT, tools: nightTools,
-      user: `DURUM=${JSON.stringify(compactContext(game, order, decision))}`,
-    });
-  } catch (error) {
-    return finish(`Sağlayıcı hatası: ${error instanceof Error ? error.message : "bilinmiyor"}`, false, true);
-  }
-  if (!proposed || proposed.name === "no_action") {
-    return finish(`General beklemeyi seçti: ${String(proposed?.arguments.reason ?? "gerekçe yok")}`, false, true);
-  }
+  const apiKey = await decryptByok(credential.encryptedKey, credential.iv, env.BYOK_MASTER_KEY, row.userId, credential.provider, credential.model, credential.keyVersion)
+    .catch(() => null);
+  if (apiKey === null) return finish("BYOK anahtarı çözülemedi; General sessiz.", false, false);
 
-  // Yalnızca öneri yetkisi varsa uygulamayız; Kralın onayına bırakılır.
-  if (row.autonomy === "ask") {
-    await db.insert(pendingDecisions).values({
-      userId: row.userId, action: JSON.stringify(proposed), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposed.name}`]),
-      riskLevel: "elevated", expiresAt: now + 12 * 3_600_000,
-    }).onConflictDoUpdate({
-      target: pendingDecisions.userId,
-      set: { action: JSON.stringify(proposed), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposed.name}`]), riskLevel: "elevated", expiresAt: now + 12 * 3_600_000 },
-    });
-    return finish(`Öneri hazırlandı, onayınız bekleniyor: ${proposed.name}`, false, true);
-  }
-
-  const applied = applyActions(game, [proposed], now);
-  const succeeded = applied.results.some(line => line.startsWith("✓"));
-  const summary = applied.results[0] ?? "Motor eylemi uygulamadı.";
-  const next: Game = {
-    ...applied.game,
-    notices: [{ kind: "GECE VARDİYASI", text: summary.replace(/^[✓✕] /, ""), at: now }, ...applied.game.notices].slice(0, 20),
-  };
-  const written = await writeSaveIfUnchanged(row.userId, baseRevision, next);
-  if (!written) {
-    // Kral bu arada oynadı. Onun ilerlemesini EZMEYİZ: taze durumu okuyup
-    // eylemi onun üstüne uygularız.
-    const [fresh] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
-    const freshGame = fresh ? parseStoredSave(fresh.gameState) : null;
-    if (!freshGame) return finish("Kayıt bu arada değişti; hamle uygulanmadı.", false, true);
-    const redone = applyActions(tick(freshGame as Game, now), [proposed], now);
-    const ok = redone.results.some(line => line.startsWith("✓"));
-    const again = { ...redone.game, notices: [{ kind: "GECE VARDİYASI", text: (redone.results[0] ?? summary).replace(/^[✓✕] /, ""), at: now }, ...redone.game.notices].slice(0, 20) };
-    const retried = await writeSaveIfUnchanged(row.userId, fresh!.revision, again);
-    if (!retried) return finish("Kayıt eşzamanlı değişti; hamle atlandı.", false, true);
-    // Göç kuyruğu: bu tur GERÇEKTEN yazılan `peopleLeft` artışı kuyruğa girer
-    // (bkz. server/migration-desk.ts). `game`in kendi tick()'i değil, taze
-    // durumun üstüne yeniden atılan `freshGame`/`redone.game` çifti okunur —
-    // asıl kalıcı olan budur.
+  /**
+   * BİR HAMLE. Gövdesi eskiden doğrudan `runOne` içindeydi; buraya alınmasının
+   * tek sebebi `max_actions_per_wake` desteği (aşağıdaki döngü). Davranışı
+   * değişmedi: aynı çağrı, aynı araç şeması, aynı sürüm korumalı yazma ve aynı
+   * çakışma yeniden denemesi.
+   *
+   * Dönen `outcome`: "acted" hamle yazıldı · "idle" token harcandı ama hamle
+   * yok · "stop" bu uyanışta devam edilmemeli.
+   */
+  const performTurn = async (current: Game, revision: number, wake: Extract<WakeDecision, { act: true }>): Promise<{
+    outcome: "acted" | "idle" | "stop"; detail: string; tokensUsed: boolean; game: Game; action: string | null;
+  }> => {
+    let proposed: GameAction | null = null;
     try {
-      await queueEmigrants({
-        channelId: row.channelId, sourceUserId: row.userId,
-        before: freshGame.peopleLeft, after: redone.game.peopleLeft, now,
+      proposed = await callProvider({
+        provider: credential.provider, model: credential.model, apiKey,
+        system: NIGHT_PROMPT, tools: nightTools,
+        user: `DURUM=${JSON.stringify(compactContext(current, order, wake))}`,
       });
+    } catch (error) {
+      return { outcome: "stop", detail: `Sağlayıcı hatası: ${error instanceof Error ? error.message : "bilinmiyor"}`, tokensUsed: false, game: current, action: null };
+    }
+    if (!proposed || proposed.name === "no_action") {
+      return { outcome: "stop", detail: `General beklemeyi seçti: ${String(proposed?.arguments.reason ?? "gerekçe yok")}`, tokensUsed: true, game: current, action: null };
+    }
+
+    // Yalnızca öneri yetkisi varsa uygulamayız; Kralın onayına bırakılır.
+    //
+    // BURADA DURULUR, döngü sürmez: bekleyen karar tablosunda Kral başına TEK
+    // satır var (`onConflictDoUpdate`), yani ikinci bir öneri birincisini
+    // sessizce ezerdi. Kral onaylayacağı şeyi görmeden ikincisi yazılmamalı.
+    if (row.autonomy === "ask") {
+      const reasons = JSON.stringify([`Gece emriniz gereği önerim: ${proposed.name}`]);
+      await db.insert(pendingDecisions).values({
+        userId: row.userId, action: JSON.stringify(proposed), reasons,
+        riskLevel: "elevated", expiresAt: now + 12 * 3_600_000,
+      }).onConflictDoUpdate({
+        target: pendingDecisions.userId,
+        set: { action: JSON.stringify(proposed), reasons, riskLevel: "elevated", expiresAt: now + 12 * 3_600_000 },
+      });
+      return { outcome: "stop", detail: `Öneri hazırlandı, onayınız bekleniyor: ${proposed.name}`, tokensUsed: true, game: current, action: null };
+    }
+
+    const applied = applyActions(current, [proposed], now);
+    const succeeded = applied.results.some(line => line.startsWith("✓"));
+    const summary = applied.results[0] ?? "Motor eylemi uygulamadı.";
+    const stamp = (result: { game: Game; results: string[] }) => ({
+      ...result.game,
+      notices: [{ kind: "GECE VARDİYASI", text: (result.results[0] ?? summary).replace(/^[✓✕] /, ""), at: now }, ...result.game.notices].slice(0, 20),
+    }) as Game;
+
+    const written = await writeSaveIfUnchanged(row.userId, revision, stamp(applied));
+    if (!written) {
+      // Kral bu arada oynadı. Onun ilerlemesini EZMEYİZ: taze durumu okuyup
+      // eylemi onun üstüne uygularız.
+      const [fresh] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
+      const freshGame = fresh ? parseStoredSave(fresh.gameState) : null;
+      if (!freshGame) return { outcome: "stop", detail: "Kayıt bu arada değişti; hamle uygulanmadı.", tokensUsed: true, game: current, action: null };
+      const redone = applyActions(tick(freshGame as Game, now), [proposed], now);
+      const ok = redone.results.some(line => line.startsWith("✓"));
+      const retried = await writeSaveIfUnchanged(row.userId, fresh!.revision, stamp(redone));
+      if (!retried) return { outcome: "stop", detail: "Kayıt eşzamanlı değişti; hamle atlandı.", tokensUsed: true, game: current, action: null };
+      // Göç kuyruğu: bu tur GERÇEKTEN yazılan `peopleLeft` artışı kuyruğa girer
+      // (bkz. server/migration-desk.ts).
+      try {
+        await queueEmigrants({ channelId: row.channelId, sourceUserId: row.userId, before: freshGame.peopleLeft, after: redone.game.peopleLeft, now });
+      } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
+      if (ok) await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
+      return { outcome: ok ? "acted" : "idle", detail: redone.results[0] ?? summary, tokensUsed: true, game: redone.game, action: ok ? proposed.name : null };
+    }
+    // Göç kuyruğu: bu turun BAŞINDAKİ kayıt ile SONUNDA yazılan durum arasındaki fark.
+    try {
+      await queueEmigrants({ channelId: row.channelId, sourceUserId: row.userId, before: current.peopleLeft, after: applied.game.peopleLeft, now });
     } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
-    if (ok) await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
-    return finish(redone.results[0] ?? summary, ok, true);
+    if (succeeded) {
+      await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
+    }
+    return { outcome: succeeded ? "acted" : "idle", detail: summary, tokensUsed: true, game: applied.game, action: succeeded ? proposed.name : null };
+  };
+
+  /**
+   * `max_actions_per_wake` ARTIK OKUNUYOR. Sütun (varsayılan 1) ve tip baştan
+   * beri vardı ama hiçbir yerde okunmuyordu: Kral "gece en fazla üç iş yap"
+   * dese de bir iş yapılıyordu.
+   *
+   * Bütçe iki tavanın küçüğü: Kralın uyanış başına verdiği hak ve günlük
+   * tavandan KALAN. İkincisi olmadan uyanış başına 3, gün başına 8 diyen bir
+   * Kralda günlük tavan aşılabilirdi.
+   *
+   * Döngü her turda `shouldWake`'i YENİDEN sorar. Böylece "hangi koşulda hamle
+   * yapılabilir" kuralı tek yerde kalır ve araya giren durumlar kendiliğinden
+   * saygı görür: inşaat kuyruğu doldu, karşılanabilir emir kalmadı, günlük
+   * tavana ulaşıldı. Açık soru buydu ve cevabı şu: her hamle TAM BİR TUR olarak
+   * yeniden değerlendirilir, motorun kapıları (garnizon vetosu dâhil)
+   * `applyActions` üzerinden her hamlede tekrar çalışır.
+   */
+  const budget = wakeBudget(row, window.actionsToday);
+  const details: string[] = [];
+  let acted = false, tokensUsed = false;
+  const appliedNames: string[] = [];
+  let current = game, revision = baseRevision, wake = decision;
+
+  for (let turn = 0; turn < budget; turn += 1) {
+    if (turn > 0) {
+      // İkinci ve sonraki hamleler TAZE kayıt üzerinden yürür: sürüm de durum
+      // da değişmiş olabilir.
+      const [again] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
+      const freshGame = again ? parseStoredSave(again.gameState) : null;
+      if (!freshGame || !again) { details.push("Kayıt okunamadı; kalan hamleler atlandı."); break; }
+      current = tick(freshGame as Game, now);
+      revision = again.revision;
+      const next = shouldWake({ ...order, ...window, actionsToday: window.actionsToday + appliedNames.length, lastRunAt: null }, current, now);
+      if (!next.act) { details.push(next.reason); break; }
+      wake = next;
+    }
+    const result = await performTurn(current, revision, wake);
+    details.push(result.detail);
+    tokensUsed = tokensUsed || result.tokensUsed;
+    if (result.outcome === "acted") { acted = true; current = result.game; if (result.action) appliedNames.push(result.action); }
+    if (result.outcome !== "acted") break;
   }
-  // Göç kuyruğu: `stored` (bu turun BAŞINDAKİ kayıt) ile `applied.game` (bu
-  // turun SONUNDA GERÇEKTEN yazılan durum) arasındaki `peopleLeft` farkı.
+
+  /**
+   * DEFTERE YAZ. Gece vardiyası bugüne kadar `general_ledger`'a hiç
+   * dokunmuyordu (`appendToLedger` yalnızca Kral çevrimiçiyken çağrılıyordu),
+   * yani General ertesi gün "dün gece ne oldu" diye hatırlamıyordu.
+   *
+   * YENİ BİR DEFTER TÜRÜ UYDURULMADI. `deriveLedgerEvents`in ürettiği
+   * türlerin çoğu krallığın DURUMUNDAN doğuyor (açlık, tokluk, firar, ödenmiş
+   * maaş, boşalan hazine) ve gece sonundaki durum da bir durumdur. Kral-General
+   * sohbetine özgü sinyaller (itirazın ezilmesi, reddetme, geri adım, talep
+   * karşılama, koalisyon masası) gece KAPALIDIR — masada Kral yok, o yüzden
+   * hepsi kapalı geçilir. Şenlik gecenin gerçekten uyguladığı eylemden gelir.
+   */
   try {
-    await queueEmigrants({
-      channelId: row.channelId, sourceUserId: row.userId,
-      before: stored.peopleLeft, after: applied.game.peopleLeft, now,
+    const rations = rationsOf(current);
+    const kinds = deriveLedgerEvents({
+      resources: current.resources,
+      hourlyRates: rates(current) as unknown as Record<string, number>,
+      populace: {
+        foodRation: rations.food,
+        soldierPay: rations.soldierPay,
+        soldierUnrest: current.soldierUnrest ?? 0,
+        army: armySize(current.units ?? {}),
+      },
+      // Gecenin GERÇEKTEN uyguladığı eylem adları; şenlik defterine buradan girer.
+      appliedActions: appliedNames,
+      kingOverrode: false, generalRefused: false, kingBackedDown: false,
+      requestsMet: 0, requestsRefused: 0,
     });
-  } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
-  if (succeeded) {
-    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
-  }
-  return finish(summary, succeeded, true);
+    if (kinds.length) await appendToLedger(row.userId, kinds, now);
+  } catch { /* defter yazımı düşerse bile gece vardiyası düşmesin */ }
+
+  return finish(details.join(" · ") || "Hamle yapılmadı.", acted, tokensUsed);
 }
 
 /**
