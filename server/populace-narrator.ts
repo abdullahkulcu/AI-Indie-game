@@ -2,6 +2,9 @@ import {
   DEMAND_SUBJECT, type DemandCandidate, type DemandKind, type DemandSeverity, type DemandTone,
   demandTone,
 } from "../engine/populace-voice";
+import {
+  AGITATION_NOTICE, AGITATION_SUBJECT, type AgitationKind, agitationExposedNotice,
+} from "../engine/agitation";
 import { type PopulacePersona, populacePersonaProfile } from "../engine/populace-persona";
 import { POPULACE_TEXT_LIMIT, sanitizeDemandText } from "./populace-brief";
 import { callProviderText } from "./llm-provider";
@@ -212,4 +215,126 @@ export async function narrateDemands(input: {
     }
   }
   return out;
+}
+
+// --- PROPAGANDA: DIŞ KESENİN ANLATI KATMANI (plan belgesi Fikir 15) ---------
+
+/**
+ * Dış kese bugüne kadar yalnızca SAYISAL bir etki taşıyordu; hedefin defterine
+ * düşen satır `engine/agitation.ts`'in sabit `AGITATION_NOTICE` tablosundan
+ * geliyordu. Bu blok o satırı, hedefin KENDİ halkının ağzından çıkan bir
+ * söylentiye çeviriyor — etkinin sayısal tarafı motorda deterministik kalır,
+ * yalnızca ANLATI modelden gelir.
+ *
+ * ÜÇ SINIR, üçü de plan kararına bağlı:
+ *
+ *  1) İÇERİK BELİRSİZ KALIR. Modele verilen tek şey `AGITATION_SUBJECT[kind]`:
+ *     "birileri parayla dolaşıyor" mertebesinde bir konu. Hedefin gerçek
+ *     verisi (ambar, istihkak, hazine, rıza) prompt'a HİÇ GİRMEZ ve prompt
+ *     somut bir zaaf işaret etmeyi açıkça yasaklar. Bu, asimetrik bilgi
+ *     sınırının (plan §2) kese üzerinden aşılmasını engeller.
+ *  2) KİMLİK YAZILMAZ. Ne gönderenin ne hedefin adı prompt'a girer. İFŞA
+ *     satırı (`agitationExposedNotice`) bilinçli olarak MODELE HİÇ GİTMEZ ve
+ *     deterministik kalır: o satır bir söylenti değil, karşı-istihbaratın
+ *     kesin raporudur ve gönderenin adını taşımak zorundadır. Bir modelin o
+ *     ismi yeniden yazmasına izin vermek, ifşanın tek somut çıktısını
+ *     bulanıklaştırırdı.
+ *  3) KİŞİLİK TONU BELİRLER, ETKİYİ BELİRLEMEZ. Sayısal inanç çarpanı
+ *     motordadır (`engine/agitation.ts` → `AGITATION_BELIEF`); burada kişilik
+ *     yalnızca söylentinin nasıl ANLATILDIĞINI değiştirir.
+ *
+ * Kimlik bilgisi yoksa bu modül hiç çağrılmaz ve `AGITATION_NOTICE` şablonu
+ * kullanılmaya devam eder (Fikir 2'nin kademeli açılım sözleşmesi).
+ */
+const PROPAGANDA_MAX_TOKENS = 200;
+
+const PROPAGANDA_PROMPT = [
+  "Sen Demirkale adlı ortaçağ krallık oyununda bir sancağın HALKISIN. Kalenin defterine düşecek bir SÖYLENTİYİ kendi ağzınla anlatıyorsun.",
+  "Sana verilen söylenti konusundan başka bir şey anlatma; yeni bir olay, yeni bir suçlama ya da yeni bir talep uydurma.",
+  `En fazla iki kısa cümle, toplam ${POPULACE_TEXT_LIMIT} karakteri geçmesin. Başlık, madde imi, tırnak, emoji ve selam yok.`,
+  "SÖYLENTİ BELİRSİZ KALMALI: kimin yaptığını BİLMİYORSUN. Hiçbir krallık, kişi ya da komşu adı yazma; 'yabancı bir el', 'kimin olduğu belli değil' gibi kal.",
+  "Krallığın kendi zaafından (ambarın boşluğu, istihkakın düşüklüğü, hazinenin hâli, askerin sayısı) HİÇ söz etme; bunları bilmiyorsun ve tahmin de etmiyorsun.",
+  "HİÇBİR SAYI ya da yüzde yazma; rakam uydurmak yasak.",
+  "Halkın kendi ağzından, birinci çoğul şahısla konuş; üçüncü tekil şahısla 'halk şunu duydu' diye anlatma.",
+  "Yalnızca söylentiyi yaz; açıklama, gerekçe, tavsiye ya da ek satır ekleme.",
+].join("\n");
+
+/** Kişiliğin söylentiye yaklaşımı. Etkiyi DEĞİL, anlatımı belirler. */
+const BELIEF_INSTRUCTION: Record<PopulacePersona, string> = {
+  isyankar: "Bu söylentiye kolayca inanıyorsun: anlatırken doğruymuş gibi konuş, kalenin bundan haberi olmamasına da kızgınsın.",
+  zeki_istekli: "Bu söylentiye ihtiyatla yaklaşıyorsun: duyduğunu aktarıyorsun ama doğruluğundan emin değilsin, kalenin bakmasını istiyorsun.",
+  bagli_itaatkar: "Bu söylentiye pek inanmıyorsun: dedikodu olabileceğini de söylüyorsun, yine de Kral'ın bilmesi gerektiğini düşünüyorsun.",
+};
+
+export type PropagandaCue = { kind: AgitationKind };
+
+export type PropagandaRequest = PropagandaCue & { persona: PopulacePersona };
+
+/** Modele gidecek kullanıcı mesajı. Ayrı fonksiyon: testte doğrudan ölçülür. */
+export function propagandaPrompt(request: PropagandaRequest): string {
+  const persona = populacePersonaProfile(request.persona);
+  return [
+    `HALKIN HUYU: ${persona?.tone ?? ""}`,
+    `SÖYLENTİNİN KONUSU: ${AGITATION_SUBJECT[request.kind]}`,
+    BELIEF_INSTRUCTION[request.persona],
+    "Şimdi o söylentiyi yaz.",
+  ].join("\n");
+}
+
+export type PropagandaNarrator = (cue: PropagandaCue) => Promise<string | null>;
+
+/**
+ * Söylenti cümlesini üretir; başarısızlıkta `null`.
+ *
+ * Hata `populaceNarrator` ile aynı gerekçeyle YUTULUR ve loglanmaz (kısıt #4:
+ * sağlayıcının hata gövdesi isteğin başlığını yankılayabilir). Çağıran için
+ * `null` "şablona dön" demektir — halkın sesinden farklı bir karar ve gerekçesi
+ * `agitationNotice` içinde yazılı.
+ */
+export function propagandaNarrator(credential: ResolvedPopulaceCredential): PropagandaNarrator {
+  return async (cue) => {
+    try {
+      const text = await callProviderText({
+        provider: credential.provider,
+        model: credential.model,
+        apiKey: credential.apiKey,
+        system: PROPAGANDA_PROMPT,
+        user: propagandaPrompt({ ...cue, persona: credential.persona }),
+        maxTokens: PROPAGANDA_MAX_TOKENS,
+        temperature: 0.8,
+      });
+      const clean = text ? sanitizeDemandText(text) : "";
+      return clean.length >= 8 ? clean : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Kesenin hedefin defterine düşecek satırı — KARARIN TEK YERİ.
+ *
+ * ŞABLONA DÜŞÜLÜR ve bu, halkın sesindeki (`narrateDemands`) karardan
+ * BİLİNÇLİ olarak farklıdır. Orada model konuşamazsa talep susar, çünkü talep
+ * SÜREGELEN bir durumdur: bir sonraki istekte yeniden denenir, hiçbir şey
+ * kaybolmaz. Burada ise satır TEK SEFERLİK bir olaydır — kese bir kez varır ve
+ * cron o satırı yazamazsa Kral yabancı bir elin krallığına dokunduğunu HİÇ
+ * öğrenmez. Sağlayıcı hatasının Kral'ın gözünden bir sabotajı tamamen silmesi
+ * kabul edilemez; bu yüzden ağ şablondur.
+ *
+ * İFŞA yolunda model HİÇ ÇAĞRILMAZ: `exposed` satırı gönderenin adını taşıyan
+ * kesin bir rapordur, söylenti değildir (bkz. dosya içindeki 2. sınır). Bu aynı
+ * zamanda token disiplinidir — yakalanan kese için propaganda üretmenin
+ * anlatısal bir karşılığı yok.
+ */
+export async function agitationNotice(input: {
+  kind: AgitationKind;
+  /** İfşa olduysa gönderenin görünen adı; yoksa boş dize. */
+  exposedSender: string;
+  narrate: PropagandaNarrator | null;
+}): Promise<string> {
+  if (input.exposedSender) return agitationExposedNotice(input.exposedSender, input.kind);
+  if (!input.narrate) return AGITATION_NOTICE[input.kind];
+  const fresh = await input.narrate({ kind: input.kind });
+  return fresh || AGITATION_NOTICE[input.kind];
 }

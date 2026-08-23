@@ -1,4 +1,5 @@
 import { BASE_PRICE, TRADED_KEYS } from "./market";
+import type { PopulacePersona } from "./populace-persona";
 import type { Game, TradeKey } from "./types";
 
 /**
@@ -157,22 +158,72 @@ export function feltUnrest(game: AgitationCarrier & Pick<Game, "soldierUnrest">,
 }
 
 /**
+ * PROPAGANDANIN İNANILIRLIĞI — halkın kişiliğine göre (plan belgesi Fikir 15).
+ *
+ * Kararın ikinci maddesi: "isyankâr bir halk propagandaya daha çok inanır,
+ * itaatkâr bir halk daha az". Kişilik (`engine/populace-persona.ts`) Halk-AI
+ * kimlik bilgisinin bir parçasıdır, yani oyun kurucusunun channel'a verdiği
+ * huydur; kese o huya çarpar.
+ *
+ * YALNIZCA `gold_commons` KANALINA UYGULANIR ve bu bilinçli bir sınır:
+ *  - `gold_commons` halkın arasına dağıtılan paradır ve etkisi halkın var olan
+ *    hoşnutsuzluğunu ÖRGÜTLEMESİdir — yani inanç mekanizmanın kendisi.
+ *  - `gold_garrison` askerin kesesine giren paradır; inanç değil çıkar işler.
+ *  - `goods_glut` pazardaki mal miktarıdır, `raid_lure` dağdaki eşkıyadır.
+ *    İkisi de halkın neye inandığından bağımsız fiziksel etkilerdir.
+ * Çarpanı hepsine uygulamak, kişiliği bir "genel sabotaj zayıflığı"na
+ * çevirirdi; oysa karar bir ENFORMASYON etkisinden söz ediyor.
+ *
+ * DENGE İNVARYANTI KORUNUR: çarpan yalnızca EKLENEN payı ölçekler, TAVANI
+ * (`AGITATION.commons.cap` = 11,5) hiç oynatmaz. Yani isyankâr bir halkta bile
+ * yabancının bütün emeği hâlâ tek bir şenliğin rızaya kattığı 12 puanın
+ * altında kalır — kesenin ölçülmüş verimsizliği (hedefin kendi maaşını
+ * ödememesinden ~14 kat verimsiz) bozulmuyor, yalnızca doyuma varma hızı
+ * kişiliğe göre değişiyor.
+ *
+ * Kişilik yoksa (Halk-AI kimlik bilgisi olmayan channel) çarpan 1'dir: bugüne
+ * kadarki davranış birebir korunur. Fikir 2'nin kademeli açılım deseni.
+ *
+ * ÇARPANIN BÜYÜKLÜĞÜ ÖLÇÜLEREK SEÇİLDİ, gözle değil. Üst sınır
+ * `cap / perPurse` = 11,5 / 9,6 ≈ 1,198'dir: bunun üstünde TEK kese en inançlı
+ * halkta tavana çakar. İlk denemede 1,25 yazıldı ve tam bu oldu — mekaniğin
+ * "keseler art arda birikir" dokusu (ve dolayısıyla çift bekleme penceresiyle
+ * günlük tavanların anlamı) o kişilikte tamamen kayboluyordu, çünkü bir kese
+ * zaten yapılabilecek her şeyi yapıyordu. 1,15 seçildi: en inançlı halkta bile
+ * tek kese 11,04'te kalır, tavanın ALTINDA, yani birikim hâlâ bir şey ifade
+ * eder. Simetri için itaatkâr taraf 0,85.
+ */
+export const AGITATION_BELIEF: Record<PopulacePersona, number> = {
+  isyankar: 1.15,
+  zeki_istekli: 1,
+  bagli_itaatkar: .85,
+} as const;
+
+/** Kişiliğin propagandaya inanma çarpanı; kişilik yoksa 1 (bugünkü davranış). */
+export const agitationBelief = (persona: PopulacePersona | null | undefined) =>
+  (persona && AGITATION_BELIEF[persona]) || 1;
+
+/**
  * Yeni bir kesenin hedefin kaydına yazacağı değerler.
  *
  * `at` kesenin VARDIĞI andır (`completesAt`), cron'un çalıştığı an değil: etki
  * geriye dönük damgalanır, böylece cron bir tur gecikse de sonuç değişmez.
  * Mevcut birikim önce o ana kadar sönümlenir, sonra yeni pay eklenir ve tavan
  * uygulanır.
+ *
+ * `persona` hedefin Halk-AI kişiliğidir (varsa) ve YALNIZCA `gold_commons`
+ * payını ölçekler; bkz. `AGITATION_BELIEF`.
  */
 export function applyAgitation(
   game: AgitationCarrier,
   kind: AgitationKind,
   at: number,
+  persona: PopulacePersona | null = null,
 ): { agitationPressure: number; agitationBribe: number; agitationAt: number } {
   const decayed = agitationEffect(game, at);
   const share = decayed.shielded ? AGITATION.shieldedShare : 1;
   const pressure = kind === "gold_commons"
-    ? Math.min(AGITATION.commons.cap, decayed.pressure + AGITATION.commons.perPurse * share)
+    ? Math.min(AGITATION.commons.cap, decayed.pressure + AGITATION.commons.perPurse * share * agitationBelief(persona))
     : decayed.pressure;
   const bribe = kind === "gold_garrison"
     ? Math.min(AGITATION.garrison.cap, decayed.bribe + AGITATION.garrison.perPurse * share)
@@ -292,6 +343,33 @@ export const AGITATION_NOTICE: Record<AgitationKind, string> = {
   gold_garrison: "Kışlada yabancı bir kese dolaştığı duyuldu; kimin gönderdiği belli değil.",
   goods_glut: "Pazarda tuhaf bir bolluk var: kimsenin bilmediği kervanlar tezgâhları doldurdu, satış fiyatları düştü. Malın nereden geldiği anlaşılamadı.",
   raid_lure: "Dağ yollarında tuhaf bir hareket var: eşkıya sanki kaleye doğru çekilmiş. Kimin çektiği belli değil.",
+};
+
+/**
+ * PROPAGANDANIN KONUSU — Halk-AI'ya verilen tek şey (plan belgesi Fikir 15).
+ *
+ * `engine/populace-voice.ts` → `DEMAND_SUBJECT` ile birebir aynı rol ve aynı
+ * gerekçeyle motorda: konu bir yerde, prompt başka yerde yazılırsa ikisi
+ * sessizce sapar. Yukarıdaki `AGITATION_NOTICE` bitmiş ŞABLON cümledir (Halk-AI
+ * yoksa kullanılır); bu tablo ise modele verilen KONUDUR.
+ *
+ * İÇERİK KASITLI OLARAK BELİRSİZ ve bu kararın BİRİNCİ maddesidir:
+ * söylenti yalnızca "birileri parayla dolaşıyor" mertebesinde kalır, hedefin
+ * GERÇEK bir zaafına (düşük istihkakına, boş hazinesine) ASLA işaret etmez.
+ * Sebep asimetrik bilgi sınırı (plan belgesi §2): gönderen Kral hedefin iç
+ * verisini bilmiyor, dolayısıyla gönderdiği söylenti de onu bilemez. Somut bir
+ * zaaf işaret eden bir metin, hedefin verisini gönderene sızdırmanın dolaylı
+ * bir yolu olurdu — üstelik hedef Kral kendi panelinde o zaafı görüp
+ * "yabancı benim ambarımı biliyor" sonucuna varırdı.
+ *
+ * Bu yüzden konular hedefin durumundan DEĞİL, kesenin TÜRÜNDEN türer: türü
+ * gönderen zaten kendisi seçmiştir, yeni bir bilgi sızıntısı yoktur.
+ */
+export const AGITATION_SUBJECT: Record<AgitationKind, string> = {
+  gold_commons: "çarşıda ve kahvelerde yabancı bir elin para dağıttığı söylentisi; kimin dağıttığı bilinmiyor",
+  gold_garrison: "kışlada yabancı bir kesenin dolaştığı söylentisi; kimin soktuğu bilinmiyor",
+  goods_glut: "pazarda kimsenin tanımadığı kervanların mal yığdığı ve tezgâh fiyatlarının düştüğü söylentisi; malın nereden geldiği bilinmiyor",
+  raid_lure: "dağ yollarındaki eşkıyanın kaleye doğru çekildiği söylentisi; kimin çektiği bilinmiyor",
 };
 
 const WHERE: Record<AgitationKind, string> = {

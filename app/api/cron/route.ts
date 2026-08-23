@@ -6,8 +6,8 @@ import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
 import { agitations, agreements, channelMembers, channels, gameSaves, intelDefenses, llmCredentials, migrations, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
 import {
-  AGITATION, AGITATION_NOTICE, type AgitationKind,
-  agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut, applyLure,
+  AGITATION, type AgitationKind,
+  agitationSenderNotice, applyAgitation, applyGlut, applyLure,
 } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
 import { arrivingMigrants, migrationArrivalNotice, pickMigrationTarget } from "../../../engine/migration";
@@ -23,6 +23,10 @@ import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderN
 // Sağlayıcı çağrısı paylaşılan modülden gelir; bu dosyada artık `fetch` yok.
 import { callProvider } from "../../../server/llm-provider";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
+// PROPAGANDA (plan belgesi Fikir 15): dış kesenin defter satırı ve kişilik
+// çarpanı. Kimlik bilgisi TEK kapıdan çözülür (`populaceCredentialFor`).
+import { agitationNotice, propagandaNarrator } from "../../../server/populace-narrator";
+import { populaceCredentialFor } from "../../../server/populace-ai-desk";
 import { decryptByok } from "../../../server/byok-crypto";
 import { pruneExpiredSessions } from "../../../server/account-auth";
 import { noteToKing } from "../../../server/king-notice";
@@ -560,6 +564,12 @@ async function settleAgitations(now: number) {
     const [shield] = await db.select().from(intelDefenses).where(eq(intelDefenses.userId, row.targetUserId)).limit(1);
     const exposed = Boolean(shield?.activeUntil && shield.activeUntil > row.completesAt);
     const kind = row.kind as AgitationKind;
+    // PROPAGANDA (plan belgesi Fikir 15). Hedefin Halk-AI kimlik bilgisi iki
+    // şeyi birden taşır: söylentiyi anlatacak anahtar VE halkın kişiliği.
+    // Kişilik kesenin SAYISAL payını ölçekler (isyankâr halk propagandaya daha
+    // çok inanır), anahtar defterdeki CÜMLEYİ üretir. Kimlik bilgisi yoksa
+    // ikisi de bugünkü hâlinde kalır: çarpan 1, cümle şablon.
+    const populaceAi = await populaceCredentialFor(row.targetUserId, env.BYOK_MASTER_KEY);
     // Mal kesesi yığın taşıyıcısına, altın kesesi baskı/kese taşıyıcılarına
     // yazar. İkisi ayrı silahtır: mal kesesi muhalefet baskısı üretmez, çünkü bol
     // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
@@ -569,9 +579,16 @@ async function settleAgitations(now: number) {
         // Yönlendirme `completesAt`e damgalanır; akın penceresi bu damgayı
         // pencerenin BAŞLANGICINA göre okur, yani sonuç iki okumada da aynı.
         ? applyLure({ ...target, speed }, row.completesAt)
-        : applyAgitation({ ...target, speed }, kind, row.completesAt);
+        : applyAgitation({ ...target, speed }, kind, row.completesAt, populaceAi?.persona ?? null);
     const senderName = exposed ? await displayNameOf(row.sourceUserId, channelName) : "";
-    const text = exposed ? agitationExposedNotice(senderName, kind) : AGITATION_NOTICE[kind];
+    // Satırın ne olacağı TEK yerde kararlaşır (server/populace-narrator.ts →
+    // agitationNotice): ifşa yolunda deterministik rapor, sessiz yolda Halk-AI
+    // söylentisi, model konuşamazsa şablon. Karar burada tekrarlanmaz.
+    const text = await agitationNotice({
+      kind,
+      exposedSender: senderName,
+      narrate: populaceAi ? propagandaNarrator(populaceAi) : null,
+    });
 
     const written = await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, {
       ...target,
