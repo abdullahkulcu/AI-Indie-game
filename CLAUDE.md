@@ -99,7 +99,7 @@ Format ve kuralın tam metni için → `updates/README.md`.
 - Komut satırı: `./run.sh help` tüm sık kullanılan komutları listeler
   (`./run.sh check` = tsc + lint, `./run.sh cron` = gece vardiyasını beklemeden
   tetikle).
-- Test çalıştırma: `npm test` (36 dosya, `node --import tsx --test`).
+- Test çalıştırma: `npm test` (37 dosya, `node --import tsx --test`).
 - UI sekmeleri: `meclis`, `binalar`, `halk`, `ordu`, `istihbarat`, `defter`,
   `diyar`
   (`components/KingdomGame.tsx`).

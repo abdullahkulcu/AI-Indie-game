@@ -5,7 +5,7 @@ import { currentUser } from "../../../server/account-auth";
 import { channelAverages, channelVictoryStanding, intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
 import { sendAgitation } from "../../../server/agitation-desk";
 import { AGITATION, agitationDayStart } from "../../../engine/agitation";
-import { isTraded } from "../../../engine/market";
+import { channelPriceIndex, isTraded } from "../../../engine/market";
 import type { TradeKey } from "../../../engine/types";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
@@ -103,12 +103,33 @@ export async function GET(request: Request) {
       reportStale: report && mission ? isStaleReport(mission.completesAt, now) : false,
     }];
   });
+  const compare = channelAverages({ channelName: channel.name, excludeUserId: user.id, rows, now });
   return response({ channel, kingdoms, home: { x: home.x, z: home.z, ring: home.ring, biome: home.biome }, extent: worldExtent([home, ...kingdoms.map(k => ({ x: k.position.x, z: k.position.z, ring: k.ring, biome: k.terrain as never }))]), minePosition: sharedMinePosition(), defense: { active: Boolean(defense[0]?.activeUntil && defense[0].activeUntil > Date.now()), activeUntil: defense[0]?.activeUntil ?? null }, incomingAlerts: incoming.length,
     // KIYAS: channel'ın anonim ortalaması. Yukarıdaki `rows` sorgusu channel'ın
     // tüm aktif üyelerini zaten okuduğu için ikinci bir DB turu yok; kimin hangi
     // değere sahip olduğu istemciye inmez, yalnızca ortalama iner (ve aday
     // sayısı gizlilik alt sınırının altındaysa o bile inmez).
-    compare: channelAverages({ channelName: channel.name, excludeUserId: user.id, rows, now }),
+    compare,
+    /**
+     * CHANNEL PAZAR ENDEKSİ (plan belgesi Fikir 24) — komşuların açık emir
+     * akışının yerel fiyata sızması.
+     *
+     * NEDEN BURADAN ÇIKIYOR: endeks SUNUCU-TÜREVİDİR ve kaydın içinde
+     * DURMAZ. Kayda konsaydı istemci onu bildirir ve `commons` istismarının
+     * aynısı doğardı (bkz. server/save-validation.ts, "HALKIN DEFTERİ
+     * SUNUCUNUN"): Kral endeksi kendi lehine bildirip fiyatı kırar/şişirirdi.
+     * Burada hesaplanıp SALT OKUNUR olarak inince istemcinin bildirebileceği
+     * bir alan hiç var olmuyor — istismar kapısı açılmadan kapanıyor.
+     *
+     * Yukarıdaki `rows` sorgusu channel'ın bütün aktif kayıtlarını ZATEN
+     * okuduğu için ikinci bir DB turu yok; toplamlar `channelAverages`'ın
+     * kendi döngüsünden geliyor (kararı gereği bağımsız bir agregasyon
+     * kurulmadı). Kimin ne emri verdiği İNMEZ, yalnızca mal başına tek bir
+     * çarpan iner ve o da gizlilik alt sınırının altında hiç üretilmez.
+     */
+    marketIndex: compare.market
+      ? channelPriceIndex({ ...compare.market, channelSpeed: channel.speed })
+      : null,
     // Dış kese: bedeli, günlük tavanı ve Kralın kendi opt-out durumu. Sabitler
     // motordan okunur; panel kendi kopyasını tutmaz.
     agitation: {
