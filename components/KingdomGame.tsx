@@ -32,7 +32,7 @@ import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
 // Müzakere sınırları TEK kaynaktan gelir. Panelde elle yazılan bir tavan,
 // sunucunun uyguladığı tavandan sapınca Kral reddedilecek bir şart öneriyor.
-import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, carriesTribute, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
+import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, canSpeak, carriesTribute, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
 import type { Game, GameAction, TerrainId as EngineTerrainId } from "@/engine/types";
 
 
@@ -105,7 +105,9 @@ export default function KingdomGame(){
  // DERİN GÖZETLEMENİN BEDELİ (Fikir 5). Sunucudan iner (app/api/world →
  // intel.deepCost, kaynağı engine/intel.ts); panel kendi kopyasını TUTMAZ.
  // Başlangıç değeri yalnızca ilk çizim içindir, karar sunucudadır.
- [deepIntel,setDeepIntel]=useState<{deepCost:number}>({deepCost:300});
+ [deepIntel,setDeepIntel]=useState<{deepCost:number}>({deepCost:300}),
+ // Kralın kendi eliyle yazdığı sözün taslağı. Masa başına tek taslak.
+ [envoyReply,setEnvoyReply]=useState<{tableId:string;text:string}|null>(null);
  const lastCloudSave=useRef(0),saving=useRef(false),revision=useRef<number|null>(null),worldRefresh=useRef<(()=>void)|null>(null),negotiationRefresh=useRef<(()=>void)|null>(null),lastEnvoySeen=useRef<number|null>(null),chatEnd=useRef<HTMLDivElement|null>(null);
  // Halkın meclise HANGİ talep için girdiği. Ref, state değil: bir daha
  // konuşmamayı sağlamak dışında hiçbir şeyi çizmez, çizimi eklenen balonun
@@ -295,6 +297,33 @@ async function openNegotiation(){
    setToast(`Şart ${table.counterpart} tarafına sunuldu; imzaları bekleniyor.`);
    negotiationRefresh.current?.();
   }catch(error){setToast(error instanceof Error?error.message:"Şart sunulamadı.")}
+  finally{setWorldBusy(false)}
+ }
+
+ /**
+  * KRALIN KENDİ SÖZÜ. Sunucu bunu zaten destekliyordu (`speaker` gövdeden
+  * gelir ve "general" değilse "king" yazılır); arayüzde o yolu çağıran hiçbir
+  * düğme yoktu. Kral masayı AÇARKEN (`envoyMessage`) ve ŞART SUNARKEN
+  * (`proposeTerms`, o da `speaker:"king"` gönderiyor) kendi cümlesini
+  * yazabiliyordu — ama masa kurulduktan sonra şart taşımayan düz bir cevap
+  * yazmanın hiçbir yolu yoktu, her söz Generalin ağzından gidiyordu.
+  *
+  * Konuşma hakkını motorun `canSpeak`i belirler; burada ikinci bir eşik yok.
+  */
+ async function kingReply(table:NegotiationTable){
+  if(worldBusy||!envoyReply||envoyReply.tableId!==table.id)return;
+  const message=envoyReply.text.trim();
+  if(!message)return;
+  setWorldBusy(true);
+  try{
+   const response=await fetch("/api/negotiate",{method:"POST",headers:{"content-type":"application/json"},
+     body:JSON.stringify({action:"reply",speaker:"king",negotiationId:table.id,message})});
+   const data=await response.json() as {error?:string};
+   if(!response.ok)throw new Error(data.error||"Söz masaya ulaşmadı.");
+   setEnvoyReply(null);
+   setToast(`${table.counterpart} masasına kendi sözünüz yazıldı.`);
+   negotiationRefresh.current?.();
+  }catch(error){setToast(error instanceof Error?error.message:"Söz masaya ulaşmadı.")}
   finally{setWorldBusy(false)}
  }
 
@@ -507,6 +536,10 @@ async function openNegotiation(){
       status:table.status as NegotiationStatus,turns:table.turns,proposed:table.proposed as Terms|null,
       proposedBy:table.proposedBy as Side|null,openedAt:0,expiresAt:table.expiresAt,lastTurnAt:0};
      const sunabilir=canProposeTerms(asNegotiation,table.side,true,now).ok;
+      // Kralın söz hakkı: eşik motorun `canSpeak`inden okunur, panel kendi
+      // kuralını kurmaz (süre, söz tavanı ve "şartın karşıda" hâli oradadır).
+      const konusabilir=canSpeak(asNegotiation,table.side,now).ok;
+      const taslak=envoyReply&&envoyReply.tableId===table.id?envoyReply:null;
      const haracVar=carriesTribute(table.topic as NegotiationTopic);
      const form=envoyTerm&&envoyTerm.tableId===table.id?envoyTerm:null;
      return <article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
@@ -516,6 +549,18 @@ async function openNegotiation(){
       {table.canAccept&&<div className="envoy-actions">
         <button disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"accept")}>ONAYLA</button>
         <button className="ghost" disabled={worldBusy} onClick={()=>void negotiationAction(table.id,"decline")}>REDDET</button>
+      </div>}
+      {konusabilir&&!taslak&&<div className="envoy-actions">
+        <button className="ghost" onClick={()=>setEnvoyReply({tableId:table.id,text:""})}>KENDİ SÖZÜNÜ YAZ</button>
+      </div>}
+      {konusabilir&&taslak&&<div className="envoy-term-form">
+        <textarea value={taslak.text} onChange={event=>setEnvoyReply({tableId:table.id,text:event.target.value})}
+         placeholder="Kral olarak kendi sözünüz…" maxLength={MAX_MESSAGE_LENGTH} rows={3}/>
+        <small>Bu söz masaya KRAL olarak yazılır; Generalin ağzından gitmez. Söz tavanından bir hak düşer.</small>
+        <div className="envoy-actions">
+         <button disabled={worldBusy||!taslak.text.trim()} onClick={()=>void kingReply(table)}>SÖZÜ GÖNDER</button>
+         <button className="ghost" disabled={worldBusy} onClick={()=>setEnvoyReply(null)}>VAZGEÇ</button>
+        </div>
       </div>}
       {sunabilir&&!form&&<div className="envoy-actions">
         <button className="ghost" onClick={()=>setEnvoyTerm({tableId:table.id,mode:"amount",value:"",resource:"gold",payer:"them",hours:"24",everyHours:"6",note:""})}>KENDİ ŞARTINI SUN</button>

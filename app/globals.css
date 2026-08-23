@@ -155,7 +155,9 @@
 .envoy-door button:disabled{opacity:.4;cursor:not-allowed}
 .envoy-term-form{margin-top:7px;padding:8px 9px;border:1px dashed rgba(190,150,220,.4);border-radius:4px;background:rgba(150,110,190,.08)}
 .envoy-term-form .envoy-fields{display:flex;gap:6px;margin-bottom:6px}
-.envoy-term-form select,.envoy-term-form input{min-width:0;flex:1;width:100%;padding:5px 7px;border:1px solid rgba(214,168,80,.3);border-radius:3px;background:rgba(20,13,7,.85);color:#efe0c0;font:inherit;font-size:.74rem}
+.envoy-term-form select,.envoy-term-form input,.envoy-term-form textarea{min-width:0;flex:1;width:100%;padding:5px 7px;border:1px solid rgba(214,168,80,.3);border-radius:3px;background:rgba(20,13,7,.85);color:#efe0c0;font:inherit;font-size:.74rem}
+/* Kralın kendi sözü: aynı kutu ailesi, yalnızca çok satırlı. */
+.envoy-term-form textarea{display:block;margin-bottom:6px;resize:vertical;min-height:56px;line-height:1.45}
 .envoy-term-form>input{margin-bottom:6px}
 .envoy-term-form small{display:block;font-size:.66rem;line-height:1.4;opacity:.62}
 .envoy-new>button:disabled{opacity:.4;cursor:not-allowed}
