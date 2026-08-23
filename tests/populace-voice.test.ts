@@ -9,6 +9,7 @@ import {
   garrisonVetoes, openDemands, promiseGaps,
 } from "../engine/populace-voice";
 import { SOLDIER_THRESHOLDS } from "../engine/populace";
+import { FACTION_THRESHOLDS } from "../engine/faction";
 import { COMPARE_BETTER, type CompareMetric } from "../engine/comparison";
 import type { Game } from "../engine/types";
 
@@ -259,6 +260,78 @@ test("kıyas ölçütlerinin yönü motorun tek kaynağından okunur", () => {
   assert.ok(kiyasOf(good({ comparison: worse })));
   const better = compare({ taxRate: 5, factionPressure: 0 }, { taxRate: 30, factionPressure: 40 });
   assert.equal(kiyasOf(good({ comparison: better })), undefined);
+});
+
+// --- KOALİSYON MASASI: muhalefetle pazarlık (Fikir 8) ---------------------
+
+const masaOf = (signals: VoiceSignals) => derivePopulaceDemands(signals).find(demand => demand.kind === "muhalefet");
+
+test("baskı girdisi yoksa ya da elebaşı çıkmamışsa masa kurulmaz", () => {
+  assert.equal(masaOf(good()), undefined);
+  // Kıpırdanma var ama henüz bir önder yok: masaya oturacak muhatap da yok.
+  assert.equal(masaOf(good({ factionPressure: FACTION_THRESHOLDS.stirring })), undefined);
+  assert.equal(masaOf(good({ factionPressure: FACTION_THRESHOLDS.organized - 1 })), undefined);
+});
+
+test("eşik YENİ BİR SAYI DEĞİL: elebaşının çıktığı eşiktir", () => {
+  // `organized` = "bir elebaşı çıktı ve halkın bir bölümü onun sözünü dinliyor".
+  assert.equal(VOICE_THRESHOLDS.muhalefet.pressure, FACTION_THRESHOLDS.organized);
+  assert.equal(VOICE_THRESHOLDS.muhalefet.urgent, FACTION_THRESHOLDS.defiant);
+  const demand = masaOf(good({ factionPressure: FACTION_THRESHOLDS.organized }));
+  assert.ok(demand);
+  assert.equal(demand.voice, "commons");
+  assert.equal(demand.severity, "normal");
+  assert.equal(demand.minGameHours, VOICE_THRESHOLDS.muhalefet.hours);
+});
+
+test("açık meydan okumada masa teklifi ACİL olur", () => {
+  const demand = masaOf(good({ factionPressure: FACTION_THRESHOLDS.defiant }));
+  assert.ok(demand);
+  assert.equal(demand.severity, "urgent");
+  assert.match(demand.text, /meydandan/);
+  // Teklif hâlâ masadadır: ültimatom bile bir kapı bırakır.
+  assert.match(demand.text, /[Mm]asaya oturmayı/);
+});
+
+test("elebaşının adı verilirse metinde geçer, verilmezse isimsiz kalır", () => {
+  const named = masaOf(good({ factionPressure: 60, factionLeader: "Değirmenci Balaban" }));
+  assert.match(named!.text, /Değirmenci Balaban/);
+  const anonymous = masaOf(good({ factionPressure: 60, factionLeader: null }));
+  assert.ok(anonymous, "ad yoksa talep YİNE açılır");
+  assert.match(anonymous.text, /elebaşısı/);
+  // Boş dize de ad sayılmaz.
+  assert.match(masaOf(good({ factionPressure: 60, factionLeader: "   " }))!.text, /elebaşısı/);
+});
+
+test("MASANIN ÇARESİ muhalefeti dağıtan bir emir DEĞİL, rızayı yükseltenlerdir", () => {
+  // `engine/faction.ts`'in taşıyıcı ilkesi: Kral'ın muhalefeti BASTIRACAK bir
+  // emri yoktur. Masa da yeni bir çıkış açmaz.
+  const open = derivePopulaceDemands(good({ factionPressure: 60 })).filter(item => item.kind === "muhalefet");
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "host_festival", arguments: {} }]), ["muhalefet"]);
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "set_tax_rate", arguments: { rate_percent: 10 } }]), ["muhalefet"]);
+  // Askerî bir hamle masayı kapatmaz.
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "train_unit", arguments: { unit_type: "spearman", count: 5 } }]), []);
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "set_watch_ratio", arguments: { percent: 90 } }]), []);
+});
+
+test("çare listesi kıyas talebiyle AYNI kaynaktan okunur", () => {
+  // Kısıt #5: "muhalefet baskısı nasıl erir" sorusunun cevabı iki yerde ayrı
+  // yazılmasın. Kıyas talebi de aynı listeyi kullanıyor.
+  const masa = masaOf(good({ factionPressure: 60 }))!;
+  const kiyas = kiyasOf(good({ comparison: compare({ factionPressure: 40, taxRate: 30 }, { factionPressure: 0, taxRate: 14 }) }))!;
+  for (const action of masa.satisfiedBy.actions) {
+    assert.ok(kiyas.satisfiedBy.actions.includes(action), `${action} iki listede de olmalı`);
+  }
+});
+
+test("masa teklifi Halk-AI boru hattına girer: konusu tanımlı ve sayısız", () => {
+  // Kararın 1. maddesi (talep LLM'den üretilir) ayrı bir yol açmadan sağlanır:
+  // bu bir `DemandKind` olduğu için Fikir 2'nin anlatım hattından geçer.
+  assert.ok(DEMAND_SUBJECT.muhalefet.length > 20);
+  assert.ok(!/[0-9%]/.test(DEMAND_SUBJECT.muhalefet));
+  // Kademe süreye göre sertleşir; masa da bu hattı kullanır.
+  assert.equal(demandTone("normal", 0), "ilk");
+  assert.equal(demandTone("normal", DEMAND_TONE_HOURS.ofke), "ofke");
 });
 
 // --- MAKAS: ilan edilen ile fiilen verilen (Fikir 14) ----------------------

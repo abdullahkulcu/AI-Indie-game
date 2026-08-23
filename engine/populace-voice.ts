@@ -1,4 +1,5 @@
 import { COMPARE_BETTER, COMPARE_METRICS, type CompareMetric } from "./comparison";
+import { FACTION_THRESHOLDS } from "./faction";
 import { SOLDIER_THRESHOLDS } from "./populace";
 
 /**
@@ -23,7 +24,7 @@ import { SOLDIER_THRESHOLDS } from "./populace";
  * (bkz. server/populace-voice.ts).
  */
 
-export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas" | "vaat";
+export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas" | "vaat" | "muhalefet";
 
 export type DemandSeverity = "normal" | "urgent";
 
@@ -114,6 +115,26 @@ export const VOICE_THRESHOLDS = {
    * HESAP SORMADIR; acil bir talebin tavandaki yerini almamalı.
    */
   vaat: { promise: 100, gap: 12, hours: 4 },
+  /**
+   * KOALİSYON MASASI — muhalefetin elebaşısının talebi (plan belgesindeki
+   * Fikir 8).
+   *
+   * `pressure` — talebin açılması için gereken muhalefet baskısı. YENİ BİR SAYI
+   * DEĞİL: `FACTION_THRESHOLDS.organized`, yani "bir elebaşı çıktı ve halkın
+   * bir bölümü onun sözünü dinliyor" eşiği. Plan belgesi de tam olarak bu
+   * eşiği öneriyor ("örn. `organized`"). Elebaşı yokken masaya oturacak bir
+   * muhatap da yoktur, o yüzden eşik bu.
+   * `urgent` — `FACTION_THRESHOLDS.defiant`: muhalefet meydanda açıkça
+   *   toplanıyorsa bu artık bir pazarlık değil bir ültimatomdur.
+   * `hours` — 2, dosya başındaki "ayrıca ölçülmemiş kaleme 2 oyun saati"
+   *   kuralı. Kısa olması sorun değil: baskının 50'ye çıkması zaten uzun bir
+   *   düşük-rıza dönemi ister, yani süre şartı fiilen zaten dolmuş olur.
+   */
+  muhalefet: {
+    pressure: FACTION_THRESHOLDS.organized,
+    urgent: FACTION_THRESHOLDS.defiant,
+    hours: 2,
+  },
 } as const;
 
 /** Aynı anda açık kalabilecek en fazla talep. Kralı yormamanın asıl freni bu. */
@@ -153,6 +174,20 @@ export type VoiceSignals = {
   nominalPay?: number;
   /** Fiilen ödenebilen asker maaşı (%); `engine/tick.ts → servedRations().pay`. */
   servedPay?: number;
+  /**
+   * KOALİSYON MASASI girdileri (plan belgesindeki Fikir 8).
+   *
+   * `factionPressure` — `engine/faction.ts`'in kendi ölçüsü; burada yeniden
+   * hesaplanmaz, dışarıdan hazır gelir.
+   * `factionLeader` — elebaşının adı (`factionLeaderName`). Motor onu kendisi
+   * üretemez, çünkü tohum krallığın adı ve kuruluş anıdır ve bu modül krallık
+   * kimliğini hiç görmüyor. Verilmezse ŞABLON metin isimsiz kalır — talep yine
+   * açılır, yalnızca cümlesi "muhalefetin elebaşısı" der.
+   *
+   * İkisi de opsiyoneldir: göndermeyen çağıran için masa hiç kurulmaz.
+   */
+  factionPressure?: number;
+  factionLeader?: string | null;
   /**
    * SESSİZ KIYASLAMA girdisi — DIŞARIDAN gelir, motor veritabanı okumaz
    * (bkz. `server/world-projection.ts` → `populaceComparison`).
@@ -264,6 +299,13 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
       satisfiedBy: { actions: ["host_festival", "set_ale_ration", "build_structure"], buildingTypes: ["park", "theater", "town_square"] },
     });
   }
+
+  // Koalisyon masası (Fikir 8) somut kalemlerden SONRA, makastan ÖNCE:
+  // elebaşının talebi tek tek şikâyetlerin toplamıdır, onların yerine geçmez —
+  // ama bir hesap sormadan (makas) ve bir arka plan sinyalinden (kıyas) daha
+  // ağırdır, çünkü karşısında gerçek bir muhatap vardır.
+  const faction = factionDemand(signals);
+  if (faction) demands.push(faction);
 
   // Makas (Fikir 14) somut kalemlerin ARDINDA: aciliyeti onlar taşır, bu talep
   // hesap sorar. Kıyastan önce gelir çünkü dayanağı krallığın KENDİ defteridir,
@@ -395,6 +437,58 @@ function promiseDemand(signals: VoiceSignals): DemandCandidate | null {
       // büyüten yapılarla sayılır; Sur kurmak sofradaki eksiği kapatmaz.
       ...(open.some(entry => entry.channel === "food") ? { buildingTypes: PROMISE_BUILDINGS } : {}),
     },
+  };
+}
+
+// --- KOALİSYON MASASI: muhalefetle pazarlık (Fikir 8) ----------------------
+
+/**
+ * ELEBAŞI KRAL'A SOMUT BİR TALEP İLETİR.
+ *
+ * Bugüne kadar iç muhalefetin (`engine/faction.ts`) Kral'la HİÇ etkileşimi
+ * yoktu: baskı büyüyor, garnizonun zapt gücünü kırıyor ve Kral'ın elinde
+ * yalnızca "rızayı yükselt" kalıyordu. Kral elebaşıyla konuşamıyordu bile. Bu
+ * talep o masayı kuruyor.
+ *
+ * MEKANİĞE YENİ BİR ÇIKIŞ EKLENMEDİ ve bu, `engine/faction.ts`'in taşıyıcı
+ * ilkesine (Kral'ın muhalefeti BASTIRACAK bir emri YOKTUR) sadık kalmanın
+ * doğrudan sonucudur: talebin `satisfiedBy` listesi muhalefeti dağıtan bir emir
+ * değil, RIZAYI YÜKSELTEN emirlerdir ve liste `COMPARE_REMEDY.factionPressure`
+ * ile AYNI yerden okunur (kısıt #5) — "muhalefet baskısı nasıl erir" sorusunun
+ * cevabı iki yerde ayrı yazılmasın. Yani Kral pazarlığı "kabul ettiğinde" bile
+ * yaptığı şey halkın hayatını düzeltmektir; elebaşı bir imza karşılığında
+ * dağılmaz, rıza yükseldiğinde dağılır.
+ *
+ * "Anlaşma indirimi" (kabul edilince baskının NORMALDEN HIZLI erimesi) BİLEREK
+ * YAPILMADI. Plan belgesinin bağlayıcı "Karar (2026-08-22)" kısmı yalnızca iki
+ * şey sabitliyor — talebin LLM'den üretilmesi ve ısrarlı reddin elebaşıyı
+ * sertleştirmesi; indirim kararın değil ön analizin bir cümlesiydi. Teknik
+ * gerekçesi de var: indirim `advanceFaction`'a bir "anlaşma damgası" ister,
+ * damga `engine/types.ts` + `.strict()` save şemasına yeni bir alan demek
+ * (kısıt #3) ve bu turda o dosyalara dokunma yetkisi yoktu.
+ *
+ * TALEBİN CÜMLESİ LLM'DEN GELİR (kararın 1. maddesi) ve bunun için ayrı bir
+ * yol açılmadı: bu bir `DemandKind` olduğu için Fikir 2'nin mevcut anlatım
+ * boru hattından (`server/populace-narrator.ts` → `narrateDemands`) kendiliğinden
+ * geçer, kademesi `demandTone` ile süreye göre sertleşir. İkinci bir anlatıcı
+ * yazmak aynı kuralı iki yere kopyalamak olurdu.
+ */
+function factionDemand(signals: VoiceSignals): DemandCandidate | null {
+  const rule = VOICE_THRESHOLDS.muhalefet;
+  const pressure = Number(signals.factionPressure) || 0;
+  if (pressure < rule.pressure) return null;
+  const leader = String(signals.factionLeader ?? "").trim();
+  const who = leader || "Muhalefetin elebaşısı";
+  return {
+    kind: "muhalefet", voice: "commons",
+    severity: pressure >= rule.urgent ? "urgent" : "normal",
+    minGameHours: rule.hours,
+    text: pressure >= rule.urgent
+      ? `${who} meydandan Kral'a sesleniyor: halkın yükü hafifletilmedikçe kimse dağılmayacak. Masaya oturmayı hâlâ teklif ediyor.`
+      : `${who} Kral'la konuşmak istiyor: halkın yükü hafifletilirse muhalefeti dağıtacağını söylüyor.`,
+    // Muhalefet baskısı yalnızca rıza yükselince erir; çare de o yüzden rızayı
+    // yükselten emirlerdir. Liste kıyas talebiyle AYNI kaynaktan okunur.
+    satisfiedBy: { actions: [...COMPARE_REMEDY.factionPressure] },
   };
 }
 
@@ -591,6 +685,13 @@ export const DEMAND_SUBJECT: Record<DemandKind, string> = {
    * `commons` çarşıyı, `garrison` kışlayı konuşturur.
    */
   vaat: "kalede ilan edilen payın elimize eksik geçmesi; ilan edildiği söylenenin gerçekten verilmesini istiyorlar",
+  /**
+   * Koalisyon masası (Fikir 8). Konuşan taraf ÖRGÜTLÜ muhalefettir, dağınık
+   * halk değil: prompt'ta elebaşının ADI GEÇMEZ (isim yasağı) ama bir masa
+   * teklifi olduğu, yani karşılığında bir şey verildiği anlatılır — pazarlığın
+   * "ben de dağılırım" tarafı bu maddenin bütün fikri.
+   */
+  muhalefet: "örgütlü muhalefetin Kral'la pazarlık teklifi; halkın yükü hafifletilirse dağılmaya razı olduklarını söylüyorlar",
 };
 
 // --- GARNİZON VETOSU -------------------------------------------------------

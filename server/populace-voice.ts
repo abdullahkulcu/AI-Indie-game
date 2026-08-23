@@ -45,7 +45,7 @@ export async function syncPopulaceDemands(
   context: VoiceContext,
   now: number,
   narrate: DemandNarrator | null = null,
-): Promise<{ open: OpenDemand[]; closed: DemandKind[] }> {
+): Promise<{ open: OpenDemand[]; closed: DemandKind[]; derived: DemandCandidate[] }> {
   const db = getDb();
   const speed = Math.max(1, Number(context.channelSpeed) || 1);
   const candidates = derivePopulaceDemands(context);
@@ -124,6 +124,12 @@ export async function syncPopulaceDemands(
       since: byKind.get(demand.kind)?.openedAt ?? now,
     })),
     closed,
+    // `derived` DIŞARI VERİLİR çünkü `OpenDemand` `satisfiedBy` taşımıyor:
+    // "Kral bu turdaki emirle hangi talebi kapattı" sorusunu ancak adayların
+    // kendisi cevaplayabilir (`demandsSatisfiedBy`). `server/general-ledger.ts`
+    // → `loadGeneralMemory` de aynı gerekçeyle `derived` döndürüyor; desen
+    // kopyalanmadı, aynısı kullanıldı.
+    derived: candidates,
   };
 }
 

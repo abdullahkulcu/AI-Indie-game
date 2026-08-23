@@ -69,6 +69,26 @@ export function factionTarget(popularity: number) {
  * Baskıyı `hours` kadar ilerletir. `boost` dış müdahalenin (yabancı kesenin)
  * o pencerede eklediği puandır; hedefe değil doğrudan baskıya eklenir, çünkü
  * kese rızayı değiştirmez — yalnızca var olan hoşnutsuzluğu örgütler.
+ *
+ * BURAYA "SERTLEŞME HIZI" EKLEMEYİN — denendi ve KISIT #2'yi ihlal ediyor.
+ *
+ * Plan belgesindeki Fikir 8 ("Kral ısrarla reddederse elebaşı sertleşir:
+ * dil/baskı hızlanır") uygulanırken en doğal görünen yol buydu: baskı bir
+ * eşiği (örn. `organized`) geçtiyse `riseRate`i büyütmek. YAPILMADI, çünkü
+ * mevcut `rate` seçimi güvenliğini tek bir şeye borçlu: `start < target`
+ * karşılaştırması aralık BOYUNCA hiç dönmez (x hedefe doğru tek yönde yürür,
+ * onu geçmez), dolayısıyla tek büyük adım ile saniyelik adımlar aynı hızı
+ * kullanır. Oysa `current`in bir EŞİĞİ geçmesine bağlı bir hız, aralığın
+ * ortasında dönerdi: sunucunun tek adımı eşik-öncesi hızı bütün aralığa
+ * uygular, istemcinin küçük adımları eşiği geçtiği yerde hızı değiştirir ve
+ * iki taraf ayrışır. `factionPressure` `SERVER_DERIVED` olduğu için bu sapma
+ * 409 üretmez — yani hatayı GİZLER, düzeltmez; sessizce ayrışan bir motor,
+ * gürültülü ayrışan bir motordan daha kötüdür.
+ *
+ * Sertleşme bu yüzden DİLDE uygulandı ve iki yerde yaşıyor: talebin kademesi
+ * (`engine/populace-voice.ts` → `demandTone`, süreyle sertleşir) ve General'in
+ * defteri (`engine/ledger.ts` → `faction_defied`, ARTAN AĞIRLIKLA sertleşir —
+ * kararın kendisi de zaten o desene işaret ediyor).
  */
 export function advanceFaction(current: number, popularity: number, hours: number, boost = 0) {
   const start = Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(current) || 0))

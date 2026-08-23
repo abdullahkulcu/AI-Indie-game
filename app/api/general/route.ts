@@ -193,6 +193,10 @@ function gamePrompt(body: GeneralRequest) {
     // seslendirebiliyor ve General bunu "iftira" sanıp savunmaya geçmemeli.
     // Eşik ve rakam BURAYA YAZILMAZ: ölçü engine/populace-voice.ts'te
     // (`promiseGaps`, `VOICE_THRESHOLDS.vaat`) tek kaynakta yaşıyor.
+    // KOALİSYON MASASI (plan belgesi Fikir 8). Eşik ve çare listesi BURAYA
+    // YAZILMAZ: ikisi de engine/populace-voice.ts'te (`VOICE_THRESHOLDS.muhalefet`,
+    // `COMPARE_REMEDY.factionPressure`) tek kaynakta yaşıyor.
+    "Muhalefet örgütlendiğinde elebaşı Kral'a bir masa TEKLİF EDER ve bu teklif halkın sesi listesinde açık bir talep olarak görünür. Teklif gerçektir: halkın yükü hafifletilirse muhalefet dağılır. Ama bu bir imza değildir — elebaşı bir söz karşılığında dağılmaz, halkın rızası GERÇEKTEN yükseldiğinde dağılır. Kral'a masaya oturmanın somut karşılığını (şenlik, bira, verginin indirilmesi) söyle; olmayan bir 'anlaşma' aracı ya da elebaşını dağıtacak bir emir varmış gibi konuşma. Teklif tekrar tekrar geçiştirilirse elebaşının dili sertleşir ve bunu defterinde görürsün.",
     "İSTİHKAK VE MAAŞ İKİ AYRI SAYIDIR: Kral'ın İLAN ETTİĞİ oran ile ambarın/hazinenin FİİLEN karşıladığı oran. Bir emri uyguladığında ilan edilen oran gerçekten değişir — orada yalan yok. Ama ambar yetmiyorsa halkın eline geçen daha azdır ve bunu Kral'a KENDİLİĞİNDEN söylemek senin işindir: bir istihkak/maaş emrini uyguladıktan sonra karşılanıp karşılanmadığını da bir cümleyle belirt, 'ilan ettim' demekle yetinme. Halk bu makası fark eder ve yüzüne vurur; o zaman inkâr etme ve halkı yalancı ilan etme, farkı kabul edip nasıl kapatacağını söyle (stok bul ya da ilanı gerçeğe indir).",
     ...(body.pendingDecision
       ? [`BEKLEYEN_TEYİT=${JSON.stringify(body.pendingDecision)}`,
@@ -447,13 +451,13 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
  */
 async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: number) {
   const populace = body.kingdom?.populace;
-  if (!populace) return { lines: [] as string[], transcript: "", open: [] as OpenDemand[] };
+  if (!populace) return { lines: [] as string[], transcript: "", open: [] as OpenDemand[], derived: [] as DemandCandidate[] };
   const credential = await populaceCredentialFor(userId, env.BYOK_MASTER_KEY);
   // Üyelik TEK KAYNAKTAN okunur (`activeMembershipOf`): burada eskiden aynı
   // sorgunun elle yazılmış, channel'ın kendi durumunu hiç sormayan ve sırasız
   // bir kopyası vardı — kayıt bir channel'a, halkın sesi başkasına bakabilirdi.
   const membership = await activeMembershipOf(userId);
-  const { open } = await syncPopulaceDemands(userId, {
+  const { open, derived } = await syncPopulaceDemands(userId, {
     servedFood: Number(populace.servedFood ?? populace.foodRation) || 0,
     // İLAN EDİLEN paylar (Fikir 14'ün makasının üst tarafı). `servedFood`
     // fiilîyi, bunlar Kralın ilan ettiğini taşır; farkı motor ölçer.
@@ -467,6 +471,11 @@ async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: numb
     capacity: Number(populace.capacity) || 0,
     soldierUnrest: Number(populace.soldierUnrest) || 0,
     army: Number(populace.army) || 0,
+    // KOALİSYON MASASI (Fikir 8): baskı ve elebaşının adı istemcinin muhalefet
+    // bloğundan okunur; ikisi de motorun kendi hesaplarından (`factionPressureOf`,
+    // `factionLeaderName`) doğar, burada yeniden üretilmez.
+    factionPressure: Number(populace.muhalefet?.baski) || 0,
+    factionLeader: populace.muhalefet?.elebasi ?? null,
     buildings: body.kingdom?.buildings ?? [],
     channelSpeed: membership?.channelSpeed ?? (Number(body.kingdom?.channelSpeed) || 1),
     comparison: membership ? await loadComparison(userId, membership.channelId, membership.channelName, now) : null,
@@ -474,7 +483,7 @@ async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: numb
   // İKİ KANAL, TEK KAYNAK: yapısal özet sistem promptuna, halkın kendi sözleri
   // `user` rolünde işaretli bir bloğa gider (bkz. server/populace-brief.ts).
   // Sözler MODEL ÜRETİMİ olabildiği için sistem promptuna ham girmez.
-  return { lines: renderPopulaceVoice(open, now), transcript: renderPopulaceTranscript(open, now), open };
+  return { lines: renderPopulaceVoice(open, now), transcript: renderPopulaceTranscript(open, now), open, derived };
 }
 
 /**
@@ -534,11 +543,28 @@ async function recordTurn(
     open: Awaited<ReturnType<typeof loadGeneralMemory>>["open"];
     /** Eşleştirme `satisfiedBy` taşıyan türetilmiş liste üzerinden yapılır. */
     derived: Awaited<ReturnType<typeof loadGeneralMemory>>["derived"];
+    /** HALKIN açık talepleri ve adayları — koalisyon masası buradan okunur. */
+    populaceOpen: Awaited<ReturnType<typeof loadPopulaceVoice>>["open"];
+    populaceDerived: Awaited<ReturnType<typeof loadPopulaceVoice>>["derived"];
   },
   now: number,
 ) {
   const signals = memorySignalsOf(body);
   const met = requestsSatisfiedBy(turn.derived, turn.applied);
+
+  // KOALİSYON MASASI (plan belgesi Fikir 8). Elebaşının talebi AÇIKSA Kral'ın
+  // bu turdaki emirleri onu karşılıyor mu? Eşleştirme motorun kendi
+  // fonksiyonuyla yapılır (`demandsSatisfiedBy`), yani "hangi emir hangi talebi
+  // kapatır" kuralı burada yeniden yazılmaz (kısıt #5).
+  //
+  // "Geçiştirme" yalnızca Kral BAŞKA BİR İŞ YAPTIYSA sayılır: sohbet ettiği ya
+  // da hiçbir emir vermediği bir tur ihmal değildir (General taleplerindeki
+  // `ignored` ile aynı ölçüt ve aynı gerekçe).
+  const tableOpen = turn.populaceOpen.some(demand => demand.kind === "muhalefet");
+  const tableMet = tableOpen && demandsSatisfiedBy(
+    turn.populaceDerived.filter(demand => demand.kind === "muhalefet"),
+    turn.applied,
+  ).length > 0;
   // Uzun süredir açık duran acil bir talep varken Kral başka işlerle uğraştıysa
   // bu bir geçiştirmedir. Tur başına en fazla bir kez sayılır.
   const ignored = turn.applied.length > 0 && turn.open.some(request =>
@@ -555,6 +581,8 @@ async function recordTurn(
     kingBackedDown: false,
     requestsMet: met.length,
     requestsRefused: ignored ? 1 : 0,
+    factionSettled: tableMet,
+    factionDefied: tableOpen && !tableMet && turn.applied.length > 0,
   });
   if (kinds.length) await appendToLedger(userId, kinds, now);
 }
@@ -714,6 +742,8 @@ export async function POST(request: Request) {
       refused: review.notes.some(note => note.startsWith("✕")),
       open: memory.open,
       derived: memory.derived,
+      populaceOpen: voice.open,
+      populaceDerived: voice.derived,
     }, now);
 
     return json({
@@ -746,6 +776,8 @@ import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-req
 import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
 import { syncPopulaceDemands } from "../../../server/populace-voice";
+// Koalisyon masasının eşleştirmesi motorun kendi kuralından okunur.
+import { type DemandCandidate, demandsSatisfiedBy } from "../../../engine/populace-voice";
 import { type OpenDemand, renderPopulaceTranscript, renderPopulaceVoice } from "../../../server/populace-brief";
 import { populaceNarrator } from "../../../server/populace-narrator";
 import { populaceCredentialFor } from "../../../server/populace-ai-desk";

@@ -15,18 +15,39 @@
  * kalır hem de tekrar eden davranış güçlenerek görünür.
  */
 
-export type LedgerKind =
-  | "override"
-  | "refusal"
-  | "heeded"
-  | "starvation"
-  | "desertion"
-  | "treasury_drain"
-  | "fed_people"
-  | "paid_soldiers"
-  | "festival"
-  | "request_met"
-  | "request_refused";
+/**
+ * Defter madde türleri — TEK KAYNAK, dizi hâlinde.
+ *
+ * Eskiden bu bir birleşim (union) TİPİYDİ ve türlerin tam listesi ikinci bir
+ * yerde, `tests/ledger.test.ts` içinde ELLE yazılıydı ("her madde türü bir
+ * cümle üretir" testi). Yani yeni bir tür eklendiğinde test onu görmüyordu:
+ * cümlesi olmayan bir tür sessizce geçebilirdi. Liste artık dizidir, tip ondan
+ * TÜRETİLİR ve test de aynı diziyi okur (kısıt #5).
+ *
+ * `general_ledger.kind` sütunu serbest metindir (enum kısıtı YOK), dolayısıyla
+ * yeni bir tür migration istemez.
+ */
+export const LEDGER_KINDS = [
+  "override",
+  "refusal",
+  "heeded",
+  "starvation",
+  "desertion",
+  "treasury_drain",
+  "fed_people",
+  "paid_soldiers",
+  "festival",
+  "request_met",
+  "request_refused",
+  // KOALİSYON MASASI (plan belgesi Fikir 8). Elebaşının talebi karşılandı mı,
+  // geçiştirildi mi? Bu iki tür, kararın "Kral ısrarla reddederse elebaşı
+  // SERTLEŞİR" maddesinin taşıyıcısıdır: sertleşme burada, defterin ARTAN
+  // AĞIRLIK deseninde yaşıyor (bkz. `phraseFor`).
+  "faction_settled",
+  "faction_defied",
+] as const;
+
+export type LedgerKind = typeof LEDGER_KINDS[number];
 
 export type LedgerEntry = {
   kind: LedgerKind;
@@ -52,6 +73,10 @@ const STATEFUL: ReadonlySet<LedgerKind> = new Set<LedgerKind>([
   // Karşılanmayan talep de süregelen bir durumdur: her mesajda yeniden
   // "geçiştirdi" saymak tek bir ihmali onlarca suçlamaya çevirirdi.
   "request_refused",
+  // Muhalefetin masa teklifi de öyle: baskı 50'nin üstünde kaldığı sürece
+  // talep AÇIK kalır, yani pencere olmasa Kral tek bir konuşmada ağırlığı
+  // üçe çıkarabilir ve elebaşı sebepsiz yere en sert diline geçerdi.
+  "faction_defied",
 ]);
 
 const COUNT_WORDS = ["", "bir", "iki", "üç", "dört", "beş", "altı", "yedi", "sekiz", "dokuz", "on"];
@@ -106,6 +131,25 @@ export function phraseFor(entry: Pick<LedgerEntry, "kind" | "weight">): string {
       return weight >= 3
         ? `Talebimi ${times} geçiştirdi; istediklerim ona ulaşmıyor.`
         : `Talebimi ${times} karşılamadı.`;
+    // ELEBAŞININ SERTLEŞMESİ (plan belgesi Fikir 8, "Karar 2026-08-22").
+    //
+    // Sertleşme buradadır ve `override`/`request_refused` ile BİREBİR aynı
+    // desendir: bir kerelik ret bir gözlem, tekrar eden ret bir karakter
+    // tespitidir. Kararın "elebaşı sertleşir" cümlesinin kod tabanındaki
+    // karşılığı bu artan ağırlıktır — karar zaten `engine/ledger.ts`'in bu
+    // desenine işaret ediyor.
+    //
+    // `faction_defied` ayrıca STATEFUL listesindedir: muhalefet baskısı süregelen
+    // bir durumdur ve Kral her mesajında yeniden "geçiştirdi" sayılırsa tek bir
+    // ihmal onlarca suçlamaya dönüşür.
+    case "faction_settled":
+      return weight >= 3
+        ? `Muhalefetin elebaşısıyla ${times} pazarlığa oturdu; halkın yükünü hafifletmeyi biliyor.`
+        : `Muhalefetin talebini ${times} karşıladı.`;
+    case "faction_defied":
+      return weight >= 3
+        ? `Elebaşının masa teklifini ${times} geçiştirdi; muhalefetin dili her seferinde sertleşiyor ve artık kimse kaleyi dinlemiyor.`
+        : `Elebaşının masa teklifini ${times} geçiştirdi.`;
   }
 }
 
@@ -180,6 +224,16 @@ export type LedgerSignals = {
   /** Bu turda karşılanan / geçiştirilen General talebi sayısı. */
   requestsMet: number;
   requestsRefused: number;
+  /**
+   * KOALİSYON MASASI (plan belgesi Fikir 8) — elebaşının açık talebi bu turda
+   * karşılandı mı, geçiştirildi mi?
+   *
+   * Sayı değil BAYRAK, çünkü aynı anda tek bir masa vardır (tek bir elebaşı,
+   * tek bir `muhalefet` talebi). İkisi de opsiyonel: masa girdisi olmayan
+   * çağıran için hiçbir defter satırı açılmaz.
+   */
+  factionSettled?: boolean;
+  factionDefied?: boolean;
 };
 
 const TREASURY_FLOOR = 60;
@@ -199,6 +253,11 @@ export function deriveLedgerEvents(signals: LedgerSignals): LedgerKind[] {
   for (let i = 0; i < signals.requestsMet; i += 1) kinds.push("request_met");
   for (let i = 0; i < signals.requestsRefused; i += 1) kinds.push("request_refused");
   if (signals.appliedActions.includes("host_festival")) kinds.push("festival");
+  // Koalisyon masası: karşılama ve geçiştirme birbirini DIŞLAR — Kral aynı
+  // turda hem pazarlığa oturup hem geçiştirmiş olamaz. Karşılama önce sınanır
+  // ki sınırdaki bir tur Kral'ın aleyhine yazılmasın.
+  if (signals.factionSettled) kinds.push("faction_settled");
+  else if (signals.factionDefied) kinds.push("faction_defied");
 
   // Halkın karnı: istihkak fiilen düşükse ya da yiyecek tükeniyorsa açlık,
   // istihkak tamsa ve stok erimiyorsa tokluk deftere geçer.
