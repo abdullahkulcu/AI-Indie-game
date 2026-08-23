@@ -28,6 +28,35 @@ export const POLICY_LIMITS: Record<PolicyKey, { min: number; max: number }> = {
   taxRate: { min: 0, max: 50 },
 };
 
+/**
+ * KRALIN KENDİ ELİYLE ÇEVİRDİĞİ KOLLARIN ADI — arayüz etiketleri de buradan
+ * okunur.
+ *
+ * NEDEN BURADA: yetkinin kimde olduğu bilgisi arayüzde DÖRT ayrı yere elle
+ * yazılmıştı ve dördü aynı şeyi söylemiyordu. Halk sekmesi "doğrudan
+ * çevirirsin" derken Defter sekmesi kaydırıcıyı kilitleyip "General'i ikna
+ * etmelisin" diyor, başlangıç rehberi "düğmeyle değiştirmezsin" diyor,
+ * yetkiler kartı ise "Vergi ayarla"yı General'in yetkileri arasına koyup hemen
+ * altındaki satırda "Kral doğrudan çevirir" yazıyordu — kart kendi kendiyle
+ * çelişiyordu. Oyuncu en sık kullandığı kolun kime ait olduğunu
+ * öğrenemiyordu.
+ *
+ * `PolicyKey` bu dosyanın başından beri doğruyu söylüyordu; eksik olan
+ * arayüzün onu OKUMASIYDI.
+ */
+export const POLICY_LABELS: Record<PolicyKey, string> = {
+  foodRation: "Yiyecek istihkakı",
+  aleRation: "Bira istihkakı",
+  taxRate: "Vergi oranı",
+};
+
+/**
+ * Yetkinin tek cümlesi. Arayüzün bunu ANLATTIĞI her yer aynı dizgeyi basar;
+ * ikinci bir cümle yazılırsa iki cümle birbirinden ayrılmaya başlar.
+ */
+export const POLICY_AUTHORITY_NOTE =
+  "Vergi ve istihkakları Kral doğrudan çevirir; General uygulamaz ama her değişiklikte görüşünü söyler.";
+
 export function clampPolicy(key: PolicyKey, value: number) {
   const limit = POLICY_LIMITS[key];
   const rounded = Math.round(Number(value) || 0);

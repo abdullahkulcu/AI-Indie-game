@@ -29,7 +29,7 @@ import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, compareVerdict, t
 import { generalNameFor } from "@/engine/general-name";
 import { armySize, hourlyDemand, moodState, NEED, populationChange, rationsOf, suppression } from "@/engine/populace";
 import { defenseOf, watchRatioOf } from "@/engine/raids";
-import { applyPolicy, clampPolicy, type PolicyKey } from "@/engine/policy";
+import { applyPolicy, clampPolicy, POLICY_AUTHORITY_NOTE, POLICY_LABELS, type PolicyKey } from "@/engine/policy";
 // Müzakere sınırları TEK kaynaktan gelir. Panelde elle yazılan bir tavan,
 // sunucunun uyguladığı tavandan sapınca Kral reddedilecek bir şart öneriyor.
 import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, canSpeak, carriesTribute, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
@@ -686,7 +686,7 @@ async function openNegotiation(){
   const step=(current:number,delta:number)=>Math.max(0,Math.min(200,current+delta));
   return <div className="populace-panel">
    <div className="section-head"><span>HALKIN DURUMU · RAPOR</span><b className={`mood ${mood.id}`}>{mood.label}</b></div>
-   <div className="general-only-note"><b>Ferman senin, uygulama Generalin</b><span>Vergi ve istihkakları doğrudan çevirirsin; General uygulamaz ama her değişiklikte görüşünü söyler. Asker maaşı ve yapılar emirle yürür.</span></div>
+   <div className="general-only-note"><b>Ferman senin, uygulama Generalin</b><span>{POLICY_AUTHORITY_NOTE} Asker maaşı ve yapılar emirle yürür.</span></div>
 
    {/* HALKIN SESİ — var olan bir cezanın okunması, yeni bir ceza değil.
        Talepler sunucudan gelir (süre şartının defteri orada); Kral General'le
@@ -886,7 +886,7 @@ async function openNegotiation(){
       :"Komşuya eşkıya çekmek Generalin işidir: Meclis'te hangi sancak olduğunu söyleyin."}</em></div></div>
    </div>
   </div>;})()}
- {tab==="defter"&&<div className="ledger"><div className="section-head"><span>HAZİNE VE HALK · RAPOR</span><b>Tick canlı</b></div><div className="general-only-note"><b>Defter karar değil, istihbarattır</b><span>Vergi ve şenlik kararlarını General&apos;e bildir; halkın rızasına göre uygulayabilir veya karşı çıkabilir.</span></div>{meta.map(([k,label])=><div key={k}><span>{label}</span><strong>{fmt(game.resources[k])}</strong><small className={(rt?.[k]??0)<0?"negative":""}>{(rt?.[k]??0).toFixed(1)}/sa</small></div>)}<div className="tax-control"><label>Mevcut vergi oranı <b>%{game.taxRate}</b></label><input type="range" min="0" max="50" value={game.taxRate} disabled/><small>Değiştirmek için General&apos;i ikna etmelisin.</small></div></div>}
+ {tab==="defter"&&<div className="ledger"><div className="section-head"><span>HAZİNE VE HALK · RAPOR</span><b>Tick canlı</b></div><div className="general-only-note"><b>Defter karar değil, istihbarattır</b><span>Vergi ve şenlik kararlarını General&apos;e bildir; halkın rızasına göre uygulayabilir veya karşı çıkabilir.</span></div>{meta.map(([k,label])=><div key={k}><span>{label}</span><strong>{fmt(game.resources[k])}</strong><small className={(rt?.[k]??0)<0?"negative":""}>{(rt?.[k]??0).toFixed(1)}/sa</small></div>)}<div className="tax-control"><label>Mevcut vergi oranı <b>%{game.taxRate}</b></label><input type="range" min="0" max="50" value={game.taxRate} disabled/><small>{POLICY_LABELS.taxRate}nı HALK sekmesinden kendiniz çevirirsiniz; burası rapordur.</small></div></div>}
  {tab==="diyar"&&<div className="realm"><div className="section-head"><span>DIŞ ÇEPER · KORUMALI</span><b>{left(game.protectionEndsAt,now)}</b></div><div className={`terrain-summary ${game.terrain}`}><span>BAŞKENT ARAZİSİ</span><b>{(terrainCatalog[game.terrain]??terrainCatalog.plain).label}</b><p>{(terrainCatalog[game.terrain]??terrainCatalog.plain).description}</p><small>{(terrainCatalog[game.terrain]??terrainCatalog.plain).bonus}</small></div>{worldError&&<div className="world-error"><b>Channel bilgisi alınamadı</b><span>{worldError}</span><small>Bu yüzden komşu sancaklar ve ortak saha görünmüyor; haritadaki konumunuz da geçici olarak merkeze düşer.</small></div>}<div className="world-intel">
  {/* CHANNEL KIYASI — anonim. Sunucu yalnızca ortalamayı gönderir (kimin hangi
      değere sahip olduğu inmez) ve aday sayısı gizlilik alt sınırının altındaysa
@@ -925,9 +925,9 @@ async function openNegotiation(){
      ? <><span className="eyebrow">İLK HEDEF</span><h3>Ekonomiyi dengede tut</h3>
          <p>Yiyecek üretimini pozitif tutun; ardından Meydan veya Kışla kurun. Halkın istihkakı yiyecekten düşer, yani üretim açığı doğrudan rızaya vurur.</p></>
      : <><span className="eyebrow">GENERALİN AKTİF YETKİLERİ</span><h3>Neleri kendi uygular?</h3>
-         <div className="authority-list">{["Yapı kur/yükselt","İnşaat hızlandır","Birlik eğit","Vergi ayarla","Şenlik düzenle","Doktrin kaydet","Madene işçi gönder","İşçileri geri çek","Ajan gönder","Karşı-istihbarat kur","Nöbet oranı","Asker maaşı","Gece emri"].map(x=><i key={x}>{x}</i>)}</div>
+         <div className="authority-list">{["Yapı kur/yükselt","İnşaat hızlandır","Birlik eğit","Şenlik düzenle","Doktrin kaydet","Madene işçi gönder","İşçileri geri çek","Ajan gönder","Karşı-istihbarat kur","Nöbet oranı","Asker maaşı","Gece emri"].map(x=><i key={x}>{x}</i>)}</div>
          <p>Rutin emirleri doğrudan uygular. Kaynak yetmiyorsa, kuyruk doluysa ya da halk riski varsa engeller veya teyit ister. Emir sayısını kısıtlayan bir kota yoktur; istediğin kadar danışabilirsin.</p>
-         <p className="info-note">Vergi ve istihkakları Kral doğrudan çevirir — General uygulamaz ama her değişiklikte görüşünü söyler.</p></>}
+         <p className="info-note">{POLICY_AUTHORITY_NOTE}</p></>}
   </div>
  </div>}
  {tutorialStep!==null&&<Tutorial step={tutorialStep} next={advanceTutorial} skip={closeTutorial}/>}</section></main>
@@ -937,7 +937,7 @@ const tutorial=[
  {eyebrow:"I · YENİ KRALLIK",title:"Önce başkentini ve arazini tanı",text:"Sv.1 ahşap kalen, üç başlangıç yapın ve dört günlük koruman var. Seçtiğin arazi haritanın coğrafyasını, üretim hızını ve savunmanı kalıcı olarak etkiler. Haritayı sürükleyerek döndür, tekerlekle yakınlaş."},
  {eyebrow:"II · MECLİS",title:"Generalini yönlendir ve ikna et",text:"Sen Kral olarak hedef ve gerekçe verirsin; General kaynakları, halkı, sadakatini ve yönetim doktrinini tartıp ayrıntıları kendisi yönetir. Riskli emirde itiraz edebilir."},
  {eyebrow:"III · BİNALAR",title:"Raporu oku, emri General'e ver",text:"Binalar sekmesi salt okunur bir durum raporudur. İnşa ve yükseltme için Meclis'te doğal dille emir ver; General uygun bulursa kuyruğu başlatır."},
- {eyebrow:"IV · DEFTER",title:"Karar için istihbarat topla",text:"Defterde saatlik değerleri izlersin fakat vergiyi düğmeyle değiştirmezsin. General'i rakamlar ve gerekçelerle ikna etmelisin."},
+ {eyebrow:"IV · DEFTER",title:"Karar için istihbarat topla",text:"Defterde saatlik değerleri izlersin; burası rapordur. Vergi ve istihkak kollarını HALK sekmesinde kendi elinle çevirirsin, General yalnızca görüşünü söyler."},
  {eyebrow:"V · DİYAR",title:"Koruma bitmeden hazırlan",text:"Dış dünya ilerledikçe açılır. Önce ekonomi ve kışla, sonra diplomasi ve fetih. Krallığın hesabına otomatik kaydedilir."},
 ];
 function Tutorial({step,next,skip}:{step:number;next:()=>void;skip:()=>void}){const item=tutorial[step];return <div className="tutorial-layer"><section className="tutorial-card"><div className="tutorial-progress">{tutorial.map((_,i)=><i className={i<=step?"done":""} key={i}/>)}</div><p>{item.eyebrow}</p><h3>{item.title}</h3><span>{item.text}</span><div><button onClick={skip}>REHBERİ GEÇ</button><button className="primary-seal" onClick={next}>{step===tutorial.length-1?"OYUNA BAŞLA":"SONRAKİ"}</button></div></section></div>}
