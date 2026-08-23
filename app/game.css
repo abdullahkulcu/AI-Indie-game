@@ -254,3 +254,15 @@
 .shared-mine small.mine-influence.mine{color:#3f5f2c}
 .shared-mine small.mine-influence.mine b{color:#3f5f2c}
 .shared-mine i.owner{background:#7d2930;box-shadow:inset 0 -2px #d2a64d}
+
+/* DAMAR TÜKENİNCE ÇIKAN FIRSAT (plan belgesi Fikir 23). Tükenme bir son değil
+   yeni bir olay: panel bu yüzden madenin kendi kutusundan görsel olarak
+   AYRILIR. Alınmış fırsat soluklaşır ama panelde kalır — kimin kazandığı
+   channel'ın hafızasıdır. */
+.shared-mine .mine-find{display:grid;gap:4px;margin-top:6px;padding:9px 10px;background:#3b2f1c;color:#f0dfb9;box-shadow:inset 4px 0 #d2a64d}
+.shared-mine .mine-find>span{font:600 7px JetBrains Mono;color:#d2a64d;letter-spacing:.08em}
+.shared-mine .mine-find>b{font:600 12px Cinzel}
+.shared-mine .mine-find>small{font:7px/1.5 JetBrains Mono;color:#d8c9a5}
+.shared-mine .mine-find>button{justify-self:start;margin-top:4px}
+.shared-mine .mine-find.claimed{background:#2c2620;box-shadow:inset 4px 0 #7a6a4a;opacity:.85}
+.shared-mine .mine-find small.mine-find-owner{color:#e6c98a}

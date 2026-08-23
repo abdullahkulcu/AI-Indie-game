@@ -124,6 +124,7 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `intel_missions` | Gönderilen ajan görevi: TÜR (`kind`: `scout` / `deep`), başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
 | `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher, **bölge sahibi** (`influence_user_id`) ve sahipliğin tartıldığı pencere (`influence_window`). |
 | `shared_mine_workers` | Bir krallığın madendeki işçisi, henüz teslim edilmemiş kesirli cevheri (`pendingOre`) ve nüfuz ölçütü olan zaman ağırlıklı ortalama işçi sayısı (`worker_avg`). |
+| `shared_mine_finds` | Damar tükendiğinde ortaya çıkan fırsat (define / yıkık kale / terk edilmiş galeri): yalnızca TOHUMUN girdileri (`channel_id` + `depleted_at`) ve durumu; tür/miktar/konum `engine/mine.ts` → `mineFindOf` ile türetilir. Tek kazanan, koşullu UPDATE ile belirlenir. |
 | `standing_orders` | Kralın gece vardiyası için verdiği kalıcı emir: otonomi (`autonomous`/`ask`), günlük eylem tavanı, durum. |
 | `pending_decisions` | General'in riskli bulup Kral'ın teyidine sunduğu tek bekleyen emir. |
 | `general_ledger` | General'in Kral hakkındaki kalıcı hafızası; aynı olay türü tek satırda `weight` ile birikir. |
@@ -231,9 +232,20 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   (`tests/mine-influence.test.ts` iki ayrı senaryoyla tutar).
 - **Sarma:** `app/api/mine/route.ts` doğrudan çağırır; ayrı bir `server/`
   dosyası yoktur (route kısa ve odaklı).
-- **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al —
-  sürüm korumalı `writeSaveIfUnchanged` ile `game_saves`'e GERÇEKTEN yazılır).
-- **UI:** `diyar` sekmesi (ortak maden paneli).
+- **TÜKENME-SONRASI FIRSAT (plan belgesi Fikir 23):** damar bitince aynı
+  bölgede tohumlu bir keşif belirir (`mineFindOf`; tohum = channel + KABA bir
+  kovaya yuvarlanmış tükenme anı, çünkü son cevheri alan oyuncu yoklama anını
+  bir ölçüde seçebilir). GERÇEK BİR YARIŞ: tek kazanan tüm fırsatı alır ve
+  kazanan uygulama katmanında değil VERİTABANINDA belirlenir (`status`
+  üzerinden koşullu UPDATE). Fırsata ulaşmak için madende işçi bulundurmak
+  şarttır; kaçırılırsa `pending` kalır ve sonradan da alınabilir. Fırsat
+  CRON'a değil madenin kendi TEMBEL ritmine bağlı (maden yalnızca birisi
+  sayfaya baktığında ilerler); yeni bir cron adımı eklenmedi.
+- **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al,
+  `claim_find` ile fırsatı al — hepsi sürüm korumalı `writeSaveIfUnchanged`
+  ile `game_saves`'e GERÇEKTEN yazılır).
+- **UI:** `diyar` sekmesi (ortak maden paneli, bölge sahipliği satırı, fırsat
+  kutusu).
 
 ### 3.6 Yerel pazar (market)
 

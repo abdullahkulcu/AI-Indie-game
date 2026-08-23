@@ -1,3 +1,5 @@
+import { rand01 } from "./raids";
+
 /**
  * Ortak madenin kuralları.
  *
@@ -266,4 +268,99 @@ export function settleMine(crew: MineCrew[], input: {
   });
 
   return { shares, extracted, influence };
+}
+
+/**
+ * DAMAR TÜKENİNCE ÇIKAN FIRSAT (plan belgesi Fikir 23).
+ *
+ * Madenin bitmesi bir SON değil, yeni bir olayın başlangıcı: aynı bölgede
+ * tematik bir keşif (define, yıkık kale, terk edilmiş galeri) belirir.
+ *
+ * ÜÇ KARAR, ÜÇÜ DE PLANDAN:
+ *  1. Fırsatın türü/büyüklüğü/konumu TOHUMLU — `rand01` deseniyle
+ *     deterministik, admin müdahalesi gerekmez. Satırda YALNIZCA tohumun
+ *     girdileri saklanır (channel + tükenme anı); tür ve miktar her okumada
+ *     buradan TÜRETİLİR. Böylece ödülün sayısı hiçbir yerde ikinci bir kopya
+ *     olarak durmaz ve istemcinin şişirebileceği bir alan hiç var olmaz.
+ *  2. GERÇEK BİR YARIŞ: tek kazanan tüm fırsatı alır. Fikir 22'nin sürekli
+ *     paylaşımlı doğasından bilinçli olarak farklı bir ton — maden işbirlikçi
+ *     ve rekabetçi, tükenme-sonrası olay tek-kazananlı; ikisi farklı anları
+ *     temsil eder, tutarsızlık değildir.
+ *  3. Kaçırılırsa BEKLEYEN kalır, sonradan da alınabilir (affedici tasarım).
+ *
+ * TOHUMUN ANI NEDEN KABA (`MINE_FIND_SEED_BUCKET_MS`): tükenme anını, damarın
+ * son cevherini alan oyuncu bir ölçüde SEÇEBİLİR (maden yalnızca birisi
+ * sayfaya baktığında ilerler). Milisaniye hassasiyetinde bir tohum, "hangi
+ * milisaniyede yoklarsam define çıkar" diye taranabilirdi. An bir oyun saatine
+ * yuvarlandı ve ödül bantları da bilinçli olarak dar tutuldu: tohum avlamak
+ * kârlı bir iş olmasın.
+ */
+export type MineFindKind = "define" | "yikik_kale" | "terk_galeri";
+
+export const MINE_FIND_KINDS = ["define", "yikik_kale", "terk_galeri"] as const;
+
+/** Tohumun anını yuvarlama aralığı: bir oyun saati. */
+export const MINE_FIND_SEED_BUCKET_GAME_HOURS = 1;
+
+export const MINE_FINDS: Record<MineFindKind, {
+  label: string;
+  text: string;
+  /** Ödül hangi kaleme yazılır. */
+  resource: "gold" | "stone" | "iron";
+  /** Ödül bandı; dar tutulur ki tohum avlamak kârlı olmasın. */
+  min: number;
+  max: number;
+}> = {
+  define: {
+    label: "Define",
+    text: "Terk edilmiş galerinin dibinde, eski bir hükümdarın gömdüğü sikke küpü.",
+    resource: "gold", min: 600, max: 900,
+  },
+  yikik_kale: {
+    label: "Yıkık Kale",
+    text: "Damarın üstündeki sırtta, taşları hâlâ sağlam bir yıkık gözcü kalesi.",
+    resource: "stone", min: 500, max: 800,
+  },
+  terk_galeri: {
+    label: "Terk Edilmiş Galeri",
+    text: "Damar bitti ama yan kolda kimsenin dokunmadığı bir cevher damarı kalmış.",
+    resource: "iron", min: 450, max: 700,
+  },
+};
+
+/** Tükenme anını kaba bir kovaya oturtur; tohum bundan kurulur. */
+export function mineFindSeedAt(now: number, speed: number) {
+  const bucket = MINE_FIND_SEED_BUCKET_GAME_HOURS * 3_600_000 / Math.max(1, speed || 1);
+  return Math.floor(now / bucket) * bucket;
+}
+
+export type MineFind = {
+  kind: MineFindKind;
+  label: string;
+  text: string;
+  resource: "gold" | "stone" | "iron";
+  amount: number;
+  /** Madenin çevresindeki konum sapması; harita/panel bunu maden konumuna ekler. */
+  offset: { x: number; z: number };
+};
+
+/**
+ * Tohumdan fırsatı türetir. Aynı channel + aynı tükenme kovası ⇒ aynı fırsat;
+ * yeniden yüklemek ya da başka bir oyuncunun bakması sonucu değiştirmez.
+ */
+export function mineFindOf(seed: string): MineFind {
+  const kind = MINE_FIND_KINDS[Math.min(MINE_FIND_KINDS.length - 1, Math.floor(rand01(`${seed}:tur`) * MINE_FIND_KINDS.length))];
+  const catalog = MINE_FINDS[kind];
+  const amount = Math.round(catalog.min + rand01(`${seed}:miktar`) * (catalog.max - catalog.min));
+  return {
+    kind,
+    label: catalog.label,
+    text: catalog.text,
+    resource: catalog.resource,
+    amount,
+    offset: {
+      x: Math.round((rand01(`${seed}:x`) - .5) * 24 * 10) / 10,
+      z: Math.round((rand01(`${seed}:z`) - .5) * 24 * 10) / 10,
+    },
+  };
 }
