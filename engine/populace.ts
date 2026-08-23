@@ -20,6 +20,24 @@ export const NEED = {
 
 export const RATION_LIMITS = { min: 0, max: 200 } as const;
 
+/**
+ * TAM PAY (%). Halk bu oranda doyar; altı ceza, üstü ölçülü ödül.
+ *
+ * Sayı zaten `moodParts` içinde eşik olarak duruyordu; sabit olarak dışa
+ * verilmesinin sebebi ikinci ve üçüncü okuyucusunun çıkması:
+ * `engine/populace-voice.ts` → `VOICE_THRESHOLDS.vaat.promise` (Kral tam pay
+ * İLAN ETTİ mi) ve aşağıdaki `deliberateExodus` (Kral tam payı bilerek mi
+ * kıstı). Üç yerde elle yazılsaydı "tam pay" kavramı sessizce sapardı.
+ */
+export const FULL_RATION = 100;
+
+/**
+ * Vergi oranının NÖTR noktası (%). Bunun altı rızayı yükseltir, üstü aşındırır.
+ * `moodParts` içinde eşik olarak zaten vardı; `deliberateExodus` de aynı
+ * noktayı okuduğu için dışa verildi.
+ */
+export const TAX_NEUTRAL = 15;
+
 /** Rızanın hedefe yaklaşma hızı (puan/saat). */
 const MOOD_APPROACH = 5;
 
@@ -122,10 +140,10 @@ export function moodParts(input: MoodInputs): MoodParts {
   // Kalabalıklık: kapasitenin %90'ını aşınca huzursuzluk başlar.
   const crowding = input.capacity > 0 ? input.population / input.capacity : 0;
   return {
-    food: food >= 100 ? Math.min(12, (food - 100) * 0.12) : -Math.pow((100 - food) / 100, 1.35) * 55,
+    food: food >= FULL_RATION ? Math.min(12, (food - 100) * 0.12) : -Math.pow((100 - food) / 100, 1.35) * 55,
     ale: Math.min(16, input.servedAle * 0.1) * fed,
-    // Vergi: %15 nötr kabul edilir.
-    tax: -((input.taxRate - 15) * 0.9),
+    // Vergi: nötr nokta `TAX_NEUTRAL` (%15).
+    tax: -((input.taxRate - TAX_NEUTRAL) * 0.9),
     // Pazardaki geçim maliyeti. İstihkak halkın AĞZINA ne girdiğini söyler; bu
     // ise kendi cebinden aldığı ekmeğin kaça mal olduğunu. Kral ambarı açıp
     // fiyatı kırarsa rıza yükselir, halkın kilerini pazardan süpürürse düşer.
@@ -188,6 +206,91 @@ export function heaviestGrievance(input: MoodInputs): { key: GrievanceKey; label
     if (worst === null || parts[key] < parts[worst]) worst = key;
   }
   return worst === null ? null : { key: worst, label: GRIEVANCE_LABELS[worst], weight: -parts[worst] };
+}
+
+// --- KRALIN KENDİ HALKINI FEDA ETMESİ (plan belgesi Fikir 18) --------------
+
+/**
+ * GÖÇ KRALIN KENDİ KARARINDAN MI DOĞDU?
+ *
+ * Plan belgesindeki Fikir 18'in en radikal ucu: Kral kendi rızasını bilerek
+ * düşürüp nüfusunu boşaltabilir, ve göç channel'daki başka bir krallığa
+ * gittiği için (Faz 6) bu dolaylı bir saldırı aracına dönüşebilir.
+ *
+ * KARARIN BİRİNCİ MADDESİ: `engine/migration.ts`'in "hedef ADAYLAR arasından
+ * seçilir, GÖNDEREN SEÇMEZ" ilkesi KORUNUR. Bu dosyaya ve o dosyaya hiçbir
+ * hedefleme aracı eklenmedi ve eklenmeyecek; Kral yalnızca kendi rızasını
+ * düşürerek göçü DOLAYLI tetikler, kimin alacağını asla seçemez.
+ *
+ * KARARIN İKİNCİ MADDESİ — bu fonksiyonun sebebi: doğal rıza/nüfus kaybının
+ * ÜSTÜNE, "halk fark ederse" bir itibar cezası devreye girer. "Fark etmek"
+ * burada Fikir 14'ün mekanizmasının aynısıdır: halk kalede olan ile kendi
+ * yaşadığı arasındaki tutarsızlığı okur. Sebebi zaten hesaplanıyor
+ * (`heaviestGrievance`); eksik olan şey SONUÇTU.
+ *
+ * ASIL AYRIM — ZORLANAN KRAL ile FEDA EDEN KRAL:
+ *  - Kral istihkakı TAM ilan etmiş ama ambar yetmiyorsa halk açtır, ama bu bir
+ *    feda değil bir DARBOĞAZDIR. İtibar cezası YOK; o durumun karşılığı Fikir
+ *    14'ün `vaat` talebidir (halk sesini yükseltir, hesap sorar).
+ *  - Kral istihkakı TAM PAYIN ALTINA kendi eliyle indirmişse ya da vergiyi
+ *    nötr noktanın üstüne çıkarmışsa, göçün sebebi bir kıtlık değil bir
+ *    KARARDIR. İtibar cezası burada devreye girer.
+ * Bu ayrım olmadan ceza, zor bir dönemden geçen her Kralı vururdu ve "feda
+ * etme" stratejisiyle "kötü şans" arasındaki fark kaybolurdu.
+ *
+ * `living`, `crowding` ve `raid` gerekçeleri BİLİNÇLİ OLARAK dışarıda: pazar
+ * fiyatı, konut tavanı ve dağdan gelen akın Kralın tek bir kolu çevirerek
+ * ürettiği sonuçlar değil. İhmal olabilirler ama feda değildirler.
+ */
+export type ExodusPolicy = { foodRation: number; taxRate: number };
+
+export const EXODUS_PENALTY = {
+  /**
+   * Göç eden kişi başına itibar cezası.
+   *
+   * ÖLÇEK MEVCUT BİR SAYIYA DEMİRLENDİ, uydurulmadı: 25 kişi ≈ 10 puan, yani
+   * `engine/diplomacy.ts` → `REPUTATION_CHANGES.caught_agitating` ile aynı
+   * mertebe. Okunuşu şu: tipik bir krallığın (≈120 kişi) beşte birini bilerek
+   * boşaltmak, komşuya kese gönderirken suçüstü yakalanmak kadar itibar
+   * götürür. Kişi BAŞINA olması ayrıca kısıt #2'nin gereği (aşağıya bkz.).
+   */
+  reputationPerPerson: .4,
+} as const;
+
+/**
+ * Göç bu turda Kralın KENDİ kararından mı doğdu? Öyleyse gerekçe anahtarı,
+ * değilse `null`.
+ *
+ * YALNIZCA KRALIN AYARINA BAKAR — hangi şikâyetin o anda en ağır olduğuna
+ * BAKMAZ. Bu, kısıt #2'nin (adım-bölünmesi bağımsızlığı) doğrudan gereği ve
+ * ölçülerek öğrenildi:
+ *
+ * İlk sürüm kapıyı `heaviestGrievance`'a bağlıyordu. O bir KAZANAN-HEPSİNİ-ALIR
+ * karşılaştırması, yani hangi kalemin en ağır olduğu adım başındaki duruma
+ * bağlı — ve adım büyüklüğü değişince TAKLA ATIYOR. Ölçüm (nüfus 400, kapasite
+ * 500, rıza 15, vergi %45, istihkak %40): sunucunun tek büyük adımı cezayı HİÇ
+ * uygulamıyordu (itibar 50 kalıyordu), istemcinin dakikalık adımları 24 saatte
+ * 20'ye düşürüyordu. Sıfır ile tam ceza arasında 30 puanlık bir fark, çünkü
+ * kaba adımda en ağır şikâyet kalabalıklık, ince adımda vergi çıkıyordu.
+ *
+ * `foodRation` ve `taxRate` ise tur içinde SABİT (yalnızca Kralın emriyle
+ * değişir), dolayısıyla kapı her adım büyüklüğünde aynı cevabı verir.
+ * Gerekçe seçimi de büyüklük karşılaştırması değil SABİT SIRA: pay kısılmışsa
+ * "food", değilse vergi yüksekse "tax". Anlamı da böylesi doğru — Fikir 18
+ * "Kral bilerek payı kıstı mı" sorusudur, "hangi şikâyet en gürültülü" değil.
+ *
+ * Kalan sapma cezanın kendisinden değil `gone` toplamından geliyor: nüfus
+ * hareketinin adım-bölünmesi borcu (bkz. `populationChange` ve
+ * `docs/plans/2026-08-22-acik-backlog-maddeleri.md`) buraya da taşıyor. O borç
+ * bu maddenin kapsamı dışında ve itibar sunucu tarafından üzerine yazıldığı
+ * için (`server/save-validation.ts` → `serverDerived`) meşru bir kaydı
+ * reddetmiyor.
+ */
+export function deliberateExodus(policy: ExodusPolicy): GrievanceKey | null {
+  // Tam pay ilan edilmişse bu bir darboğazdır, feda değil.
+  if (clampRation(policy.foodRation) < FULL_RATION) return "food";
+  if ((Number(policy.taxRate) || 0) > TAX_NEUTRAL) return "tax";
+  return null;
 }
 
 /** Rıza hedefe doğru yürür; ani sıçrama olmaz. */

@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyActions, marketState } from "../engine/actions";
 import {
-  AGITATION, GLUT, LURE, agitationDayStart, agitationEffect, agitationPairWindow,
+  AGITATION, AGITATION_BELIEF, GLUT, LURE, agitationBelief, agitationDayStart,
+  agitationEffect, agitationPairWindow,
   agitationTravelMs, applyAgitation, applyGlut, applyLure, feltUnrest, glutCost,
   glutShare, lureAt,
 } from "../engine/agitation";
+import { POPULACE_PERSONA_IDS, type PopulacePersona } from "../engine/populace-persona";
 import { raidInWindow, resolveRaids } from "../engine/raids";
 import { BASE_PRICE, PRICE_FLOOR, fillOrder, maxPurchase } from "../engine/market";
 import { SOLDIER_THRESHOLDS, suppression } from "../engine/populace";
@@ -63,6 +65,70 @@ test("tek kese eşikleri tam olarak beklenen kadar oynatır", () => {
   const garrison = applyAgitation(target, "gold_garrison", T0);
   assert.equal(garrison.agitationBribe, AGITATION.garrison.perPurse);
   assert.equal(garrison.agitationPressure, 0);
+});
+
+// --- PROPAGANDAYA İNANÇ: kişilik çarpanı (Fikir 15) ------------------------
+
+test("kişilik verilmezse bugünkü davranış BİREBİR korunur", () => {
+  const target = newGame();
+  assert.equal(agitationBelief(null), 1);
+  assert.equal(agitationBelief(undefined), 1);
+  assert.equal(
+    applyAgitation(target, "gold_commons", T0, null).agitationPressure,
+    applyAgitation(target, "gold_commons", T0).agitationPressure,
+  );
+});
+
+test("isyankâr halk propagandaya daha çok, itaatkâr daha az inanır", () => {
+  const target = newGame();
+  const pressureOf = (persona: PopulacePersona) =>
+    applyAgitation(target, "gold_commons", T0, persona).agitationPressure;
+  assert.ok(pressureOf("isyankar") > pressureOf("zeki_istekli"));
+  assert.ok(pressureOf("zeki_istekli") > pressureOf("bagli_itaatkar"));
+  // Orta kişilik bugünkü değeri hiç oynatmaz: çarpan 1.
+  assert.equal(pressureOf("zeki_istekli"), AGITATION.commons.perPurse);
+  assert.equal(pressureOf("isyankar"), AGITATION.commons.perPurse * AGITATION_BELIEF.isyankar);
+  // TEK KESE EN İNANÇLI HALKTA BİLE TAVANA ÇAKMAZ. Çarpan `cap/perPurse`
+  // (≈1,198) sınırının altında kalmalı; aşarsa bir kese yapılabilecek her şeyi
+  // yapar ve "keseler art arda birikir" dokusu o kişilikte yok olur.
+  assert.ok(pressureOf("isyankar") < AGITATION.commons.cap, `tek kese tavana çaktı: ${pressureOf("isyankar")}`);
+  assert.ok(AGITATION_BELIEF.isyankar < AGITATION.commons.cap / AGITATION.commons.perPurse);
+  // Her kişilik için bir çarpan OLMAK ZORUNDA: eksik kalan kişilik sessizce
+  // 1'e düşerdi ve kararın etkisi o channel'da hiç görünmezdi.
+  for (const persona of POPULACE_PERSONA_IDS) {
+    assert.ok(AGITATION_BELIEF[persona] > 0, persona);
+  }
+});
+
+test("DENGE İNVARYANTI: inanç çarpanı TAVANI oynatmaz", () => {
+  // İsyankâr halkta bile yabancının bütün emeği şenliğin rızaya kattığı 12
+  // puanın ALTINDA kalmalı; kesenin ölçülmüş verimsizliği bozulmasın.
+  let carrier = newGame();
+  for (let i = 0; i < 20; i += 1) {
+    carrier = { ...carrier, ...applyAgitation(carrier, "gold_commons", T0 + i * HOUR, "isyankar") };
+  }
+  assert.ok((carrier.agitationPressure ?? 0) <= AGITATION.commons.cap);
+  assert.ok(AGITATION.commons.cap < 12);
+});
+
+test("inanç YALNIZCA halka giden keseye uygulanır", () => {
+  // Askerin kesesinde inanç değil çıkar işler; mal yığını ve eşkıya ise halkın
+  // neye inandığından bağımsız fiziksel etkilerdir.
+  const target = newGame();
+  const plain = applyAgitation(target, "gold_garrison", T0);
+  const rebel = applyAgitation(target, "gold_garrison", T0, "isyankar");
+  assert.equal(rebel.agitationBribe, plain.agitationBribe);
+  const glutPlain = applyGlut(target, "food", T0);
+  assert.deepEqual(applyGlut(target, "food", T0).commonsGlut, glutPlain.commonsGlut);
+  assert.equal(applyLure(target, T0).raidLure, LURE.perPurse);
+});
+
+test("inanç çarpanı kalkanla ÇARPIŞMAZ: ikisi birlikte çalışır", () => {
+  const shielded = newGame({ agitationShieldUntil: T0 + 6 * HOUR });
+  const value = applyAgitation(shielded, "gold_commons", T0, "isyankar").agitationPressure;
+  assert.equal(value, AGITATION.commons.perPurse * AGITATION.shieldedShare * AGITATION_BELIEF.isyankar);
+  // Kalkan hâlâ yarılıyor: isyankâr halk kalkanı geçersiz kılmıyor.
+  assert.ok(value < AGITATION.commons.perPurse * AGITATION_BELIEF.isyankar);
 });
 
 test("art arda kese tavanı aşamaz", () => {

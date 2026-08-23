@@ -1,4 +1,5 @@
 import { COMPARE_BETTER, COMPARE_METRICS, type CompareMetric } from "./comparison";
+import { FACTION_THRESHOLDS } from "./faction";
 import { SOLDIER_THRESHOLDS } from "./populace";
 
 /**
@@ -23,7 +24,7 @@ import { SOLDIER_THRESHOLDS } from "./populace";
  * (bkz. server/populace-voice.ts).
  */
 
-export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas";
+export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas" | "vaat" | "muhalefet";
 
 export type DemandSeverity = "normal" | "urgent";
 
@@ -94,6 +95,46 @@ export const VOICE_THRESHOLDS = {
     metrics: 2,
     hours: 8,
   },
+  /**
+   * İLAN EDİLEN İLE FİİLEN VERİLEN ARASINDAKİ MAKAS (plan belgesindeki Fikir 14).
+   *
+   * `promise` — makasın sayılması için Kralın en az TAM payı ilan etmiş olması
+   * şartı. 100 seçildi çünkü bu maddenin konusu "az verdi" değil "verdiğini
+   * söylediğini vermedi"dir: Kral istihkakı %70'te tutuyorsa kimseye tam pay
+   * sözü vermemiştir ve şikâyeti `bread` zaten taşır. Kapı buradan geçmezse
+   * madde ikinci bir "istihkak düşük" talebine dönüşür ve tavanı boşa harcar.
+   * `gap`  — ilan ile fiilî arasındaki en küçük anlamlı fark (puan). 12,
+   *   `bread` eşiğinin (100 → 85) 15 puanlık makasının biraz altı: halkın
+   *   sofrada FARK ETTİĞİ en küçük eksilme mertebesi, ama tek tick'lik bir
+   *   ambar sarsıntısını yakalayacak kadar da küçük değil.
+   * `hours` — 4, `bread` ile aynı. Makas da sofra kalemidir; bir saatlik ambar
+   *   boşluğu bir vaat ihlali değildir.
+   *
+   * `urgent` YOK ve bu KASITLI, `kiyas` ile aynı gerekçe: aciliyeti asıl
+   * sıkıntı taşır (aç halkın `bread`i, maaşsız garnizonun `wage`i). Makas bir
+   * HESAP SORMADIR; acil bir talebin tavandaki yerini almamalı.
+   */
+  vaat: { promise: 100, gap: 12, hours: 4 },
+  /**
+   * KOALİSYON MASASI — muhalefetin elebaşısının talebi (plan belgesindeki
+   * Fikir 8).
+   *
+   * `pressure` — talebin açılması için gereken muhalefet baskısı. YENİ BİR SAYI
+   * DEĞİL: `FACTION_THRESHOLDS.organized`, yani "bir elebaşı çıktı ve halkın
+   * bir bölümü onun sözünü dinliyor" eşiği. Plan belgesi de tam olarak bu
+   * eşiği öneriyor ("örn. `organized`"). Elebaşı yokken masaya oturacak bir
+   * muhatap da yoktur, o yüzden eşik bu.
+   * `urgent` — `FACTION_THRESHOLDS.defiant`: muhalefet meydanda açıkça
+   *   toplanıyorsa bu artık bir pazarlık değil bir ültimatomdur.
+   * `hours` — 2, dosya başındaki "ayrıca ölçülmemiş kaleme 2 oyun saati"
+   *   kuralı. Kısa olması sorun değil: baskının 50'ye çıkması zaten uzun bir
+   *   düşük-rıza dönemi ister, yani süre şartı fiilen zaten dolmuş olur.
+   */
+  muhalefet: {
+    pressure: FACTION_THRESHOLDS.organized,
+    urgent: FACTION_THRESHOLDS.defiant,
+    hours: 2,
+  },
 } as const;
 
 /** Aynı anda açık kalabilecek en fazla talep. Kralı yormamanın asıl freni bu. */
@@ -117,6 +158,36 @@ export type VoiceSignals = {
   soldierUnrest: number;
   army: number;
   buildings: Array<{ type?: string; level?: number }>;
+  /**
+   * İLAN EDİLEN (nominal) PAYLAR — Fikir 14'ün makasının üst tarafı.
+   *
+   * `servedFood` zaten FİİLEN dağıtılanı taşıyor; makası ölçmek için karşısına
+   * Kralın İLAN ETTİĞİ oranın da gelmesi gerekiyor. İkisi ayrı alan olarak
+   * taşınır, çünkü aralarındaki farkın kendisi bir sinyaldir (bkz.
+   * `promiseGaps`) — tek bir "istihkak" alanı bu maddeyi imkânsız kılardı.
+   *
+   * Üç alan da OPSİYONELDİR ve verilmediğinde makas SIFIR sayılır: eski
+   * çağıranlar (test, eski istemci bağlamı) yeni bir talep görmez, yani
+   * özellik kademeli açılır.
+   */
+  nominalFood?: number;
+  nominalPay?: number;
+  /** Fiilen ödenebilen asker maaşı (%); `engine/tick.ts → servedRations().pay`. */
+  servedPay?: number;
+  /**
+   * KOALİSYON MASASI girdileri (plan belgesindeki Fikir 8).
+   *
+   * `factionPressure` — `engine/faction.ts`'in kendi ölçüsü; burada yeniden
+   * hesaplanmaz, dışarıdan hazır gelir.
+   * `factionLeader` — elebaşının adı (`factionLeaderName`). Motor onu kendisi
+   * üretemez, çünkü tohum krallığın adı ve kuruluş anıdır ve bu modül krallık
+   * kimliğini hiç görmüyor. Verilmezse ŞABLON metin isimsiz kalır — talep yine
+   * açılır, yalnızca cümlesi "muhalefetin elebaşısı" der.
+   *
+   * İkisi de opsiyoneldir: göndermeyen çağıran için masa hiç kurulmaz.
+   */
+  factionPressure?: number;
+  factionLeader?: string | null;
   /**
    * SESSİZ KIYASLAMA girdisi — DIŞARIDAN gelir, motor veritabanı okumaz
    * (bkz. `server/world-projection.ts` → `populaceComparison`).
@@ -229,6 +300,19 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
     });
   }
 
+  // Koalisyon masası (Fikir 8) somut kalemlerden SONRA, makastan ÖNCE:
+  // elebaşının talebi tek tek şikâyetlerin toplamıdır, onların yerine geçmez —
+  // ama bir hesap sormadan (makas) ve bir arka plan sinyalinden (kıyas) daha
+  // ağırdır, çünkü karşısında gerçek bir muhatap vardır.
+  const faction = factionDemand(signals);
+  if (faction) demands.push(faction);
+
+  // Makas (Fikir 14) somut kalemlerin ARDINDA: aciliyeti onlar taşır, bu talep
+  // hesap sorar. Kıyastan önce gelir çünkü dayanağı krallığın KENDİ defteridir,
+  // komşuların ortalaması değil.
+  const promise = promiseDemand(signals);
+  if (promise) demands.push(promise);
+
   // Kıyas EN SONDA: plan belgesinin kendi açık sorusu ("kıyas talebi diğer daha
   // somut taleplerin önüne geçip yer kaplayabilir") burada iki tedbirle
   // cevaplanıyor — sırada en arkada durur ve asla `urgent` olmaz.
@@ -236,6 +320,176 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
   if (comparison) demands.push(comparison);
 
   return demands;
+}
+
+// --- İLAN EDİLEN İLE FİİLEN VERİLEN ARASINDAKİ MAKAS (Fikir 14) -------------
+
+/**
+ * "GENERAL YALAN SÖYLEDİ" HİSSİ — VE NEDEN BU BİR İLKE İHLALİ DEĞİL.
+ *
+ * BU YORUM SİLİNMESİN. Gelecekte biri bu bloğu CLAUDE.md'nin "General
+ * uygulamadığı eylemi uyguladım demez" (Kesin işlem kuralı) ilkesinin ihlali
+ * sanıp geri alabilir. Almasın; ayrım plan belgesinde (Fikir 14, "Karar
+ * 2026-08-22") açıkça karara bağlandı ve şudur:
+ *
+ *   General TEKNİK OLARAK YALAN SÖYLEMİYOR. Kral "istihkakı %100'e çek" dedi,
+ *   General `set_food_ration` aracını GERÇEKTEN çağırdı, motor emri GERÇEKTEN
+ *   uyguladı. Ortada uygulanmamış bir eylem yok, dolayısıyla "uyguladım"
+ *   sözü doğrudur ve Kesin işlem kuralı ihlal edilmiyor.
+ *
+ *   General'in kendiliğinden SÖYLEMEDİĞİ şey SONUÇTUR: ambar o istihkakı
+ *   karşılamaya yetmedi, sofraya fiilen daha azı geldi. Yani ortada "yanlış
+ *   iddia" değil "eksik açıklama" var.
+ *
+ *   Bu eksikliği HALK yakalar ve kendi ağzından seslendirir. Kral'ın gözünde
+ *   doğan his "General bana yalan söyledi"dir; kodda olan şey ise halkın,
+ *   General'in atlamayı seçtiği sonucu masaya koymasıdır. Oyunun "General her
+ *   zaman haklı" hissini kıran şey tam olarak bu.
+ *
+ * MAKAS GENEL BİR DESENDİR, tek bir dar örnek değil (kararın ilk maddesi):
+ * yiyecek (ilan edilen istihkak ↔ sofraya gelen) ve maaş (ilan edilen maaş ↔
+ * keseye giren) AYNI kuraldan geçer. Yeni bir nominal/fiilî çifti çıkarsa
+ * (örneğin bira) buraya bir satır eklenir, ikinci bir mekanik açılmaz.
+ */
+export type PromiseChannel = "food" | "pay";
+
+export type PromiseGap = {
+  channel: PromiseChannel;
+  /** İlan edilen oran (%). */
+  promised: number;
+  /** Fiilen dağıtılabilen oran (%). */
+  delivered: number;
+  /** İkisi arasındaki fark (puan); yalnızca artı değerler taşınır. */
+  gap: number;
+};
+
+/**
+ * Makası olan kanallar, EN BÜYÜK MAKAS ÖNDE.
+ *
+ * Saf ve eşiksiz: eşiği uygulayan taraf `promiseDemand`. Ayrı bir fonksiyon
+ * olması bilinçli — Fikir 18 (Kralın kendi halkını feda etmesi) de "halk fark
+ * etti mi" sorusunu bu ölçüden okur; ölçü iki yerde ayrı yazılsaydı iki madde
+ * sessizce birbirinden sapardı (kısıt #5).
+ *
+ * `promise` şartı BURADA UYGULANMAZ: bu fonksiyon yalnızca ham makası ölçer.
+ * "Kral tam pay sözü verdi mi" siyasi bir kapıdır ve talebin kapısında durur.
+ */
+export function promiseGaps(signals: VoiceSignals): PromiseGap[] {
+  const pairs: Array<{ channel: PromiseChannel; promised: number; delivered: number }> = [
+    // İlan edilen alan verilmemişse fiilî değerin kendisi yazılır: makas 0 olur,
+    // yani bilgisi olmayan çağıran asla suçlama üretmez.
+    { channel: "food", promised: Number(signals.nominalFood ?? signals.servedFood) || 0, delivered: Number(signals.servedFood) || 0 },
+    { channel: "pay", promised: Number(signals.nominalPay ?? signals.servedPay ?? 0) || 0, delivered: Number(signals.servedPay ?? signals.nominalPay ?? 0) || 0 },
+  ];
+  return pairs
+    .map(pair => ({ ...pair, gap: pair.promised - pair.delivered }))
+    .filter(pair => pair.gap > 0)
+    .sort((a, b) => b.gap - a.gap);
+}
+
+/** Kanalın hangi emirlerle kapanabileceği. Makas iki yoldan kapanır:
+ *  ilan edilen payı GERÇEKTEN karşılayacak stoğu bulmak, ya da ilanı fiilî
+ *  duruma indirip halka doğruyu söylemek. İkisi de meşru; "değirmen dersi"
+ *  gereği ikisi de listede. */
+const PROMISE_REMEDY: Record<PromiseChannel, string[]> = {
+  food: ["set_food_ration", "trade_resource", "build_structure"],
+  pay: ["set_soldier_pay", "trade_resource", "set_tax_rate"],
+};
+
+const PROMISE_BUILDINGS = ["wheat_farm", "apple_orchard", "mill", "granary"];
+
+/**
+ * Makasın talebi. Kapı üç şarttan geçer:
+ *  1) Kral en az TAM payı ilan etmiş olacak (`promise`) — yoksa söz verilmemiş,
+ *     dolayısıyla tutulmamış bir söz de yok;
+ *  2) makas eşiği aşacak (`gap`);
+ *  3) o kanalın gerçekten bir muhatabı olacak — asker yoksa maaş makası
+ *     kimseyi ilgilendirmez ("değirmen dersi": olmayan bir garnizonun maaş
+ *     hesabı Kralı boş bir işe çağırır).
+ *
+ * İki kanalda birden makas varsa TEK talep açılır ve ikisini birlikte söyler:
+ * satır kimliği `(userId, kind)` olduğu için iki ayrı satır açmak tavanı
+ * (`MAX_OPEN_DEMANDS`) tek başına doldurur, üstelik şikâyet aynı şikâyettir.
+ * Konuşan taraf en büyük makasın tarafıdır.
+ */
+function promiseDemand(signals: VoiceSignals): DemandCandidate | null {
+  const rule = VOICE_THRESHOLDS.vaat;
+  const army = Math.max(0, Number(signals.army) || 0);
+  const open = promiseGaps(signals).filter(entry =>
+    entry.promised >= rule.promise && entry.gap >= rule.gap && (entry.channel !== "pay" || army > 0));
+  if (!open.length) return null;
+  const worst = open[0];
+  const phrase = (entry: PromiseGap) => entry.channel === "food"
+    ? `sofraya ilan edilen %${Math.round(entry.promised)} yerine %${Math.round(entry.delivered)} geliyor`
+    : `keseye ilan edilen %${Math.round(entry.promised)} maaş yerine %${Math.round(entry.delivered)} giriyor`;
+  return {
+    kind: "vaat",
+    // Konuşan taraf makasın büyük tarafıdır: maaş makası kışlanın, sofra
+    // makası çarşının derdidir. İkisi birden varsa büyük olan söz alır.
+    voice: worst.channel === "pay" ? "garrison" : "commons",
+    // ASLA `urgent` (bkz. VOICE_THRESHOLDS.vaat).
+    severity: "normal",
+    minGameHours: rule.hours,
+    text: `Kalede ilan edilen pay tutmuyor: ${open.map(phrase).join("; ")}. İlan edilenin gerçekten verilmesini istiyorlar.`,
+    satisfiedBy: {
+      actions: [...new Set(open.flatMap(entry => PROMISE_REMEDY[entry.channel]))],
+      // `build_structure` yalnızca yiyecek makasında ve yalnızca AMBARI/TARLAYI
+      // büyüten yapılarla sayılır; Sur kurmak sofradaki eksiği kapatmaz.
+      ...(open.some(entry => entry.channel === "food") ? { buildingTypes: PROMISE_BUILDINGS } : {}),
+    },
+  };
+}
+
+// --- KOALİSYON MASASI: muhalefetle pazarlık (Fikir 8) ----------------------
+
+/**
+ * ELEBAŞI KRAL'A SOMUT BİR TALEP İLETİR.
+ *
+ * Bugüne kadar iç muhalefetin (`engine/faction.ts`) Kral'la HİÇ etkileşimi
+ * yoktu: baskı büyüyor, garnizonun zapt gücünü kırıyor ve Kral'ın elinde
+ * yalnızca "rızayı yükselt" kalıyordu. Kral elebaşıyla konuşamıyordu bile. Bu
+ * talep o masayı kuruyor.
+ *
+ * MEKANİĞE YENİ BİR ÇIKIŞ EKLENMEDİ ve bu, `engine/faction.ts`'in taşıyıcı
+ * ilkesine (Kral'ın muhalefeti BASTIRACAK bir emri YOKTUR) sadık kalmanın
+ * doğrudan sonucudur: talebin `satisfiedBy` listesi muhalefeti dağıtan bir emir
+ * değil, RIZAYI YÜKSELTEN emirlerdir ve liste `COMPARE_REMEDY.factionPressure`
+ * ile AYNI yerden okunur (kısıt #5) — "muhalefet baskısı nasıl erir" sorusunun
+ * cevabı iki yerde ayrı yazılmasın. Yani Kral pazarlığı "kabul ettiğinde" bile
+ * yaptığı şey halkın hayatını düzeltmektir; elebaşı bir imza karşılığında
+ * dağılmaz, rıza yükseldiğinde dağılır.
+ *
+ * "Anlaşma indirimi" (kabul edilince baskının NORMALDEN HIZLI erimesi) BİLEREK
+ * YAPILMADI. Plan belgesinin bağlayıcı "Karar (2026-08-22)" kısmı yalnızca iki
+ * şey sabitliyor — talebin LLM'den üretilmesi ve ısrarlı reddin elebaşıyı
+ * sertleştirmesi; indirim kararın değil ön analizin bir cümlesiydi. Teknik
+ * gerekçesi de var: indirim `advanceFaction`'a bir "anlaşma damgası" ister,
+ * damga `engine/types.ts` + `.strict()` save şemasına yeni bir alan demek
+ * (kısıt #3) ve bu turda o dosyalara dokunma yetkisi yoktu.
+ *
+ * TALEBİN CÜMLESİ LLM'DEN GELİR (kararın 1. maddesi) ve bunun için ayrı bir
+ * yol açılmadı: bu bir `DemandKind` olduğu için Fikir 2'nin mevcut anlatım
+ * boru hattından (`server/populace-narrator.ts` → `narrateDemands`) kendiliğinden
+ * geçer, kademesi `demandTone` ile süreye göre sertleşir. İkinci bir anlatıcı
+ * yazmak aynı kuralı iki yere kopyalamak olurdu.
+ */
+function factionDemand(signals: VoiceSignals): DemandCandidate | null {
+  const rule = VOICE_THRESHOLDS.muhalefet;
+  const pressure = Number(signals.factionPressure) || 0;
+  if (pressure < rule.pressure) return null;
+  const leader = String(signals.factionLeader ?? "").trim();
+  const who = leader || "Muhalefetin elebaşısı";
+  return {
+    kind: "muhalefet", voice: "commons",
+    severity: pressure >= rule.urgent ? "urgent" : "normal",
+    minGameHours: rule.hours,
+    text: pressure >= rule.urgent
+      ? `${who} meydandan Kral'a sesleniyor: halkın yükü hafifletilmedikçe kimse dağılmayacak. Masaya oturmayı hâlâ teklif ediyor.`
+      : `${who} Kral'la konuşmak istiyor: halkın yükü hafifletilirse muhalefeti dağıtacağını söylüyor.`,
+    // Muhalefet baskısı yalnızca rıza yükselince erir; çare de o yüzden rızayı
+    // yükselten emirlerdir. Liste kıyas talebiyle AYNI kaynaktan okunur.
+    satisfiedBy: { actions: [...COMPARE_REMEDY.factionPressure] },
+  };
 }
 
 /** Geride olduğumuz ölçütün halkın dilindeki NİTEL karşılığı — sayı YOK. */
@@ -424,6 +678,20 @@ export const DEMAND_SUBJECT: Record<DemandKind, string> = {
   joy: "hayatın tatsızlaşması; bir şenlik ya da meydan eğlencesi istiyorlar",
   wage: "kışlada maaşın ödenmemesi; maaş defterinin açılmasını istiyorlar",
   kiyas: "komşu sancaklarda hayatın daha kolay görünmesi; aynı düzeni kendi kapılarında istiyorlar",
+  /**
+   * Makas (Fikir 14). Konu SAYISIZ anlatılır (prompt'ta rakam yasağı var) ama
+   * ayrım korunur: şikâyet "az verildi" değil, "verildiği İLAN EDİLEN pay
+   * elimize geçmedi"dir. Kanalı (sofra mı kese mi) modele `voice` söyler:
+   * `commons` çarşıyı, `garrison` kışlayı konuşturur.
+   */
+  vaat: "kalede ilan edilen payın elimize eksik geçmesi; ilan edildiği söylenenin gerçekten verilmesini istiyorlar",
+  /**
+   * Koalisyon masası (Fikir 8). Konuşan taraf ÖRGÜTLÜ muhalefettir, dağınık
+   * halk değil: prompt'ta elebaşının ADI GEÇMEZ (isim yasağı) ama bir masa
+   * teklifi olduğu, yani karşılığında bir şey verildiği anlatılır — pazarlığın
+   * "ben de dağılırım" tarafı bu maddenin bütün fikri.
+   */
+  muhalefet: "örgütlü muhalefetin Kral'la pazarlık teklifi; halkın yükü hafifletilirse dağılmaya razı olduklarını söylüyorlar",
 };
 
 // --- GARNİZON VETOSU -------------------------------------------------------

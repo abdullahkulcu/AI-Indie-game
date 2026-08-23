@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  LEDGER_LIMIT, RESTATE_WINDOW_MS, type LedgerEntry, type LedgerKind,
+  LEDGER_KINDS, LEDGER_LIMIT, RESTATE_WINDOW_MS, type LedgerEntry, type LedgerKind,
   deriveLedgerEvents, phraseFor, pruneLedger, recordEvent, recordEvents, renderLedger, timesPhrase,
 } from "../engine/ledger";
 
@@ -102,13 +102,16 @@ test("tekrar eden davranışta dil sertleşir", () => {
 });
 
 test("her madde türü bir cümle üretir", () => {
-  const kinds: LedgerKind[] = [
-    "override", "refusal", "heeded", "starvation", "desertion", "treasury_drain",
-    "fed_people", "paid_soldiers", "festival", "request_met", "request_refused",
-  ];
-  for (const kind of kinds) {
-    const text = phraseFor({ kind, weight: 2 });
-    assert.ok(text.length > 10, `${kind} için cümle üretilmeli`);
+  // Liste ARTIK ELLE YAZILMIYOR: motorun kendi `LEDGER_KINDS` dizisinden
+  // okunur. Eskiden burada elle yazılı bir kopya vardı ve yeni bir tür
+  // eklendiğinde test onu hiç görmüyordu — cümlesi olmayan bir tür sessizce
+  // geçebiliyordu.
+  assert.ok(LEDGER_KINDS.length >= 13, "tür listesi eksilmiş olmasın");
+  for (const kind of LEDGER_KINDS) {
+    for (const weight of [1, 2, 5]) {
+      const text = phraseFor({ kind, weight });
+      assert.ok(text.length > 10, `${kind} (ağırlık ${weight}) için cümle üretilmeli`);
+    }
   }
 });
 
@@ -198,4 +201,66 @@ test("üst üste ezilen itirazlar tek maddede birikir ve dile yansır", () => {
   const override = entries.find(entry => entry.kind === "override");
   assert.equal(override?.weight, 3);
   assert.match(renderLedger(entries, T0 + 3 * HOUR), /üç kez/);
+});
+
+// --- KOALİSYON MASASI: elebaşının sertleşmesi (Fikir 8) --------------------
+
+test("masaya oturmak ve geçiştirmek AYNI turda birlikte sayılmaz", () => {
+  // Kral hem pazarlığa oturup hem geçiştirmiş olamaz; karşılama önce sınanır ki
+  // sınırdaki bir tur Kral'ın aleyhine yazılmasın.
+  const both = deriveLedgerEvents(signals({ factionSettled: true, factionDefied: true }));
+  assert.ok(both.includes("faction_settled"));
+  assert.ok(!both.includes("faction_defied"));
+  const only = deriveLedgerEvents(signals({ factionDefied: true }));
+  assert.ok(only.includes("faction_defied"));
+  assert.ok(!only.includes("faction_settled"));
+  // Masa girdisi hiç yoksa defterde masa satırı da yok.
+  const none = deriveLedgerEvents(signals());
+  assert.ok(!none.some(kind => kind.startsWith("faction_")));
+});
+
+test("ELEBAŞI SERTLEŞİR: tekrar eden ret ağırlıkla dili sertleştirir", () => {
+  // Kararın (2026-08-22) ikinci maddesi. Sertleşme defterin ARTAN AĞIRLIK
+  // deseninde yaşıyor — `override` ile birebir aynı desen.
+  const soft = phraseFor({ kind: "faction_defied", weight: 1 });
+  const hard = phraseFor({ kind: "faction_defied", weight: 3 });
+  assert.notEqual(soft, hard);
+  assert.match(hard, /sertleşiyor/);
+  assert.ok(hard.length > soft.length, "üç kez geçiştirmek bir kezden ağır anlatılmalı");
+  // Masaya oturmak da ağırlıkla bir karakter tespitine dönüşür.
+  assert.notEqual(
+    phraseFor({ kind: "faction_settled", weight: 1 }),
+    phraseFor({ kind: "faction_settled", weight: 3 }),
+  );
+});
+
+test("masa reddi DURUM temellidir: tekrar penceresi dolmadan yeniden sayılmaz", () => {
+  // Baskı 50'nin üstünde kaldığı sürece talep AÇIK kalır; pencere olmasa Kral
+  // tek bir konuşmada ağırlığı üçe çıkarır ve elebaşı sebepsiz yere en sert
+  // diline geçerdi.
+  let entries = recordEvent([], "faction_defied", T0);
+  entries = recordEvent(entries, "faction_defied", T0 + RESTATE_WINDOW_MS - 1);
+  assert.equal(entries[0].weight, 1, "pencere dolmadan ağırlık artmamalı");
+  entries = recordEvent(entries, "faction_defied", T0 + RESTATE_WINDOW_MS);
+  assert.equal(entries[0].weight, 2);
+  // Karşılama OLAY temellidir: pencereye takılmaz, çünkü Kral üst üste
+  // pazarlığa oturabilir ve her biri gerçek bir hamledir.
+  let settled = recordEvent([], "faction_settled", T0);
+  settled = recordEvent(settled, "faction_settled", T0 + 1);
+  assert.equal(settled[0].weight, 2);
+});
+
+test("üç tur geçiştirme tek maddede birikir ve defter metnine yansır", () => {
+  let entries: LedgerEntry[] = [];
+  for (let turn = 0; turn < 3; turn += 1) {
+    entries = recordEvents(
+      entries,
+      deriveLedgerEvents(signals({ factionDefied: true })),
+      T0 + turn * RESTATE_WINDOW_MS,
+    );
+  }
+  const table = entries.find(entry => entry.kind === "faction_defied");
+  assert.equal(table?.weight, 3);
+  assert.match(renderLedger(entries, T0 + 3 * RESTATE_WINDOW_MS), /üç kez/);
+  assert.match(renderLedger(entries, T0 + 3 * RESTATE_WINDOW_MS), /sertleşiyor/);
 });

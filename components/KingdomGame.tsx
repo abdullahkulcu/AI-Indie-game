@@ -200,7 +200,7 @@ export default function KingdomGame(){
     // endeksini okur; ikisi de motordan gelir, burada yeniden hesaplanmaz.
     const served=servedRations(g),garrison=garrisonMood(g.soldierUnrest??0,army);
     return{mood:state.label,moodScore:Math.round(g.popularity),productionMultiplier:state.production,foodRation:r.food,aleRation:r.ale,soldierPay:r.soldierPay,army,soldierUnrest:Math.round(g.soldierUnrest??0),dailyFoodNeed:Math.round(g.population*NEED.food*24),
-     servedFood:Math.round(served.food),livingCost:pazar.livingCost,capacity:g.capacity,
+     servedFood:Math.round(served.food),servedPay:Math.round(served.pay),livingCost:pazar.livingCost,capacity:g.capacity,
      garrison:{label:garrison.label,note:garrison.note,vetoes:garrisonVetoes(g.soldierUnrest??0,army)},
      // Muhalefet: General bunu görmeden "askerle bastır" gibi olmayan bir yol öneriyordu.
      muhalefet:(()=>{const pressure=factionPressureOf(g),state=factionState(pressure);

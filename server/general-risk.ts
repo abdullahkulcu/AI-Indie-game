@@ -1,4 +1,5 @@
 import { isConfirmationReply } from "./general-intent";
+import { type PopulacePulse, populacePulse } from "../engine/faction";
 /**
  * General'in itiraz kararı burada, kodda verilir; modelin insafına bırakılmaz.
  * Amaç: Kral riskli bir emir verdiğinde General'in gerçekten karşı çıkabilmesi,
@@ -16,6 +17,12 @@ export type KingdomSnapshot = {
   army: number;
   protectionHoursLeft: number;
   counterIntelligenceActive: boolean;
+  /**
+   * İç muhalefet baskısı — HALKIN NABZI göstergesinin ikinci girdisi
+   * (plan belgesi Fikir 6). Opsiyonel: göndermeyen çağıran için baskı 0
+   * sayılır, yani nabız yalnızca rızadan okunur ve gösterge yine çalışır.
+   */
+  factionPressure?: number;
 };
 
 export type ProposedAction = { name: string; arguments: Record<string, unknown> };
@@ -27,6 +34,16 @@ export type RiskAssessment = {
   spendRatio: number;
   /** Yiyeceğin biteceği tahmini saat; sonsuz ise açlık riski yok. */
   foodHoursLeft: number;
+  /**
+   * HALKIN NABZI (plan belgesi Fikir 6) — nitel, sayısız.
+   *
+   * Her kademede HESAPLANIR ama yalnızca `elevated`/`severe` kademelerinde
+   * GÖSTERİLİR; kapı `pulseNote` içindedir. Alanın burada durması
+   * bilinçli: değerlendirmenin bir parçası olduğu için testten doğrudan
+   * ölçülebiliyor ve ileride başka bir gösterici (örn. panel) aynı yerden
+   * okuyabilir — nabız ikinci bir yerde yeniden hesaplanmasın (kısıt #5).
+   */
+  pulse: PopulacePulse;
 };
 
 export type Verdict = {
@@ -131,7 +148,10 @@ export function assessAction(action: ProposedAction, state: KingdomSnapshot, cos
     reasons.push("Kendi nöbetimiz kurulu değilken ajan yollamak misilleme davet eder.");
   }
 
-  return { level, reasons, spendRatio, foodHoursLeft: hours };
+  return {
+    level, reasons, spendRatio, foodHoursLeft: hours,
+    pulse: populacePulse(state.popularity, state.factionPressure ?? 0),
+  };
 }
 
 /** Maliyette en ağır basan kaynağın adı; mesajı somutlaştırmak için. */
@@ -178,6 +198,28 @@ export function decide(assessment: RiskAssessment, loyalty: number, kingInsisted
   return { outcome: "confirm", assessment, note: "Sadakat sınırlı; General teyit olmadan ilerlemiyor." };
 }
 
+/**
+ * HALKIN NABZI KAPISI (plan belgesi Fikir 6, "Karar 2026-08-22").
+ *
+ * Gösterge `elevated` VE `severe` kademelerinde görünür, yalnızca `severe`
+ * değil — kararın birinci maddesi. `low` kademede boş dize döner: rutin bir
+ * emirde halkın nabzını basmak göstergeyi gürültüye çevirir ve Kral onu okumayı
+ * bırakır (halkın sesinin `MAX_OPEN_DEMANDS` tavanıyla aynı disiplin).
+ *
+ * Metin `assessment.pulse`ten OLDUĞU GİBİ alınır; burada yeni bir cümle
+ * kurulmaz ve hiçbir sayı eklenmez (kararın ikinci maddesi: nitel etiket,
+ * sayısal tahmin yok).
+ *
+ * DIŞA AÇIK OLMASININ SEBEBİ TESTTİR, ikinci bir çağıran değil. `low` kademede
+ * `reviewProposedActions` zaten hiç not üretmiyor, yani kapı o yoldan
+ * sınanamıyordu: kapıyı kaldıran bir mutasyon tek bir testi bile kırmadan
+ * geçiyordu. Kapı burada durup doğrudan çağrılabildiği için artık kırıyor.
+ */
+export function pulseNote(assessment: Pick<RiskAssessment, "level" | "pulse">): string {
+  if (assessment.level === "low") return "";
+  return ` HALKIN NABZI: ${assessment.pulse.label} ${assessment.pulse.note}`;
+}
+
 export type ReviewOutcome = {
   /** Motora iletilecek eylemler; teyit gerektirenler burada yer almaz. */
   approved: ProposedAction[];
@@ -213,17 +255,17 @@ export function reviewProposedActions(
       // Modelin kendi confirmed_risk iddiasına güvenilmez; bayrağı motor kararı belirler.
       approved.push(assessment.level === "low" ? action : { ...action, arguments: { ...action.arguments, confirmed_risk: true } });
       if (isPendingAction) clearPending = true;
-      if (assessment.level !== "low") notes.push(`⚠ ${assessment.reasons[0]} Sorumluluk sizde olmak üzere uyguluyorum.`);
+      if (assessment.level !== "low") notes.push(`⚠ ${assessment.reasons[0]} Sorumluluk sizde olmak üzere uyguluyorum.${pulseNote(assessment)}`);
       continue;
     }
     if (verdict.outcome === "refuse") {
-      notes.push(`✕ Bu emri uygulamayacağım. ${assessment.reasons.join(" ")} Sadakatim bu riski üstlenmeme yetmiyor; önce beni ikna etmelisiniz.`);
+      notes.push(`✕ Bu emri uygulamayacağım. ${assessment.reasons.join(" ")} Sadakatim bu riski üstlenmeme yetmiyor; önce beni ikna etmelisiniz.${pulseNote(assessment)}`);
       continue;
     }
     if (!toStore && assessment.level !== "low") {
       toStore = { action, reasons: assessment.reasons, riskLevel: assessment.level };
     }
-    notes.push(`⏸ ${assessment.reasons.join(" ")} Onayınızı bekliyorum — gerekçenizi de söylerseniz derhal uygularım.`);
+    notes.push(`⏸ ${assessment.reasons.join(" ")} Onayınızı bekliyorum — gerekçenizi de söylerseniz derhal uygularım.${pulseNote(assessment)}`);
   }
   return { approved, notes, toStore, clearPending };
 }
