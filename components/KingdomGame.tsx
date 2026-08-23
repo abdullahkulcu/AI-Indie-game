@@ -161,8 +161,8 @@ export default function KingdomGame(){
     return{mood:state.label,moodScore:Math.round(g.popularity),productionMultiplier:state.production,foodRation:r.food,aleRation:r.ale,soldierPay:r.soldierPay,army,soldierUnrest:Math.round(g.soldierUnrest??0),dailyFoodNeed:Math.round(g.population*NEED.food*24),
      servedFood:Math.round(served.food),livingCost:pazar.livingCost,capacity:g.capacity,
      garrison:{label:garrison.label,note:garrison.note,vetoes:garrisonVetoes(g.soldierUnrest??0,army)},
-     // Hizip: General bunu görmeden "askerle bastır" gibi olmayan bir yol öneriyordu.
-     hizip:(()=>{const pressure=factionPressureOf(g),state=factionState(pressure);
+     // Muhalefet: General bunu görmeden "askerle bastır" gibi olmayan bir yol öneriyordu.
+     muhalefet:(()=>{const pressure=factionPressureOf(g),state=factionState(pressure);
       return{baski:Math.round(pressure),durum:state.label,
        elebasi:pressure>=FACTION_THRESHOLDS.organized?factionLeaderName(g.kingdomName,g.foundedAt):null}})()}})(),
    defense:(()=>{const d=defenseOf(g);
@@ -570,16 +570,16 @@ async function openNegotiation(){
       : <p className="mood-explain-note">Halkın Kraldan açık bir isteği yok. Talep ancak bir eşik saatlerce aşılı kalırsa açılır; anlık dalgalanma masaya gelmez.</p>}
    </div>
 
-   {/* İÇ HİZİP — Kralın bastıracağı bir düğme YOK; yalnızca rızayı yükseltmek
+   {/* İÇ MUHALEFET — Kralın bastıracağı bir düğme YOK; yalnızca rızayı yükseltmek
        eritir. Blok bu yüzden bir emir sunmuyor, durumu ve tek çıkışı söylüyor. */}
    {(()=>{const pressure=factionPressureOf(game),state=factionState(pressure);
     if(state.id==="none")return null;
     return <div className={`faction-block ${state.id}`}>
-     <div className="section-head"><span>İÇ HİZİP</span><b>{state.label}</b></div>
+     <div className="section-head"><span>İÇ MUHALEFET</span><b>{state.label}</b></div>
      <div className="faction-gauge"><i style={{width:`${Math.min(100,Math.round(pressure))}%`}}/></div>
      <small>Baskı {Math.round(pressure)} · {state.note}</small>
      {pressure>=FACTION_THRESHOLDS.organized&&<p className="faction-leader">Elebaşı: <b>{factionLeaderName(game.kingdomName,game.foundedAt)}</b></p>}
-     <p className="faction-warning">Hizip güçle bastırılamaz: askerin zapt gücünü zayıflatan şeyin kendisidir. Tek çıkış halkın rızasını yükseltmektir — istihkak, vergi, fiyat ve konut.</p>
+     <p className="faction-warning">Muhalefet güçle bastırılamaz: askerin zapt gücünü zayıflatan şeyin kendisidir. Tek çıkış halkın rızasını yükseltmektir — istihkak, vergi, fiyat ve konut.</p>
     </div>})()}
 
    <div className="mood-explain">

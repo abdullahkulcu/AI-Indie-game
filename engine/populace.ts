@@ -231,7 +231,7 @@ export function suppression(army: number, population: number, soldierUnrest: num
   const ratio = army / population;
   const raw = Math.min(14, ratio * 100 * 0.9);
   const reliability = Math.max(0, 1 - soldierUnrest / 60);
-  // Örgütlü hizip zapt gücünü kırar: kalabalık artık kimin adamı olduğunu
+  // Örgütlü muhalefet zapt gücünü kırar: kalabalık artık kimin adamı olduğunu
   // bilmiyordur. Varsayılan 0 olduğu için eski çağrılar aynı sonucu verir.
   return raw * reliability * factionDrag(factionPressure);
 }

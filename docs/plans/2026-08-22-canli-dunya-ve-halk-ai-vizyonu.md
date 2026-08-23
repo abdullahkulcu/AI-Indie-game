@@ -95,9 +95,9 @@ Kısa bir harita (tam ayrıntı `docs/ARCHITECTURE.md`'de):
   (`engine/populace.ts` → `populationChange`) yalnızca o krallığın KENDİ
   mutlak rızasına bakıyor, komşularla kıyas yok (bkz. Fikir 17).
 - **Asker olmadan savaş zaten var ama UI'da gömülü.** `engine/agitation.ts`
-  (dış kese: altın→hizip baskısı veya asker huzursuzluğu, mal kesesi→pazar
+  (dış kese: altın→muhalefet baskısı veya asker huzursuzluğu, mal kesesi→pazar
   bozma, haydut yönlendirme→akın sıklığını kaydırma) ve `engine/faction.ts`
-  (iç hizip: rıza uzun süre düşükse elebaşı çıkar, Kral'ın bastıracak bir
+  (iç muhalefet: rıza uzun süre düşükse elebaşı çıkar, Kral'ın bastıracak bir
   emri **yok**, yalnızca rızayı yükselterek erir). Bunlar `diyar` sekmesinde
   "DIŞ KESE" paneli olarak var ama oyunun ana anlatısı hâlâ "bina kur, asker
   eğit". Faz 6 ile (bugün, bu oturumda tamamlandı — bkz. aşağıdaki not)
@@ -204,7 +204,7 @@ tek tek okunup özetlenir.
   ve `ChannelWorldMap.tsx`/`KingdomGame.tsx`'e küçük bir panel.
 - **Açık sorular:**
   - Ortalamaya hangi metrikler girsin — yalnızca rıza mı, yoksa istihkak/
-    vergi/hizip baskısı gibi daha fazla eksen mi? Fazla eksen "asimetrik
+    vergi/muhalefet baskısı gibi daha fazla eksen mi? Fazla eksen "asimetrik
     bilgi" sınırına (Kral'ın rakip krallığın İÇ verisine erişememesi
     gerektiği) ne kadar yaklaşıyor — ortalama anonim olsa bile "channel
     ortalama vergisi %22" gibi bir sayı Kral'a rakiplerin iç kararları
@@ -214,7 +214,7 @@ tek tek okunup özetlenir.
     burada da geçerli olmalı gibi duruyor, ama teyit gerekir)?
 
 - **Karar (2026-08-22):**
-  - Ortalamaya **rıza + istihkak + vergi + hizip baskısı** girer (zengin
+  - Ortalamaya **rıza + istihkak + vergi + muhalefet baskısı** girer (zengin
     kıyaslama tercih edildi). Not: küçük channel'larda (az sayıda krallık)
     bu ortalama tek bir rakibin durumunu neredeyse birebir yansıtabilir —
     channel büyüklüğü arttıkça bu sızıntı riski doğal olarak seyrelir;
@@ -281,7 +281,7 @@ oyun dengesi hiç değişmez, yalnızca anlatım kalitesi değişir.
 
 **Kaynak:** Claude'un önerisi (ilk brief, "hızlı/mevcut altyapıya oturanlar" #2).
 
-Dış kese, mal kesesi, haydut yönlendirme ve iç hizip bugün `diyar`
+Dış kese, mal kesesi, haydut yönlendirme ve iç muhalefet bugün `diyar`
 sekmesinde küçük bir panel olarak duruyor; oyunun "asıl meselesi" bunlar
 değil bina/asker gibi görünüyor. Bu fikir kod değişikliği değil, **konum
 ve anlatım** değişikliği: General'in sistem promptuna (`gamePrompt`)
@@ -321,7 +321,7 @@ eklemek.
 
 **Kaynak:** Claude'un önerisi (ilk brief, "hızlı/mevcut altyapıya oturanlar" #1).
 
-Kritik bir olay (hizip eşiği aşıldı, dış kese ifşa oldu, garnizon isyan
+Kritik bir olay (muhalefet eşiği aşıldı, dış kese ifşa oldu, garnizon isyan
 etti, gece vardiyası riskli bir öneri hazırladı) olduğunda `noteToKing`'in
 yazdığı satırın **aynı anda** bir Slack webhook'una da gitmesi. Kral
 oyunu açık tutmadan "krallığında bir şey oluyor" bilgisini alır.
@@ -413,7 +413,7 @@ gözetlemesidir, tamamen farklı bir kanal.
 Savaş ilanı, ittifak, ağır vergi gibi büyük kararlar önerildiğinde
 (General'in `propose_action`/`pending_decision` akışında), Kral'a
 karardan ÖNCE halkın muhtemel tepkisinin bir özeti gösterilir — "halkın
-rızası zaten 35, bu karar muhtemelen hizip baskısını hızlandırır" gibi.
+rızası zaten 35, bu karar muhtemelen muhalefet baskısını hızlandırır" gibi.
 Veto değil, güçlü bir sinyal.
 
 - **Hizmet ettiği:** "halkın yeri geldiğinde kralın arkasında durması,
@@ -422,7 +422,7 @@ Veto değil, güçlü bir sinyal.
 - **Bugün en yakın ne var / eksik:** `server/general-risk.ts` (risk
   kademesi zaten kodda hesaplanıyor, CLAUDE.md'nin "itiraz kararı kodda
   verilir" ilkesiyle uyumlu) ve `engine/faction.ts` → `factionTarget`
-  (mevcut rızadan hedef hizip baskısını hesaplayan saf fonksiyon zaten
+  (mevcut rızadan hedef muhalefet baskısını hesaplayan saf fonksiyon zaten
   var). Eksik olan: bu ikisini birleştirip `pending_decisions` akışına
   "bu kararın halk üzerindeki tahmini etkisi" alanı eklemek.
 - **Efor:** orta — yeni bir hesaplama fonksiyonu (muhtemelen
@@ -486,7 +486,7 @@ fiyatı konuşuluyor" gibi). Kral'a doğrudan bir talep DEĞİL — yalnızca
 
 ---
 
-### 8. Hizip müzakere masası — iç muhalefetle pazarlık
+### 8. Koalisyon masası — iç muhalefetle pazarlık
 
 **Kaynak:** orijinal (bu belge için üretildi).
 
@@ -501,20 +501,20 @@ yavaş `easeRate`'ten daha hızlı bir "anlaşma indirimi"), reddederse baskı
 normal seyrine (mevcut kapalı-çözüm) devam eder.
 
 - **Hizmet ettiği:** "iç karışıklık yaratarak asker olmadan savaş
-  kazanma" fikrinin AYNADAKİ karşılığı — rakibin hizbini KIŞKIRTMAK
-  bugün varken, KENDİ hizbiyle PAZARLIK etmek yok; ikisi birlikte
+  kazanma" fikrinin AYNADAKİ karşılığı — rakibin muhalefetini KIŞKIRTMAK
+  bugün varken, KENDİ muhalefetiyle PAZARLIK etmek yok; ikisi birlikte
   "demokrasi ve strateji" cümlesine daha güçlü hizmet eder.
 - **Bugün en yakın ne var / eksik:** `engine/negotiation.ts`'in TÜM
   mekaniği (tur sınırı, şart doğrulama, imza yetkisi) doğrudan yeniden
   kullanılabilir bir desen; eksik olan bunu iki KRALLIK arasında değil,
-  Kral ile kendi hizbi arasında çalıştıracak ince bir uyarlama (karşı
+  Kral ile kendi muhalefeti arasında çalıştıracak ince bir uyarlama (karşı
   tarafın "General"i yok, sabit/deterministik bir tepki fonksiyonu var).
   CLAUDE.md kısıt #5 (tek-doğru-kaynak) burada özellikle önemli: bu yeni
   mekanik `negotiation.ts`'i KOPYALAMAMALI, ondan faktörize edilmiş ortak
   parçaları (tur/süre sınırı gibi) yeniden kullanmalı.
 - **Efor:** orta-büyük — `engine/faction.ts`'e yeni saf fonksiyonlar
   (`factionDemand`, `factionSettlement` gibi) + muhtemelen yeni bir küçük
-  tablo (aktif bir "hizip talebi" bekliyorsa) + UI.
+  tablo (aktif bir "muhalefet talebi" bekliyorsa) + UI.
   **Karar sonrası not:** talep LLM'den üretileceği için bu fikir artık
   Halk-AI kimlik altyapısını (Fikir 0) GEREKTİRİYOR — Fikir 0'dan önce
   yapılamaz (aşağıdaki orijinal analiz bunun tersini varsayıyordu).
@@ -542,7 +542,7 @@ normal seyrine (mevcut kapalı-çözüm) devam eder.
 
 Kral'ın (General aracılığıyla) halka "vergiyi yükseltsem mi" gibi bir
 soru "sorabildiği" (aslında halka değil, sisteme) ve halkın (nüfus,
-mevcut rıza, hizip baskısı gibi mevcut sinyallerin AĞIRLIKLI bir
+mevcut rıza, muhalefet baskısı gibi mevcut sinyallerin AĞIRLIKLI bir
 fonksiyonu olarak, LLM olmadan) "evet/hayır" ya da bir yüzde döndürdüğü
 basit bir mekanik. Sonuç BAĞLAYICI değil — yalnızca bir sinyal (Fikir 6
 ile örtüşür ama bu, Kral'ın kendi başlattığı, AKTİF bir sorgu; 6 pasif
@@ -628,7 +628,7 @@ gömer.
 
 Gece vardiyası altyapısını (zaten proaktif, zaten token-disiplinli)
 genişleterek, standing order'ı OLMASA bile, çok nadir ve büyük anlarda
-(örn. hizip `defiant` eşiğine ilk kez ulaştığında, ya da bir komşu
+(örn. muhalefet `defiant` eşiğine ilk kez ulaştığında, ya da bir komşu
 kesesi ifşa olduğunda) General'in KENDİLİĞİNDEN bir ikilem sunması:
 "Kralım, şöyle bir seçenek var, ne yapalım?" — emrin cevabı değil,
 emrin KENDİSİ General'den gelir.
@@ -796,7 +796,7 @@ var" diye buna açıkça itiraz edebilir.
 **Kaynak:** Claude'un önerisi (kullanıcıyla ayrı sohbette verilen senaryo).
 
 Bugünkü dış kese (`engine/agitation.ts`) yalnızca SAYISAL bir etki
-taşıyor (hizip baskısına +9.6 puan gibi); içerik/anlatı taşımıyor. Bu
+taşıyor (muhalefet baskısına +9.6 puan gibi); içerik/anlatı taşımıyor. Bu
 fikir, Halk-AI'sının (Fikir 0'ın altyapısıyla) kesenin yanında ya da
 yerine bir "söylenti/propaganda metni" üretip hedefin Halk'ına
 ulaştırmasını önerir — etkinin SAYISAL tarafı yine `engine/agitation.ts`'in
@@ -942,7 +942,7 @@ kullanılabilmesinin altını çizer.
   halkına yöneliyor, dolaylı yoldan üçüncü bir tarafı etkiliyor.
   Vizyonun "bazen kralın arkasında bazen karşısında" gerilimine de hizmet
   eder: böyle bir Kral'ın kendi halkı bunu ANLARSA (bkz. Fikir 14'ün
-  "ikiyüzlülük" mekanizması) hizip baskısı çok hızlı tırmanır — kendi
+  "ikiyüzlülük" mekanizması) muhalefet baskısı çok hızlı tırmanır — kendi
   kendini cezalandıran bir strateji.
 - **Bugün en yakın ne var / eksik:** Hiçbir karşılığı yok —
   `pickMigrationTarget` hedefi YÖNLENDİRİLEMEZ biçimde (kaynak krallığın
@@ -968,7 +968,7 @@ kullanılabilmesinin altını çizer.
     saldırı aracı" olur, dış kesenin dikkatli dengelenmiş verimsizlik
     oranlarına aykırı düşer) — bu maliyet yalnızca rıza/nüfus kaybı mı,
     yoksa Fikir 14'ün ikiyüzlülük mekanizmasıyla BAĞLANTILI bir itibar/
-    hizip cezası da mı devreye girmeli?
+    muhalefet cezası da mı devreye girmeli?
 
 - **Karar (2026-08-22):**
   - `engine/migration.ts`'nin **"hedef adaylar arasından seçilir, gönderen
@@ -976,7 +976,7 @@ kullanılabilmesinin altını çizer.
     doğrudan hedefleme aracı EKLENMEZ. Kral yalnızca kendi rızasını
     düşürerek göçü dolaylı tetikler.
   - Maliyet: doğal rıza/nüfus kaybının ÜSTÜNE, **Halk fark ederse
-    (Fikir 14'ün ikiyüzlülük mekanizması) itibar/hizip cezası da
+    (Fikir 14'ün ikiyüzlülük mekanizması) itibar/muhalefet cezası da
     devreye girer** — iki fikir birbirine bağlanıyor, bu yüzden Fikir 18
     Fikir 14'ten SONRA ele alınmalı.
 

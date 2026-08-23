@@ -587,7 +587,7 @@ async function settleAgitations(now: number) {
     const exposed = Boolean(shield?.activeUntil && shield.activeUntil > row.completesAt);
     const kind = row.kind as AgitationKind;
     // Mal kesesi yığın taşıyıcısına, altın kesesi baskı/kese taşıyıcılarına
-    // yazar. İkisi ayrı silahtır: mal kesesi hizip baskısı üretmez, çünkü bol
+    // yazar. İkisi ayrı silahtır: mal kesesi muhalefet baskısı üretmez, çünkü bol
     // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
     const patch = kind === "goods_glut"
       ? applyGlut({ ...target, speed }, isTraded(row.costResource) ? row.costResource : "food", row.completesAt)

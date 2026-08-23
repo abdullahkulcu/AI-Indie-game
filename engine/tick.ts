@@ -260,7 +260,7 @@ export function tick(g: Game, now: number): Game {
   const popularity = Math.max(0, approachMood(g.popularity, target, hours) - raid.moodLoss);
 
   const soldierUnrest = army > 0 ? soldierUnrestAfter(g.soldierUnrest ?? 0, served.pay, hours) : 0;
-  // İç hizip: sürücü (rıza) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur,
+  // İç muhalefet: sürücü (rıza) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur,
   // böylece kapalı çözüm adımlara bölününce aynı sonucu verir.
   const factionPressure = advanceFaction(factionPressureOf(g), g.popularity, hours);
   // Yabancı kesenin payı taşıyıcı alanların İÇİNDE kalır, `factionPressure` ve
@@ -276,10 +276,15 @@ export function tick(g: Game, now: number): Game {
 
   notices = populaceNotices(g, { state, soldierUnrest: felt, previousUnrest: feltUnrest(g, g.lastTickAt), served }, notices, now);
 
-  // Hizip eşik geçişleri deftere düşer. Kral bunu güçle bastıramaz: bildirim de
-  // ona bir "bastır" düğmesi değil, rızayı yükseltmesi gerektiğini söyler.
+  // Muhalefet eşik geçişleri deftere düşer. Kral bunu güçle bastıramaz: bildirim
+  // de ona bir "bastır" düğmesi değil, rızayı yükseltmesi gerektiğini söyler.
+  //
+  // Etiket "HİZİP"ten "MUHALEFET"e çevrildi. Şema `kind`'ı serbest string
+  // tutuyor (`z.string()`, enum DEĞİL), bu yüzden eski kayıtlardaki "HİZİP"
+  // bildirimleri hâlâ geçerlidir ve reddedilmez — tarihe geçmiş bir satır
+  // yazıldığı gibi kalır.
   const factionLine = factionNotice(factionPressureOf(g), factionPressure, g.kingdomName, g.foundedAt);
-  if (factionLine) notices = [{ kind: "HİZİP", text: factionLine, at: now }, ...notices].slice(0, 20);
+  if (factionLine) notices = [{ kind: "MUHALEFET", text: factionLine, at: now }, ...notices].slice(0, 20);
 
   let mutinyLoss = 0;
   if (felt >= SOLDIER_THRESHOLDS.desertion && army > 0) {

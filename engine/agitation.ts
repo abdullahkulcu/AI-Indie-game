@@ -5,7 +5,7 @@ import type { Game, TradeKey } from "./types";
  * DIŞ KESE — komşu krallığın halkına ya da askerine gönderilen para.
  *
  * Kral 600 altın karşılığında bir kese yollar; kese hedefin HALKINA giderse
- * oradaki hoşnutsuzluğu örgütler (hizip baskısı), ASKERİNE giderse doğrudan
+ * oradaki hoşnutsuzluğu örgütler (muhalefet baskısı), ASKERİNE giderse doğrudan
  * huzursuzluk enjekte eder. Kese rızayı değiştirmez: var olmayan bir
  * memnuniyetsizliği yaratmaz, var olanı çalıştırır.
  *
@@ -36,7 +36,7 @@ export const AGITATION = {
   /** Kesenin yola çıkışından etkisine kadar geçen OYUN dakikası. */
   travelMinutes: 45,
   /**
-   * Halka giden kese: hizip baskısına eklenen puan. Tavan 11,5 — şenliğin
+   * Halka giden kese: muhalefet baskısına eklenen puan. Tavan 11,5 — şenliğin
    * rızaya kattığı 12 puanın ALTINDA, yani hedef Kral tek bir şenlikle
    * yabancının bütün emeğini silebilir.
    */
@@ -134,7 +134,7 @@ export function agitationEffect(game: AgitationCarrier, now: number) {
   const tau = shielded ? AGITATION.shieldedTau : AGITATION.tau;
   const decay = at > 0 ? Math.exp(-gameHours(at, now, game.speed) / tau) : 0;
   return {
-    /** Hizip baskısına eklenen puan. */
+    /** Muhalefet baskısına eklenen puan. */
     pressure: Math.max(0, Math.min(AGITATION.commons.cap, (game.agitationPressure ?? 0) * decay)),
     /** Asker huzursuzluğuna eklenen puan. */
     bribe: Math.max(0, Math.min(AGITATION.garrison.cap, (game.agitationBribe ?? 0) * decay)),
@@ -208,7 +208,7 @@ export function glutStock(game: GlutCarrier, reference: Record<TradeKey, number>
  * Yeni bir mal kesesinin hedefin kaydına yazacağı yığın. Altın kesesiyle aynı
  * geriye dönük damgalama: `at` malın VARDIĞI andır.
  *
- * Mal kesesi hizip baskısı ÜRETMEZ ve rızaya dokunmaz — üretseydi iki kese
+ * Mal kesesi muhalefet baskısı ÜRETMEZ ve rızaya dokunmaz — üretseydi iki kese
  * birbirini götürürdü, çünkü bol mal halkı memnun eder.
  */
 export function applyGlut(
@@ -246,7 +246,7 @@ export function applyGlut(
  * Ölçülen etki (ova, Sur yok, Kale Sv.3): 24 saatte beklenen akın sayısı
  * 0,94'ten 1,60'a çıkar. Asıl stratejik değeri yağma değil, hedefi nöbet
  * oranını yükseltmeye zorlaması: nöbet yükseldikçe `suppression` zayıflar, yani
- * bu mekanik iç hizip ve asker kesesiyle SİNERJİKTİR.
+ * bu mekanik iç muhalefet ve asker kesesiyle SİNERJİKTİR.
  */
 export const LURE = {
   /** Tek yönlendirmenin akın ihtimaline çarpan olarak eklediği pay. */

@@ -132,10 +132,10 @@ test("kese hedefin hiçbir kaynak alanına dokunmaz", () => {
 
 // --- Kanallar --------------------------------------------------------------
 
-test("kese hizip baskısını büyütür ama alanın içine yazılmaz", () => {
+test("kese muhalefet baskısını büyütür ama alanın içine yazılmaz", () => {
   const target = newGame({ popularity: 60, agitationPressure: 9.6, agitationAt: T0 });
   const after = tick(target, T0 + HOUR);
-  // Rıza yüksek: hizbin kendi baskısı sıfır kalır, kesenin payı ayrı taşınır.
+  // Rıza yüksek: muhalefetin kendi baskısı sıfır kalır, kesenin payı ayrı taşınır.
   assert.equal(factionPressureOf(after), 0);
   assert.ok((after.agitationPressure ?? 0) > 0, "taşıyıcı alan silinmez");
 });
@@ -307,7 +307,7 @@ test("yığın hedefin rızasını YÜKSELTMEZ", () => {
   assert.equal(marketState(glutted, T0).livingCost, marketState(clean, T0).livingCost);
 });
 
-test("mal kesesi hizip baskısı üretmez", () => {
+test("mal kesesi muhalefet baskısı üretmez", () => {
   const patch = applyGlut(trader(), "food", T0);
   assert.deepEqual(Object.keys(patch).sort(), ["commonsGlut", "commonsGlutAt"]);
 });

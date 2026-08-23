@@ -247,7 +247,7 @@ export const gameSaveSchema = z.object({
   ).strict().optional(),
   lastSpoilNoticeAt: z.number().finite().optional(),
   /**
-   * İç hizip baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
+   * İç muhalefet baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
    * Değeri istemciden HİÇ kabul edilmez (bkz. SERVER_DERIVED); şemada yer alması
    * yalnızca `.strict()` kaydın sunucunun kendi yazdığı alanı reddetmemesi için.
    */
@@ -610,7 +610,7 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
   };
   // SUNUCU-TÜREVİ ALANLAR — 2. sınıf (akıllı halk taşıyıcıları). Bu alanlarda
   // istemcinin bildirdiği değer TAMAMEN YOK SAYILIR; yerine sunucunun kendi
-  // `tick(previous)` sonucundaki değer yazılır. Sebep: hizip baskısı, kese ve
+  // `tick(previous)` sonucundaki değer yazılır. Sebep: muhalefet baskısı, kese ve
   // haydut yönlendirmesi birer CEZA/durum taşıyıcısıdır — istemci kendi
   // lehine yazabilirse mekaniğin tamamı anlamını yitirir. Tavan denetimi
   // (`checkGrowth`/`checkAgainstSimulation`) burada yetmez: bunlar kaynak

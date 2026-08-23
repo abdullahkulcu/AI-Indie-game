@@ -53,7 +53,7 @@ flowchart TB
 ### 1.1 `engine/` — saf çekirdek (~4500 satır, 20 dosya)
 
 Oyunun bütün kuralları burada yaşar: kaynak üretimi, nüfus/rıza, akınlar,
-pazar, müzakere, dış kese, iç hizip... Katı bir kısıt vardır ve
+pazar, müzakere, dış kese, iç muhalefet... Katı bir kısıt vardır ve
 `eslint.config.mjs` bunu otomatik denetler (bkz. §7):
 
 - `Math.random()` **yasak** — rastgelelik tohumlu FNV-1a karmasıyla üretilir
@@ -165,7 +165,7 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 - **Sarma:** `server/populace-voice.ts` — talebin ne zamandan beri açık
   olduğunu (`populace_demands` tablosu) tutar, süre şartı OYUN saati
   cinsindendir (channel hızıyla ölçeklenir).
-- **API:** `POST /api/general` bağlamına `populace.hizip`/`garrison`
+- **API:** `POST /api/general` bağlamına `populace.muhalefet`/`garrison`
   alanlarıyla girer.
 - **UI:** `halk` sekmesi (talepler ve garnizon durumu), meclis sohbeti
   (General'in bahsetmesi).
@@ -254,7 +254,7 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 - **API:** `POST /api/world` (kese/yönlendirme gönderme).
 - **UI:** `diyar` sekmesi ("DIŞ KESE" paneli).
 
-### 3.9 İç hizip / faction baskısı (faction)
+### 3.9 İç muhalefet / faction baskısı (faction)
 
 - **Motor:** `engine/faction.ts` — rıza uzun süre 40'ın altında kalınca
   kapalı-çözümlü üstel biriktirme (`advanceFaction`, `dx/dt = k·(hedef−x)`),
@@ -264,8 +264,8 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 - **Sarma:** `server/save-validation.ts` → `SERVER_DERIVED` listesi
   (`factionPressure` istemciden asla okunmaz, sunucunun kendi `tick()`'i
   esastır).
-- **API:** `PUT /api/save`, `POST /api/general` bağlamında `populace.hizip`.
-- **UI:** `halk` sekmesi, meclis bildirimleri ("HİZİP" kind'i).
+- **API:** `PUT /api/save`, `POST /api/general` bağlamında `populace.muhalefet`.
+- **UI:** `halk` sekmesi, meclis bildirimleri ("MUHALEFET" kind'i).
 
 ### 3.10 Casusluk / karşı-istihbarat (intel)
 

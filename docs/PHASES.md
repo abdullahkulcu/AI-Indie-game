@@ -48,7 +48,7 @@ Git geçmişinin (`git log --oneline`, 130+ commit) baştan sona okunmasıyla
 
 Bu proje, halkın ve garnizonun edilgen sayaçlar olmaktan çıkıp krallığa geri
 konuşan/direnen/örgütlenen aktörlere dönüşmesini hedefler: halkın sesi
-(taleplerini açıkça söylemesi), garnizonun vetosu, iç hizip (uzun süre düşük
+(taleplerini açıkça söylemesi), garnizonun vetosu, iç muhalefet (uzun süre düşük
 rızanın örgütlü muhalefete dönüşmesi) ve komşu krallıkların birbirine
 uygulayabileceği "yumuşak saldırı" araçları (dış kese, haydut yönlendirme).
 
@@ -75,13 +75,13 @@ geldiği doğrulanamamıştır.
 | **Faz 0** | ✅ TAMAM (kesin) | Güvenlik sertleştirmesi: `commons`, `peopleLeft`/`migrationDrift`/`peopleJoined` sunucu-türevi hâle getirildi; akın travması yalnızca GERÇEK yağmada tetiklenecek şekilde düzeltildi (püskürtülen akın artık rızayı cezalandırmıyor). | `8cb49eb` | `engine/tick.ts`, `engine/raids.ts`, `server/save-validation.ts` |
 | **Faz 1** (muhtemelen) | ✅ TAMAM | Halkın sesi: halk ve garnizonun açık talepleri, garnizon vetosu (aktif emirleri huzursuzluk eşiğine göre engelleme). | `e701da0` "Halkın sesi duyulsun, garnizon emri geri çevirebilsin" | `engine/populace-voice.ts`, `server/populace-voice.ts`, `db/schema.ts` → `populace_demands` |
 | **Faz 2** (muhtemelen) | ✅ TAMAM | Göç bildirimlerinin GEREKÇE göstermesi: Kral nüfusunun neden eridiğini artık görüyor (`heaviestGrievance`). | `0c043de` "Göç bildirimi sebebini söylesin" | `engine/populace.ts` (`GRIEVANCE_LABELS`, `heaviestGrievance`), `engine/tick.ts` |
-| **Faz 3** (muhtemelen) | ✅ TAMAM | İç hizip: rıza uzun süre düşük kalırsa elebaşı çıkıyor; kapalı-çözümlü üstel biriktirme/erime, Kral'ın bunu güçle bastıracak bir emri YOK. | `beb822c` "İç hizip: rıza uzun süre düşük kalırsa elebaşı çıksın" | `engine/faction.ts`, `tests/faction.test.ts` |
-| **Faz 4** (muhtemelen) | ✅ TAMAM | Dış kese — altın: komşu krallığın halkına ya da askerine para gönderme (hizip baskısı/asker huzursuzluğu enjeksiyonu), zar yok, iki kademeli ifşa. | `1b7d651` "Dış kese — altın: komşunun halkını ya da askerini satın al" | `engine/agitation.ts`, `server/agitation-desk.ts`, `db/schema.ts` → `agitations` |
+| **Faz 3** (muhtemelen) | ✅ TAMAM | İç muhalefet: rıza uzun süre düşük kalırsa elebaşı çıkıyor; kapalı-çözümlü üstel biriktirme/erime, Kral'ın bunu güçle bastıracak bir emri YOK. | `beb822c` "İç hizip: rıza uzun süre düşük kalırsa elebaşı çıksın" (commit mesajı, terim değişikliğinden ÖNCE yazıldığı için "hizip" diyor — tarihsel alıntı, olduğu gibi bırakıldı) | `engine/faction.ts`, `tests/faction.test.ts` |
+| **Faz 4** (muhtemelen) | ✅ TAMAM | Dış kese — altın: komşu krallığın halkına ya da askerine para gönderme (muhalefet baskısı/asker huzursuzluğu enjeksiyonu), zar yok, iki kademeli ifşa. | `1b7d651` "Dış kese — altın: komşunun halkını ya da askerini satın al" | `engine/agitation.ts`, `server/agitation-desk.ts`, `db/schema.ts` → `agitations` |
 | **Faz 5** (muhtemelen) | ✅ TAMAM | Dış kese — mal: hedefin pazarına mal yığarak satış getirisini düşürme (`commonsGlut`), rızaya ya da alışa dokunmaz. | `4aa4ad8` "Dış kese — mal: hedefin pazarını boz, ambarını doldurma" | `engine/agitation.ts` (`GLUT`, `applyGlut`), `engine/market.ts` (`pricingStock`) |
 | **Faz 6** | ✅ **TAMAM** | **Göçün çok krallığa dağılması.** Krallığı terk eden nüfus artık channel'daki aktif ve kuruluş koruması bitmiş başka bir krallığa, boş konut + rızadan doğan ağırlıklı bir seçimle (tohumlu `rand01`, `Math.random()` yok) gerçekten ulaşıyor. Orijinal tasarım belgesi erişilemez olduğu için kod tabanından rekonstrükte edildi (dış kese/ortak madenin "kaynakta olay olur, cron hedefe gecikmeli yazar" deseni). | `f143657`, `f74687b` | `engine/migration.ts`, `server/migration-desk.ts`, `app/api/cron/route.ts` (`settleMigrations`), `app/api/save/route.ts`, `db/schema.ts` → `migrations`, `tests/migration.test.ts` |
 | **Faz 7** (muhtemelen) | ✅ TAMAM | Haydut yönlendirme: Kral, dağ yollarındaki eşkıyayı komşusunun kalesine doğru çekebiliyor; yalnızca akın SIKLIĞINI ve haydut ağırlığını kaydırır, şiddete dokunmaz. | `80f23af` "Haydut yönlendirme: eşkıyayı komşunun kalesine çek" | `engine/agitation.ts` (`LURE`, `applyLure`, `lureAt`), `engine/raids.ts` (`pickKind` içindeki `lure` parametresi) |
 | **Faz 8** | ✅ TAMAM (DEVIRTESLIM'e göre; içerik bu oturumda doğrulanamadı) | Bilinmiyor — muhtemelen Faz 0-7'nin sunucu tarafı sertleştirmesi (`server/save-validation.ts` → `SERVER_DERIVED` listesinin 9 alanı tek fonksiyonda toplanması) ile örtüşüyor olabilir. | `c14aa38` (merge) içinde | `server/save-validation.ts` |
-| **Faz 9** | ✅ TAMAM (DEVIRTESLIM'e göre; içerik bu oturumda doğrulanamadı) | Bilinmiyor — muhtemelen arayüz entegrasyonu (`components/KingdomGame.tsx`'teki "DIŞ KESE" paneli, hizip göstergesi) ile örtüşüyor olabilir. | `c14aa38` (merge) içinde | `components/KingdomGame.tsx` |
+| **Faz 9** | ✅ TAMAM (DEVIRTESLIM'e göre; içerik bu oturumda doğrulanamadı) | Bilinmiyor — muhtemelen arayüz entegrasyonu (`components/KingdomGame.tsx`'teki "DIŞ KESE" paneli, muhalefet göstergesi) ile örtüşüyor olabilir. | `c14aa38` (merge) içinde | `components/KingdomGame.tsx` |
 
 ### Faz 6 hakkında ek not
 

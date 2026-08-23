@@ -1,10 +1,16 @@
 /**
- * İÇ HİZİP — rıza uzun süre düşük kalınca krallığın içinde bir elebaşı çıkar.
+ * İÇ MUHALEFET — rıza uzun süre düşük kalınca krallığın içinde bir elebaşı çıkar.
  *
  * Bu mekanik halka verilen bir CEZA DEĞİL, halkın kendi hareketidir. Bu yüzden
  * Kralın elinde onu bastıracak bir düğme yoktur: "elebaşını astır" diye bir
  * emir icat edilmedi ve edilmeyecek — bu, "halka emir verilmez" ilkesinin
- * doğrudan sonucudur. Hizip yalnızca YÖNETİMLE, yani rızayı yükselterek erir.
+ * doğrudan sonucudur. Muhalefet yalnızca YÖNETİMLE, yani rızayı yükselterek erir.
+ *
+ * TERİM NOTU: bu mekaniğe eskiden "hizip" deniyordu; oyuncuya daha anlaşılır
+ * olsun diye tüm görünen metinler "muhalefet" olarak değiştirildi. Kod içindeki
+ * `faction*` adları (İngilizce) DEĞİŞMEDİ — dolayısıyla alan adı, tip adı ve
+ * `factionLeaderName`'in TOHUM DİZGESİ olduğu gibi kaldı (bkz. aşağıdaki not:
+ * tohum değişirse her krallığın elebaşısının adı değişirdi).
  *
  * Baskı (0-100) kapalı çözümlü üstel biriktirilir/eritilir:
  *
@@ -22,10 +28,10 @@
 
 const FACTION = {
   /**
-   * Rıza bu eşiğin ÜSTÜNDEyken hizip hedefi sıfırdır, yani hizip erir.
+   * Rıza bu eşiğin ÜSTÜNDEyken muhalefet hedefi sıfırdır, yani muhalefet erir.
    * 40, halkın "Huzursuz"dan "Kaynıyor"a geçtiği sınırdır: ölçülen dinlenme
    * noktaları (normal krallık 42-46, iyi krallık 62-67) bu eşiğin üstünde
-   * oturuyor, dolayısıyla düzgün yönetilen krallıkta hizip hiç doğmaz.
+   * oturuyor, dolayısıyla düzgün yönetilen krallıkta muhalefet hiç doğmaz.
    */
   moodFloor: 40,
   /** Eşiğin altındaki her rıza puanının hedefe kattığı baskı. */
@@ -35,7 +41,7 @@ const FACTION = {
   /** Erime hızı (1/oyun saati). Rıza 60'a dönünce 12 saatte 60 → 16 puan. */
   easeRate: .11,
   /**
-   * Askerin zapt gücünü tamamen kıran baskı. Hizip büyüdükçe garnizonun halkı
+   * Askerin zapt gücünü tamamen kıran baskı. Muhalefet büyüdükçe garnizonun halkı
    * bastırma gücü zayıflar: kalabalık artık kimin adamı olduğunu bilmiyordur.
    */
   suppressionBreak: 100,
@@ -50,7 +56,7 @@ export const factionPressureOf = (game: { factionPressure?: number }) =>
   Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(game.factionPressure) || 0));
 
 /**
- * Mevcut rızanın işaret ettiği hizip baskısı. Rıza eşiğin üstündeyse 0: hizip
+ * Mevcut rızanın işaret ettiği muhalefet baskısı. Rıza eşiğin üstündeyse 0: muhalefet
  * kendi kendine büyümez, ancak memnuniyetsizlikten beslenir.
  */
 export function factionTarget(popularity: number) {
@@ -75,8 +81,8 @@ export function advanceFaction(current: number, popularity: number, hours: numbe
 }
 
 /**
- * Hizbin askerin zapt gücüne çarpanı. 1 = hizip yok, 0 = garnizon halkı hiç
- * bastıramıyor. `populace.suppression()` bunu `reliability` ile birlikte uygular.
+ * Muhalefetin askerin zapt gücüne çarpanı. 1 = muhalefet yok, 0 = garnizon halkı
+ * hiç bastıramıyor. `populace.suppression()` bunu `reliability` ile birlikte uygular.
  */
 export function factionDrag(pressure: number) {
   const level = Math.max(0, Math.min(FACTION_LIMITS.max, Number(pressure) || 0));
@@ -92,15 +98,15 @@ export type FactionState = {
 export function factionState(pressure: number): FactionState {
   const level = Math.max(0, Number(pressure) || 0);
   if (level >= FACTION_THRESHOLDS.defiant) {
-    return { id: "defiant", label: "Açık meydan okuma", note: "Hizip sokakta açıkça toplanıyor; garnizonun zapt gücü neredeyse kalmadı." };
+    return { id: "defiant", label: "Açık meydan okuma", note: "Muhalefet sokakta açıkça toplanıyor; garnizonun zapt gücü neredeyse kalmadı." };
   }
   if (level >= FACTION_THRESHOLDS.organized) {
-    return { id: "organized", label: "Örgütlü hizip", note: "Bir elebaşı çıktı ve halkın bir bölümü onun sözünü dinliyor." };
+    return { id: "organized", label: "Örgütlü muhalefet", note: "Bir elebaşı çıktı ve halkın bir bölümü onun sözünü dinliyor." };
   }
   if (level >= FACTION_THRESHOLDS.stirring) {
     return { id: "stirring", label: "Kıpırdanma", note: "Kahvelerde fısıltı var; henüz bir önder yok." };
   }
-  return { id: "none", label: "Hizip yok", note: "Krallıkta örgütlü bir muhalefet yok." };
+  return { id: "none", label: "Muhalefet yok", note: "Krallıkta örgütlü bir muhalefet yok." };
 }
 
 // --- Elebaşının adı --------------------------------------------------------
@@ -124,8 +130,14 @@ function hash(text: string) {
 }
 
 /**
- * Hizbin elebaşı. Tohum krallığın adı ve kuruluş anıdır: ad hiçbir yerde
+ * Muhalefetin elebaşı. Tohum krallığın adı ve kuruluş anıdır: ad hiçbir yerde
  * saklanmasa da aynı krallıkta hep aynı çıkar, farklı krallıklarda farklı olur.
+ *
+ * TOHUM DİZGESİ ("hizip") DEĞİŞTİRİLEMEZ. Terim "muhalefet"e çevrildiğinde bu
+ * dizgeyi de güncellemek doğal görünüyor ama YAPILMAMALI: tohum değişirse hash
+ * değişir, hash değişirse HER MEVCUT KRALLIĞIN elebaşısı bir gecede başka biri
+ * olur. Oyuncunun aylardır tanıdığı isim kaybolur. Dizge burada bir kimliktir,
+ * bir metin değil.
  */
 export function factionLeaderName(kingdomName: string, foundedAt: number) {
   const seed = hash(`${kingdomName}|${foundedAt}|hizip`);
@@ -141,7 +153,7 @@ export function factionNotice(previous: number, current: number, kingdomName: st
     return `${factionLeaderName(kingdomName, foundedAt)} meydanda açıkça konuşuyor; asker kalabalığı dağıtamıyor. Bunu ancak halkın rızasını yükselterek çözebilirsiniz.`;
   }
   if (crossed(FACTION_THRESHOLDS.organized)) {
-    return `Halkın hoşnutsuzluğu bir isme bağlandı: ${factionLeaderName(kingdomName, foundedAt)}. Hizip artık örgütlü ve garnizonun zapt gücünü zayıflatıyor.`;
+    return `Halkın hoşnutsuzluğu bir isme bağlandı: ${factionLeaderName(kingdomName, foundedAt)}. Muhalefet artık örgütlü ve garnizonun zapt gücünü zayıflatıyor.`;
   }
   if (crossed(FACTION_THRESHOLDS.stirring)) {
     return "Kahvelerde ve tezgâh başlarında hoşnutsuz bir fısıltı dolaşıyor; henüz bir önder yok.";

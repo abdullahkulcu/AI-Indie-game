@@ -29,7 +29,7 @@ function newGame(overrides: Partial<Game> = {}): Game {
 
 // --- Hedef eğrisi ----------------------------------------------------------
 
-test("iyi ve normal krallıkta hizip hedefi sıfırdır", () => {
+test("iyi ve normal krallıkta muhalefet hedefi sıfırdır", () => {
   // Ölçülen dinlenme noktaları: normal krallık 42-46, iyi krallık 62-67.
   for (const mood of [42, 44, 46, 62, 65, 67, 100]) {
     assert.equal(factionTarget(mood), 0, `rıza ${mood}`);
@@ -85,7 +85,7 @@ test("baskı 0-100 aralığını hiç terk etmez", () => {
 
 // --- Zapt gücünü zayıflatması ---------------------------------------------
 
-test("hizip askerin zapt gücünü zayıflatır", () => {
+test("muhalefet askerin zapt gücünü zayıflatır", () => {
   const clean = suppression(30, 100, 0, 0);
   assert.ok(clean > 0);
   assert.equal(suppression(30, 100, 0, 50), clean * 0.5);
@@ -117,7 +117,7 @@ test("bildirim yalnızca eşik geçişinde yazılır", () => {
   assert.equal(factionNotice(55, 60, "Demirkale", T0), null);
 });
 
-test("hizip durumu eşiklere göre isimlendirilir", () => {
+test("muhalefet durumu eşiklere göre isimlendirilir", () => {
   assert.equal(factionState(0).id, "none");
   assert.equal(factionState(FACTION_THRESHOLDS.stirring).id, "stirring");
   assert.equal(factionState(FACTION_THRESHOLDS.organized).id, "organized");
@@ -130,16 +130,16 @@ test("tick baskıyı ilerletir ve eşik geçişini deftere yazar", () => {
   const game = newGame({ popularity: 20 });
   const after = tick(game, T0 + 8 * HOUR);
   assert.ok((after.factionPressure ?? 0) > FACTION_THRESHOLDS.stirring);
-  assert.ok(after.notices.some(notice => notice.kind === "HİZİP"));
+  assert.ok(after.notices.some(notice => notice.kind === "MUHALEFET"));
 });
 
-test("memnun krallıkta hizip hiç doğmaz", () => {
+test("memnun krallıkta muhalefet hiç doğmaz", () => {
   const after = tick(newGame({ popularity: 75 }), T0 + 24 * HOUR);
   assert.equal(after.factionPressure, 0);
-  assert.ok(!after.notices.some(notice => notice.kind === "HİZİP"));
+  assert.ok(!after.notices.some(notice => notice.kind === "MUHALEFET"));
 });
 
-test("tick'in adımları hizipte de aynı sonucu verir", () => {
+test("tick'in adımları muhalefette de aynı sonucu verir", () => {
   // Rıza sabit tutulamıyor (tick onu da yürütüyor) ama sapma kıl payı kalmalı.
   const game = newGame({ popularity: 20, foodRation: 0 });
   const single = tick(game, T0 + 6 * HOUR);
@@ -153,7 +153,7 @@ test("tick'in adımları hizipte de aynı sonucu verir", () => {
 
 const save = (game: Game) => JSON.parse(JSON.stringify(game)) as Game;
 
-test("istemcinin bildirdiği hizip baskısı yok sayılır", () => {
+test("istemcinin bildirdiği muhalefet baskısı yok sayılır", () => {
   const previous = save(newGame({ popularity: 20, lastTickAt: T0 }));
   // İstemci baskıyı sıfır bildirip cezadan kaçmaya çalışıyor.
   const claimed = save({ ...tick(previous, T0 + 12 * HOUR), factionPressure: 0 });
@@ -175,7 +175,7 @@ test("istemci baskıyı şişiremez de", () => {
   assert.equal(result.ok && result.game.factionPressure, 0);
 });
 
-test("hizip alanı olmayan eski kayıt reddedilmez", () => {
+test("muhalefet alanı olmayan eski kayıt reddedilmez", () => {
   const previous = save(newGame());
   delete previous.factionPressure;
   const next = save(tick(previous, T0 + HOUR));
@@ -186,7 +186,7 @@ test("hizip alanı olmayan eski kayıt reddedilmez", () => {
   assert.equal(result.ok, true);
 });
 
-test("ilk kayıtta hizip baskısı taşınmaz", () => {
+test("ilk kayıtta muhalefet baskısı taşınmaz", () => {
   const first = save(newGame({ factionPressure: 90 }));
   const result = validateGameSave(first, { previous: null, previousUpdatedAt: null, channelSpeed: 1, now: T0 });
   assert.equal(result.ok, true);
