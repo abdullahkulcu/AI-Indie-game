@@ -303,3 +303,52 @@ girmedi ama aynı riski taşıyor.
 - **Açık soru:** hangi yaklaşım tercih edilecek — matematiği düzelt mi,
   yoksa mevcut sapmanın kabul edilebilir olduğunu bir testle belgeleyip
   öyle mi bırak?
+
+### Ölçüm (2026-08-23) — sapma gerçek, ama bugün 409 üretmiyor
+
+Fikir 24'ü yazan ajan aynı borcu **ikinci bir büyüklükte** yakaladı
+(`commons` stoğu), bu da bağımsız olarak ölçüldü. Kurulum: aynı `now`,
+sunucu TEK büyük `tick()`, istemci DAKİKALIK `tick()`.
+
+Küçülen krallık (nüfus 500, kapasite 250, rıza 20, vergi %60, 6 saat):
+
+| Büyüklük | Tek adım | Dakikalık | Sapma |
+| --- | --- | --- | --- |
+| `population` | 150,00 | 129,91 | **%15,5** |
+| `commons.food` | 747,98 | 671,52 | %11,4 |
+| `commons.wood` | 2000,00 | 1660,99 | %20,4 |
+| `popularity` | — | — | ~1e-13 (ihmal) |
+
+Büyüyen krallık (nüfus 100, kapasite 2000, rıza 95):
+
+| Süre | Sunucu nüfus | İstemci nüfus | Fark | 409 tavanı | Reddediliyor mu |
+| --- | --- | --- | --- | --- | --- |
+| 1 sa | 101,67 | 101,65 | %−0,01 | 114,80 | hayır |
+| 6 sa | 103,60 | 108,50 | **%+4,73** | 116,89 | hayır |
+| 24 sa | 114,40 | 117,50 | %+2,71 | 128,55 | hayır |
+
+**Kök neden tek:** `commons` sapması `populationChange`'in ALTINDA
+duruyor — `commonsReference(population)` nüfustan türediği için nüfus
+sapması stoğa taşınıyor. Yani bu iki bulgu iki ayrı borç değil, aynı
+borcun iki yüzü; düzeltme yeri hâlâ `populationChange`.
+
+**Bugün neden 409 çıkmıyor:** `server/save-validation.ts`'in denetimleri
+TEK YÖNLÜ tavan — istemcinin bildirdiği değer sunucunun hesabını AŞAMAZ,
+altında kalması serbest. Küçülme yönünde istemci hep daha aşağıda kalıyor
+(dolayısıyla sessiz), büyüme yönünde ise %4,7'lik fark
+`SIMULATION_TOLERANCE` (%8) + 5 kişilik mutlak payın içinde eriyor.
+`commons` ise simülasyona karşı HİÇ doğrulanmıyor, o yüzden %20 sapma bile
+kayda dokunmuyor.
+
+**Ama borç kapanmadı, gizlendi.** İki gerçek etkisi var:
+1. Oran sabit, pay sabit: %4,7 büyük nüfusta mutlak olarak büyür, tavan
+   yüzde bazlı olduğu için orada da erimesi beklenir — ama uzun çevrimdışı
+   pencere + hızlı channel (`speed`) bileşimi test edilmedi; asıl risk
+   orada.
+2. `commons` sapması Kral'ın gördüğü FİYATI ve geçim endeksini sunucunun
+   hesabından ayırıyor (%8-20). Kayıt reddedilmiyor ama iki taraf aynı
+   pazarı aynı görmüyor.
+
+Ölçüm betikleri geçici olarak yazıldı ve silindi; yukarıdaki kurulum
+birebir tekrar üretilebilir. Kalıcı bir regresyon testi hâlâ YOK — açık
+soru bu yüzden hâlâ açık.
