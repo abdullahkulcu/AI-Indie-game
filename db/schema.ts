@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { POPULACE_PERSONA_IDS } from "../engine/populace-persona";
 import { DEMAND_TONES } from "../engine/populace-voice";
+import { INTEL_MISSION_KINDS } from "../engine/intel";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -141,6 +142,14 @@ export const intelMissions = pgTable("intel_missions", {
   sourceUserId: text("source_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   targetUserId: text("target_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   status: text("status", { enum: ["pending", "succeeded", "failed", "detected"] }).notNull().default("pending"),
+  /**
+   * Görev türü (plan belgesi Fikir 5). `scout` standart keşif, `deep` derin
+   * gözetleme: pahalı, daha düşük ihtimalli ve başarılı olursa rapora hedef
+   * halkın KABA moral etiketini ekleyen ayrı bir görev. Liste motordan gelir
+   * (`engine/intel.ts` → `INTEL_MISSION_KINDS`); varsayılan `scout` olduğu
+   * için bu sütun eklenmeden önce yazılmış bütün satırlar keşif sayılır.
+   */
+  kind: text("kind", { enum: INTEL_MISSION_KINDS }).notNull().default("scout"),
   successChance: integer("success_chance").notNull(),
   detectionChance: integer("detection_chance").notNull(),
   completesAt: bigint("completes_at", { mode: "number" }).notNull(),

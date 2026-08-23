@@ -121,7 +121,7 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `game_saves` | Krallığın TEK kaydı: `gameState` (istemcide hesaplanan JSON blob), `revision` (iyimser kilit), `updatedAt`. |
 | `llm_credentials` | BYOK: sağlayıcı, model, AES-256-GCM şifreli anahtar + IV + `additionalData` sürüm etiketi. |
 | `intel_defenses` | Karşı-istihbarat seviyesi ve aktif olduğu süre (casus tespiti ve kese ifşası buradan okunur). |
-| `intel_missions` | Gönderilen ajan görevi: başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
+| `intel_missions` | Gönderilen ajan görevi: TÜR (`kind`: `scout` / `deep`), başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
 | `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher. |
 | `shared_mine_workers` | Bir krallığın madendeki işçisi ve henüz teslim edilmemiş kesirli cevheri (`pendingOre`). |
 | `standing_orders` | Kralın gece vardiyası için verdiği kalıcı emir: otonomi (`autonomous`/`ask`), günlük eylem tavanı, durum. |
@@ -284,17 +284,28 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 
 ### 3.10 Casusluk / karşı-istihbarat (intel)
 
-- **Motor/veri:** `db/schema.ts` → `intel_missions`, `intel_defenses`.
-  Başarı/tespit ihtimali zarla belirlenir (bu, `engine/`'in DIŞINDA —
-  `app/api/world/route.ts` içinde `crypto.getRandomValues` ile — çünkü
-  saf/deterministik olma zorunluluğu yalnızca `engine/`'e aittir, tek seferlik
-  sunucu tarafı bir olaydır, istemci-sunucu senkronizasyonu gerekmez).
+- **Motor/veri:** `engine/intel.ts` (görev türleri TEK KAYNAK: bedel,
+  başarı/tespit ihtimalleri, yol süresi ve TOHUMLU zar `resolveIntelMission`),
+  `db/schema.ts` → `intel_missions`, `intel_defenses`. Zar `engine/raids.ts`'in
+  `rand01` desenini kullanır ve tohumun öngörülemez parçası SUNUCUDA üretilen
+  görev kimliğidir (istemciye hiç inmez); böylece sonuç oyuncu için tahmin
+  edilemez ama testte tekrar oynatılabilir. (Eskiden zar route'un içinde
+  `crypto.getRandomValues` ileydi.)
+- **İki görev türü:** `scout` (bedava keşif) ve `deep` (DERİN GÖZETLEME, plan
+  belgesi Fikir 5): daha pahalı — bedeli gönderenin kaydından TEK İŞLEMDE
+  düşer, dış kesenin omurgası —, daha düşük başarı ihtimalli, daha kolay
+  tespit edilen ve başarılı olursa rapora hedef halkın KABA moral etiketini
+  ("Huzursuz") ekleyen ayrı bir görev. Sayı asla verilmez.
 - **Sarma:** `server/world-projection.ts` (`projectPublicKingdom`,
   `intelReportOf` — rapor İÇERİĞİ TEK YERDE kararlaşır, hedefin ambarı asla
-  sızmaz).
-- **API:** `POST /api/world` (ajan gönder), `GET /api/world`
-  (`resolveDueMissions`, biten görevleri çözer).
-- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu).
+  sızmaz; `moodLabelOf` yalnızca `deep` başarıya ulaşırsa çağrılır ve
+  `mood` alanı yalnızca o zaman rapora EKLENİR, standart raporun alan listesi
+  hiç değişmez).
+- **API:** `POST /api/world` (`scout` / `deep_scout`), `GET /api/world`
+  (`resolveDueMissions`, biten görevleri çözer; `intel.deepCost` panelin
+  bedeli sabit kodlamaması için iner).
+- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu, "DERİN GÖZETLEME"
+  düğmesi ve moral satırı).
 
 ### 3.11 General — BYOK LLM entegrasyonu
 

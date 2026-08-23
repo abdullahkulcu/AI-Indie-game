@@ -2,11 +2,13 @@ import { and, count, desc, eq, gt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { agitations, channelMembers, channels, gameSaves, intelDefenses, intelMissions } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
-import { channelAverages, channelVictoryStanding, intelReportOf, isStaleReport, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
+import { channelAverages, channelVictoryStanding, intelReportOf, isStaleReport, moodLabelOf, projectPublicKingdom, type IntelReport } from "../../../server/world-projection";
 import { sendAgitation } from "../../../server/agitation-desk";
+import { parseStoredSave } from "../../../server/save-validation";
 import { AGITATION, agitationDayStart } from "../../../engine/agitation";
 import { channelPriceIndex, isTraded } from "../../../engine/market";
-import type { TradeKey } from "../../../engine/types";
+import { INTEL_MISSIONS, intelChances, intelTravelMs, resolveIntelMission, type IntelMissionKind } from "../../../engine/intel";
+import type { Game, TradeKey } from "../../../engine/types";
 import { layoutChannel, sharedMinePosition, worldExtent, type MemberInput } from "../../../engine/world-map";
 
 export const dynamic = "force-dynamic";
@@ -36,13 +38,22 @@ async function resolveDueMissions(userId: string, channelId: string, channelName
   for (const mission of due) {
     const [save] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, mission.targetUserId)).limit(1);
     const snapshot = save ? projectPublicKingdom(mission.targetUserId, save.gameState, channelName) : null;
-    const succeeded = Boolean(snapshot) && crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 100 < mission.successChance;
-    const detected = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 100 < mission.detectionChance;
-    const status = succeeded ? "succeeded" as const : detected ? "detected" as const : "failed" as const;
+    // ZAR: tohumlu (engine/intel.ts → resolveIntelMission). Tohumun öngörülemez
+    // parçası SUNUCUDA üretilen görev kimliğidir; istemci onu hiç görmediği için
+    // Kral sonucu önceden hesaplayıp "kazanan turda" ajan yollayamaz.
+    const { succeeded, status } = resolveIntelMission({
+      missionId: mission.id, successChance: mission.successChance,
+      detectionChance: mission.detectionChance, hasSnapshot: Boolean(snapshot),
+    });
     // Raporun NE İÇERDİĞİ tek yerde kararlaşır (server/world-projection.ts →
     // intelReportOf). Eskiden anlık görüntünün tamamı yazılıyordu ve karşı
     // krallığın AMBARI raporun içinde istemciye iniyordu.
-    await getDb().update(intelMissions).set({ status, report: succeeded && snapshot ? JSON.stringify(intelReportOf(snapshot)) : null, resolvedAt: sql`CURRENT_TIMESTAMP` }).where(and(eq(intelMissions.id, mission.id), eq(intelMissions.status, "pending")));
+    //
+    // DERİN GÖZETLEME (Fikir 5): moral etiketi YALNIZCA `deep` türü bir görev
+    // başarıya ulaşırsa hesaplanır. Standart keşifte `moodLabelOf` hiç
+    // çağrılmaz, yani etiketin sızabileceği ikinci bir yol yok.
+    const mood = succeeded && mission.kind === "deep" && save ? moodLabelOf(save.gameState, channelName) : null;
+    await getDb().update(intelMissions).set({ status, report: succeeded && snapshot ? JSON.stringify(intelReportOf(snapshot, mood)) : null, resolvedAt: sql`CURRENT_TIMESTAMP` }).where(and(eq(intelMissions.id, mission.id), eq(intelMissions.status, "pending")));
   }
 }
 
@@ -94,7 +105,7 @@ export async function GET(request: Request) {
       position: { x: placement.x, z: placement.z },
       ring: placement.ring,
       discovered,
-      mission: mission ? { status: mission.status, completesAt: mission.completesAt, successChance: mission.successChance } : null,
+      mission: mission ? { status: mission.status, completesAt: mission.completesAt, successChance: mission.successChance, kind: mission.kind } : null,
       report,
       // RAPORUN YAŞI. Keşif kalıcı, rapor ise donmuş bir anlık görüntü: ajanın
       // döndüğü an taşınır ki Kral altı gün önceki ordu sayısına taze veri gibi
@@ -130,6 +141,14 @@ export async function GET(request: Request) {
     marketIndex: compare.market
       ? channelPriceIndex({ ...compare.market, channelSpeed: channel.speed })
       : null,
+    /**
+     * DERİN GÖZETLEMENİN BEDELİ (Fikir 5). Panel bu sayıyı SABİT KODLAMASIN:
+     * bedel motorda tek kaynakta (engine/intel.ts → INTEL_MISSIONS) yaşıyor ve
+     * arayüz onu buradan okuyor — dış kesenin `agitation.cost` alanıyla aynı
+     * disiplin. Sunucu bedeli yine kendi tablosundan okur, istemcinin
+     * bildirdiği hiçbir sayıya bakmaz.
+     */
+    intel: { deepCost: INTEL_MISSIONS.deep.goldCost },
     // Dış kese: bedeli, günlük tavanı ve Kralın kendi opt-out durumu. Sabitler
     // motordan okunur; panel kendi kopyasını tutmaz.
     agitation: {
@@ -153,7 +172,7 @@ export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return response({ error: "Oturum gerekli." }, 401);
   const body = await request.json() as {
-    action?: "scout" | "defend" | "agitate" | "set_agitation_opt";
+    action?: "scout" | "deep_scout" | "defend" | "agitate" | "set_agitation_opt";
     channelId?: string; targetId?: string;
     kind?: string; resource?: string; accepts?: boolean;
   };
@@ -185,14 +204,64 @@ export async function POST(request: Request) {
     await getDb().insert(intelDefenses).values({ userId: user.id, level: 1, activeUntil }).onConflictDoUpdate({ target: intelDefenses.userId, set: { level: 1, activeUntil, updatedAt: sql`CURRENT_TIMESTAMP` } });
     return response({ defended: true, activeUntil });
   }
-  if (body.action !== "scout" || !body.targetId || body.targetId === user.id) return response({ error: "Geçersiz keşif hedefi." }, 400);
+  // İki görev türü aynı kapıdan geçer: `scout` (bedava keşif) ve `deep_scout`
+  // (DERİN GÖZETLEME — plan belgesi Fikir 5). Bekleme süresi, tek-ajan kuralı
+  // ve hedef doğrulaması ikisinde de AYNI; ayrılan tek şey bedel/ihtimal/süre
+  // ve o tablo motorda tek kaynakta duruyor (engine/intel.ts).
+  const kind: IntelMissionKind | null = body.action === "scout" ? "scout" : body.action === "deep_scout" ? "deep" : null;
+  if (!kind || !body.targetId || body.targetId === user.id) return response({ error: "Geçersiz keşif hedefi." }, 400);
   const [target] = await getDb().select({ userId: channelMembers.userId }).from(channelMembers).where(and(eq(channelMembers.userId, body.targetId), eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"))).limit(1);
   if (!target) return response({ error: "Hedef bu channel'da değil." }, 404);
   const [recent] = await getDb().select().from(intelMissions).where(and(eq(intelMissions.sourceUserId, user.id), eq(intelMissions.targetUserId, target.userId))).orderBy(desc(intelMissions.completesAt)).limit(1);
   if (recent && recent.completesAt > Date.now() - 300_000) return response({ error: recent.status === "pending" ? "Ajan zaten yolda." : "Yeni ajan göndermek için beş dakika beklemelisiniz." }, 429);
   const [targetDefense] = await getDb().select().from(intelDefenses).where(eq(intelDefenses.userId, target.userId)).limit(1);
-  const defended = Boolean(targetDefense?.activeUntil && targetDefense.activeUntil > Date.now()), successChance = defended ? 3 : 10, detectionChance = defended ? 75 : 30;
-  const completesAt = Date.now() + Math.max(15_000, Math.round(90_000 / Math.max(1, channel.speed)));
-  await getDb().insert(intelMissions).values({ id: crypto.randomUUID(), channelId: channel.id, sourceUserId: user.id, targetUserId: target.userId, successChance, detectionChance, completesAt });
-  return response({ sent: true, completesAt, successChance });
+  const defended = Boolean(targetDefense?.activeUntil && targetDefense.activeUntil > Date.now());
+  const { successChance, detectionChance } = intelChances(kind, defended);
+  const now = Date.now();
+  const completesAt = now + intelTravelMs(kind, channel.speed);
+  const missionId = crypto.randomUUID();
+  const goldCost = INTEL_MISSIONS[kind].goldCost;
+
+  /**
+   * BEDEL — dış kesenin (server/agitation-desk.ts) omurgasının aynısı: altın
+   * GÖNDERENİN SUNUCUDAKİ kaydından, sürüm korumalı ve görev satırıyla TEK
+   * İŞLEMDE düşer.
+   *
+   * İSTİSMAR NOTU: hazine istemcinin bildirdiği sayıdan değil, sunucudaki
+   * kayıttan okunur (`parseStoredSave`) — istemci "altınım var" diyerek bedavaya
+   * ajan yollayamaz. İki işi ayrı ayrı yapmak da olmazdı: biri geçip diğeri
+   * düşerse ya bedava derin gözetleme yapılmış ya da altın hiçbir yere gitmeden
+   * yok olmuş olurdu.
+   */
+  if (goldCost > 0) {
+    const [row] = await getDb().select().from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
+    const save = row ? parseStoredSave(row.gameState) : null;
+    if (!row || !save) return response({ error: "Krallık kaydı okunamadı; ajan yollanamadı." }, 409);
+    if (save.resources.gold < goldCost) {
+      return response({ error: `Derin gözetleme ${goldCost} altın; hazinede ${Math.floor(save.resources.gold)} var.` }, 409);
+    }
+    const next: Game = {
+      ...(save as Game),
+      resources: { ...save.resources, gold: save.resources.gold - goldCost },
+      notices: [{ kind: "İSTİHBARAT", text: `${goldCost} altın karşılığında komşu sancağın sokaklarına derin gözetleme ajanı yollandı.`, at: now }, ...save.notices].slice(0, 20),
+    };
+    const sent = await getDb().transaction(async trx => {
+      const debited = await trx.update(gameSaves)
+        .set({ gameState: JSON.stringify(next), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(and(eq(gameSaves.userId, user.id), eq(gameSaves.revision, row.revision)))
+        .returning({ userId: gameSaves.userId });
+      if (!debited.length) return "stale" as const;
+      // Aynı hedefe ikinci ajanı DB'deki kısmi UNIQUE index reddeder; yarışan
+      // istek burada, veritabanında durur ve altın da geri alınır.
+      const opened = await trx.insert(intelMissions).values({ id: missionId, channelId: channel.id, sourceUserId: user.id, targetUserId: target.userId, kind, successChance, detectionChance, completesAt }).onConflictDoNothing().returning({ id: intelMissions.id });
+      if (!opened.length) { trx.rollback(); return "pending" as const; }
+      return "ok" as const;
+    }).catch(() => "pending" as const);
+    if (sent === "stale") return response({ error: "Krallık kaydı bu arada değişti; ajanı tekrar yollayın." }, 409);
+    if (sent !== "ok") return response({ error: "Ajan zaten yolda." }, 429);
+    return response({ sent: true, completesAt, successChance, kind, cost: goldCost });
+  }
+
+  await getDb().insert(intelMissions).values({ id: missionId, channelId: channel.id, sourceUserId: user.id, targetUserId: target.userId, kind, successChance, detectionChance, completesAt });
+  return response({ sent: true, completesAt, successChance, kind, cost: 0 });
 }

@@ -57,6 +57,13 @@
       "when": 1787459629355,
       "tag": "0007_sparkling_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787487294188,
+      "tag": "0008_redundant_vengeance",
+      "breakpoints": true
     }
   ]
 }

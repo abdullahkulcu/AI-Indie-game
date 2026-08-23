@@ -235,3 +235,13 @@
 .compare-grid b.worse{color:#8f3512}
 .compare-grid em{font-style:normal;font-size:.82rem;color:#7a6540}
 .compare-note{display:block;margin-top:8px;font-size:.66rem;line-height:1.5;color:#7a6540}
+
+/* DERİN GÖZETLEME (plan belgesi Fikir 5) — komşu kartındaki İKİNCİ emir.
+   Bedava keşif ile bedelli gözetleme yan yana durur; kartın ızgarası
+   bozulmasın diye düğmeler kendi sütununda tek bir kutuya alındı. Moral
+   satırı bilinçli olarak SAYISIZ: yalnızca kaba etiket vurgulanır. */
+.kingdom-contact .intel-actions{grid-column:2;grid-row:1/4;display:grid;gap:4px;align-content:center}
+.kingdom-contact .intel-actions button{grid-column:auto;grid-row:auto}
+.kingdom-contact button.deep-scout{background:#3b2a46;border-color:#6d5583;color:#eadcf3}
+.kingdom-contact small.intel-mood{grid-column:1/2;color:#5d4326}
+.kingdom-contact small.intel-mood b{color:#7d2930;font-weight:700;letter-spacing:.06em}
