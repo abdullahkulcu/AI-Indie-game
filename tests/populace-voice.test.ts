@@ -6,7 +6,7 @@ import {
   DEMAND_NOTICE_HOURS, MAX_OPEN_DEMANDS, VOICE_THRESHOLDS, type VoiceSignals,
   demandsSatisfiedBy, derivePopulaceDemands, garrisonMood, garrisonRefusal,
   DEMAND_SUBJECT, DEMAND_TONE_HOURS, DEMAND_TONES, demandTone,
-  garrisonVetoes, openDemands,
+  garrisonVetoes, openDemands, promiseGaps,
 } from "../engine/populace-voice";
 import { SOLDIER_THRESHOLDS } from "../engine/populace";
 import { COMPARE_BETTER, type CompareMetric } from "../engine/comparison";
@@ -259,6 +259,107 @@ test("kıyas ölçütlerinin yönü motorun tek kaynağından okunur", () => {
   assert.ok(kiyasOf(good({ comparison: worse })));
   const better = compare({ taxRate: 5, factionPressure: 0 }, { taxRate: 30, factionPressure: 40 });
   assert.equal(kiyasOf(good({ comparison: better })), undefined);
+});
+
+// --- MAKAS: ilan edilen ile fiilen verilen (Fikir 14) ----------------------
+
+const vaatOf = (signals: VoiceSignals) => derivePopulaceDemands(signals).find(demand => demand.kind === "vaat");
+
+test("makas girdisi hiç yoksa vaat talebi açılmaz", () => {
+  // Eski çağıran (nominal alanları göndermeyen) yeni bir talep görmez.
+  assert.equal(vaatOf(good()), undefined);
+  assert.equal(vaatOf(good({ servedFood: 70 })), undefined);
+});
+
+test("ilan ile fiilî aynıysa makas yoktur", () => {
+  const same = good({ nominalFood: 100, servedFood: 100, nominalPay: 100, servedPay: 100 });
+  assert.deepEqual(promiseGaps(same), []);
+  assert.equal(vaatOf(same), undefined);
+});
+
+test("Kral tam pay İLAN ETMEDİYSE makas talebi açılmaz", () => {
+  // İlan %80: kimseye tam pay sözü verilmedi, dolayısıyla tutulmamış söz de yok.
+  // Makas ham olarak VAR (80 → 40) ama siyasi kapı geçilmiyor.
+  const signals = good({ nominalFood: 80, servedFood: 40 });
+  assert.equal(promiseGaps(signals)[0]?.gap, 40);
+  assert.equal(vaatOf(signals), undefined);
+});
+
+test("tam pay ilan edilip ambar tutmazsa makas talebi açılır", () => {
+  // ASIL SENARYO: Kral istihkakı %150'ye çekti, General emri GERÇEKTEN uyguladı
+  // (ilan %150), ama ambar ancak %90 karşılıyor. `bread` eşiği (85) aşılmıyor,
+  // yani bu makas olmadan halkın hiç sesi çıkmazdı.
+  const signals = good({ nominalFood: 150, servedFood: 90 });
+  const demand = vaatOf(signals);
+  assert.ok(demand);
+  assert.equal(demand.voice, "commons");
+  assert.equal(demand.minGameHours, VOICE_THRESHOLDS.vaat.hours);
+  assert.ok(!kinds(signals).includes("bread"), "ekmek eşiği aşılmadı; sesi yalnızca makas veriyor");
+  // Metin İKİ sayıyı da söyler: ikiyüzlülük ancak ikisi yan yana durunca görünür.
+  assert.match(demand.text, /%150/);
+  assert.match(demand.text, /%90/);
+});
+
+test("makas eşiğinin tam altında talep açılmaz, tam üstünde açılır", () => {
+  const gap = VOICE_THRESHOLDS.vaat.gap;
+  assert.equal(vaatOf(good({ nominalFood: 100, servedFood: 100 - gap + 1 })), undefined);
+  assert.ok(vaatOf(good({ nominalFood: 100, servedFood: 100 - gap })));
+});
+
+test("maaş makası kışlanın sesidir ve askeri olmayan krallıkta hiç açılmaz", () => {
+  const paid = { nominalFood: 100, servedFood: 100 };
+  const withArmy = vaatOf(good({ ...paid, nominalPay: 100, servedPay: 60 }));
+  assert.ok(withArmy);
+  assert.equal(withArmy.voice, "garrison");
+  assert.match(withArmy.text, /maaş/);
+  // Asker yoksa maaş makası kimseyi ilgilendirmez ("değirmen dersi").
+  assert.equal(vaatOf(good({ ...paid, army: 0, nominalPay: 100, servedPay: 60 })), undefined);
+});
+
+test("iki kanalda birden makas varsa TEK talep açılır ve ikisini birlikte söyler", () => {
+  const both = good({ nominalFood: 120, servedFood: 80, nominalPay: 100, servedPay: 70 });
+  const demand = vaatOf(both);
+  assert.ok(demand);
+  // Sofra makası (40) maaş makasından (30) büyük: konuşan taraf çarşıdır.
+  assert.equal(demand.voice, "commons");
+  assert.match(demand.text, /sofraya/);
+  assert.match(demand.text, /keseye/);
+  // Tek satır, tek tür: iki ayrı talep tavanı tek başına doldururdu.
+  assert.equal(derivePopulaceDemands(both).filter(item => item.kind === "vaat").length, 1);
+});
+
+test("makas talebi asla acil olmaz: aciliyeti asıl sıkıntı taşır", () => {
+  // Sofraya %10 geliyor: `bread` ACİL, makas yine normal.
+  const signals = good({ nominalFood: 200, servedFood: 10, popularity: 20 });
+  const demand = vaatOf(signals);
+  assert.ok(demand);
+  assert.equal(demand.severity, "normal");
+  const bread = derivePopulaceDemands(signals).find(item => item.kind === "bread");
+  assert.equal(bread?.severity, "urgent");
+  // Tavan dolduğunda acil olanlar kalır, makas kesilir: iki acil talep
+  // (aç halk + firar eden garnizon) MAX_OPEN_DEMANDS'i doldurur.
+  const crowded = derivePopulaceDemands(good({ nominalFood: 200, servedFood: 10, popularity: 20, soldierUnrest: 90 }));
+  assert.ok(crowded.some(item => item.kind === "vaat"), "makas adaylar arasında");
+  const open = openDemands(crowded, { bread: 99, wage: 99, vaat: 99, joy: 99, tax: 99, price: 99, roof: 99 });
+  assert.equal(open.length, MAX_OPEN_DEMANDS);
+  assert.ok(!open.some(item => item.kind === "vaat"), "acil talepler varken makas tavandan düşer");
+});
+
+test("makas iki yoldan kapanır: stok bulmak ya da ilanı gerçeğe indirmek", () => {
+  const open = derivePopulaceDemands(good({ nominalFood: 150, servedFood: 90 })).filter(item => item.kind === "vaat");
+  // İlanı gerçeğe indirmek de meşru bir kapanıştır.
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "set_food_ration", arguments: { percent: 90 } }]), ["vaat"]);
+  // Stok bulmak da.
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "trade_resource", arguments: { resource: "food", direction: "buy" } }]), ["vaat"]);
+  // Ama ilgisiz bir yapı emri kapatmaz: Sur sofradaki eksiği kapatmaz.
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "build_structure", arguments: { building_type: "wall" } }]), []);
+  assert.deepEqual(demandsSatisfiedBy(open, [{ name: "build_structure", arguments: { building_type: "granary" } }]), ["vaat"]);
+});
+
+test("makas ölçüsü Fikir 18 ile PAYLAŞILAN tek kaynaktır ve büyükten küçüğe sıralanır", () => {
+  const gaps = promiseGaps(good({ nominalFood: 120, servedFood: 100, nominalPay: 100, servedPay: 40 }));
+  assert.deepEqual(gaps.map(entry => entry.channel), ["pay", "food"]);
+  assert.deepEqual(gaps.map(entry => entry.gap), [60, 20]);
 });
 
 // --- Spam frenleri ---------------------------------------------------------

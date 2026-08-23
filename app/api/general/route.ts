@@ -37,6 +37,12 @@ type GeneralRequest = {
       army: number; soldierUnrest: number; dailyFoodNeed: number;
       /** Halkın sesi bu üç alanı okur; kâğıt üstündeki oran değil fiilen dağıtılan. */
       servedFood?: number; livingCost?: number; capacity?: number;
+      /**
+       * Fiilen ödenebilen asker maaşı (%). `servedFood`in kardeşi: ilan edilen
+       * `soldierPay` ile arasındaki makas Fikir 14'ün maaş kanalıdır. Eski
+       * istemci göndermez; o hâlde maaş makası hiç ölçülmez (kademeli açılım).
+       */
+      servedPay?: number;
       /** Garnizonun reddettiği emirler; eşikler motordan gelir, panel de aynı listeyi gösterir. */
       garrison?: { label: string; note: string; vetoes: string[] };
       /** İç muhalefet baskısı ve elebaşı; güçle bastırılamaz, yalnızca yönetimle erir. */
@@ -182,6 +188,12 @@ function gamePrompt(body: GeneralRequest) {
     "Sadakatin kararlarını gerçekten bağlar. Sadakat düşükken ağır riskli emirleri reddedersin ve Kral yalnızca 'yap' diyerek bunu aşamaz; sadakat yüksekken Kralın ısrarına daha kolay uyarsın.",
     "Hafızan bu konuşmayla sınırlı değil: aşağıdaki DEFTERİN, Kralla geçmişte yaşadıklarının kaydıdır. Kral 'daha önce ne konuşmuştuk', 'beni nasıl buluyorsun', 'hep aynı hatayı mı yapıyorum' diye sorduğunda oradan cevap ver. Defterde olmayan bir geçmişi uydurma.",
     "Senin de isteklerin var. Aşağıdaki TALEPLERİN listesi krallığın gerçek durumundan doğar. Kral sormasa bile uygun bir anda bunlardan birini kendin gündeme getir; ama her cevabı talebe çevirme ve listeyi olduğu gibi okumaya kalkma. Kral talebini karşılarsa bunu görüp teşekkür et, sürekli görmezden gelirse bunu da söyle.",
+    // İLAN EDİLEN ile FİİLEN VERİLEN arasındaki makas (plan belgesi Fikir 14).
+    // Doktrin buraya yazılıyor çünkü halk bu makası yakalayıp Kral'a
+    // seslendirebiliyor ve General bunu "iftira" sanıp savunmaya geçmemeli.
+    // Eşik ve rakam BURAYA YAZILMAZ: ölçü engine/populace-voice.ts'te
+    // (`promiseGaps`, `VOICE_THRESHOLDS.vaat`) tek kaynakta yaşıyor.
+    "İSTİHKAK VE MAAŞ İKİ AYRI SAYIDIR: Kral'ın İLAN ETTİĞİ oran ile ambarın/hazinenin FİİLEN karşıladığı oran. Bir emri uyguladığında ilan edilen oran gerçekten değişir — orada yalan yok. Ama ambar yetmiyorsa halkın eline geçen daha azdır ve bunu Kral'a KENDİLİĞİNDEN söylemek senin işindir: bir istihkak/maaş emrini uyguladıktan sonra karşılanıp karşılanmadığını da bir cümleyle belirt, 'ilan ettim' demekle yetinme. Halk bu makası fark eder ve yüzüne vurur; o zaman inkâr etme ve halkı yalancı ilan etme, farkı kabul edip nasıl kapatacağını söyle (stok bul ya da ilanı gerçeğe indir).",
     ...(body.pendingDecision
       ? [`BEKLEYEN_TEYİT=${JSON.stringify(body.pendingDecision)}`,
          "Kral bu bekleyen emre cevap veriyor. Onaylıyorsa uygulanacağını, gerekçe sunmasını beklediğini ya da vazgeçtiyse emrin düştüğünü kendi ağzınla kısaca belirt."]
@@ -437,6 +449,11 @@ async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: numb
   const membership = await activeMembershipOf(userId);
   const { open } = await syncPopulaceDemands(userId, {
     servedFood: Number(populace.servedFood ?? populace.foodRation) || 0,
+    // İLAN EDİLEN paylar (Fikir 14'ün makasının üst tarafı). `servedFood`
+    // fiilîyi, bunlar Kralın ilan ettiğini taşır; farkı motor ölçer.
+    nominalFood: Number(populace.foodRation) || 0,
+    nominalPay: Number(populace.soldierPay) || 0,
+    servedPay: populace.servedPay === undefined ? undefined : Number(populace.servedPay) || 0,
     livingCost: Number(populace.livingCost ?? 1) || 1,
     taxRate: Number(body.kingdom?.taxRate ?? 0) || 0,
     popularity: Number(populace.moodScore) || 0,
