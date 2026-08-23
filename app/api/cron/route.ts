@@ -14,7 +14,7 @@ import {
   agitationSenderNotice, applyAgitation, applyGlut, applyLure,
 } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
-import { arrivingMigrants, migrationArrivalNotice, pickMigrationTarget } from "../../../engine/migration";
+import { migrationArrivalNotice, migrationReturnNotice, spreadMigrants } from "../../../engine/migration";
 import { queueEmigrants } from "../../../server/migration-desk";
 import {
   LIMITS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MISSES_BEFORE_BREACH, TRIBUTE_TOPICS,
@@ -713,10 +713,9 @@ async function settleAgitations(now: number) {
  * GÖÇÜN VARIŞI (Faz 6).
  *
  * Kaynaktan ayrılan halk, kuyruğa alındığı anda DEĞİL, cron bu satırı işlerken
- * o anın GÜNCEL aday listesinden seçilen TEK bir hedefe gider (bkz.
- * engine/migration.ts → pickMigrationTarget). Hedef kuyruğa alma anında
- * SEÇİLMEZ: aradaki sürede adayların boş konutu değişmiş olabilir, "an
- * fotoğrafı" hemen bayatlardı.
+ * o anın GÜNCEL aday listesine dağıtılır (bkz. engine/migration.ts →
+ * spreadMigrants). Hedefler kuyruğa alma anında SEÇİLMEZ: aradaki sürede
+ * adayların boş konutu değişmiş olabilir, "an fotoğrafı" hemen bayatlardı.
  *
  * Kuruluş koruması süren krallık ADAY OLARAK BİLE değerlendirilmez — dış
  * kesenin (`server/agitation-desk.ts` → `sendAgitation`) koruma süren hedefe
@@ -725,9 +724,29 @@ async function settleAgitations(now: number) {
  * istismar yüzeyi açardı (kuruluşun hemen ardından sürekli göçmen alıp normalde
  * imkânsız bir hızda büyümek gibi).
  *
- * Hedef seçilemezse (uygun aday yok ya da hiçbirinde boş konut kalmamış)
- * göçmenler kaybolur — bu, `tick()`'in bugüne kadarki davranışının aynısı;
- * FARK şu ki artık ÇOĞU zaman gerçekten bir yer buluyorlar.
+ * HALK KAYBOLMAZ — BU FONKSİYONUN ASIL KURALI. Eskiden hedef bulunamayan
+ * kervan `lost` sayılıp SİLİNİYORDU, ve bu nadir bir uç durum değildi: tek
+ * kişilik bir channel'da aday listesi HER ZAMAN boş olduğu için her göç dalgası
+ * halkın buharlaşmasıyla bitiyordu. Artık üç aşamalı bir şelale var ve her
+ * aşama bir sonrakine yalnızca YERLEŞEMEYENLERİ devreder:
+ *
+ *   1. HEDEFLER — boş konutu olan tüm adaylara oranlı dağıtım.
+ *   2. KAYNAĞA DÖNÜŞ — yer bulamayanlar kendi krallıklarına döner, kaynağın
+ *      KENDİ boş konutu kadarı. Kaynak zaten küçüldüğü için (`peopleLeft`
+ *      ancak nüfus azalırken artar) burada neredeyse her zaman yer vardır.
+ *   3. YOLDA BEKLEME — ne hedefte ne evde yer kalmadıysa satır PENDING kalır,
+ *      `count` yalnızca HÂLÂ YOLDA OLAN kişiye iner ve bir sonraki tur yeniden
+ *      denenir. Kimse silinmez; Kral konut kurunca kervan varır.
+ *
+ * `count` alanının anlamı bu yüzden "yola çıkan" değil "hâlâ yol alan"dır.
+ * Alan başka hiçbir yerde okunmuyor (tek okuyucu bu fonksiyon), bu yüzden
+ * azaltmak hiçbir görüntüyü bozmaz.
+ *
+ * KISMİ YAZMA GÜVENLİ: hedeflerden birine yazma sürüm çakışmasıyla düşerse o
+ * pay EVE DÖNMEZ, 3. aşamaya (yolda bekleme) düşer — hedef hâlâ uygundur,
+ * yalnızca kaydı bu arada değişmiştir ve bir sonraki tur aynı adaylarla
+ * yeniden denenir. `count` yalnızca GERÇEKTEN yazılan kadar azaldığı için ne
+ * çift sayım ne kayıp olur.
  */
 async function settleMigrations(now: number) {
   const db = getDb();
@@ -737,10 +756,7 @@ async function settleMigrations(now: number) {
     .where(and(eq(migrations.status, "pending"), lte(migrations.completesAt, now), eq(channels.status, "active")))
     .orderBy(migrations.completesAt);
 
-  const settle = (id: string) =>
-    db.update(migrations).set({ status: "settled", settledAt: now }).where(and(eq(migrations.id, id), eq(migrations.status, "pending")));
-
-  let landed = 0, lost = 0;
+  let landed = 0, returned = 0, travelling = 0;
   for (const { row } of due) {
     const members = await db.select({ userId: channelMembers.userId }).from(channelMembers)
       .where(and(eq(channelMembers.channelId, row.channelId), eq(channelMembers.status, "active")));
@@ -755,36 +771,71 @@ async function settleMigrations(now: number) {
       .filter(entry => entry.save && entry.save.protectionEndsAt <= now)
       .map(entry => ({ userId: entry.userId, revision: entry.revision, save: entry.save! }));
 
-    const pick = parsed.length
-      ? pickMigrationTarget(
-          parsed.map(entry => ({
-            userId: entry.userId, population: entry.save.population,
-            capacity: capacityFor(entry.save.buildings), popularity: entry.save.popularity,
-          })),
-          row.id,
-        )
-      : null;
-    if (!pick) { lost += row.count; await settle(row.id); continue; }
+    const spread = spreadMigrants(row.count, parsed.map(entry => ({
+      userId: entry.userId, population: entry.save.population,
+      capacity: capacityFor(entry.save.buildings), popularity: entry.save.popularity,
+    })));
 
-    const target = parsed.find(entry => entry.userId === pick.userId)!;
-    const arrived = arrivingMigrants(row.count, pick.room);
-    if (arrived <= 0) { lost += row.count; await settle(row.id); continue; }
+    // 1. AŞAMA — hedeflere yerleşenler.
+    let placed = 0, conflicted = 0;
+    for (const allocation of spread.allocations) {
+      const target = parsed.find(entry => entry.userId === allocation.userId)!;
+      const written = await writeSaveIfUnchanged(target.userId, target.revision, {
+        ...target.save,
+        population: target.save.population + allocation.count,
+        // Kaynağı ne olursa olsun "krallığa katılan" ledger'ıdır (bkz.
+        // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
+        // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
+        peopleJoined: (target.save.peopleJoined ?? 0) + allocation.count,
+        notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(allocation.count), at: now }, ...target.save.notices].slice(0, 20),
+      });
+      // Yazma sürüm çakışmasıyla düşerse bu pay EVE DÖNMEZ, YOLDA KALIR: hedef
+      // hâlâ uygun, yalnızca kaydı bu arada değişti. Bir sonraki tur aynı
+      // adaylarla yeniden dener.
+      if (written) placed += allocation.count; else conflicted += allocation.count;
+    }
 
-    const written = await writeSaveIfUnchanged(target.userId, target.revision, {
-      ...target.save,
-      population: target.save.population + arrived,
-      // Kaynağı ne olursa olsun "krallığa katılan" ledger'ıdır (bkz.
-      // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
-      // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
-      peopleJoined: (target.save.peopleJoined ?? 0) + arrived,
-      notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(arrived), at: now }, ...target.save.notices].slice(0, 20),
-    });
-    // Yazma düşerse satır PENDING kalır; sonraki tur GÜNCEL adaylarla yeniden dener.
-    if (!written) continue;
-    landed += arrived;
-    await settle(row.id);
+    // 2. AŞAMA — yer bulamayanların kaynağa dönüşü.
+    let cameBack = 0;
+    const homeless = row.count - placed - conflicted;
+    if (homeless > 0) {
+      const [sourceRow] = await db.select({ gameState: gameSaves.gameState, revision: gameSaves.revision })
+        .from(gameSaves).where(eq(gameSaves.userId, row.sourceUserId)).limit(1);
+      const source = sourceRow ? parseStoredSave(sourceRow.gameState) : null;
+      if (source) {
+        const room = Math.max(0, Math.floor(capacityFor(source.buildings) - source.population));
+        const back = Math.min(homeless, room);
+        if (back > 0) {
+          // `peopleJoined`e YAZILIR ve bu kasıtlı: bu kişiler ayrılırken
+          // `peopleLeft`e yazılmıştı, dönünce iki defter birbirini götürür.
+          // Zafer puanı NET'e (giren − çıkan) baktığı için (bkz.
+          // engine/victory.ts) aksi hâlde yer bulamayıp geri dönen her dalga
+          // Kralın puanını kalıcı olarak düşürürdü — kimse gitmemiş olmasına
+          // rağmen.
+          const written = await writeSaveIfUnchanged(row.sourceUserId, sourceRow!.revision, {
+            ...source,
+            population: source.population + back,
+            peopleJoined: (source.peopleJoined ?? 0) + back,
+            notices: [{ kind: "GÖÇ", text: migrationReturnNotice(back), at: now }, ...source.notices].slice(0, 20),
+          });
+          if (written) cameBack = back;
+        }
+      }
+    }
+
+    // 3. AŞAMA — hâlâ yolda olanlar. Satır PENDING kalır ve sayısı iner.
+    const stillTravelling = row.count - placed - cameBack;
+    if (stillTravelling > 0) {
+      await db.update(migrations).set({ count: stillTravelling })
+        .where(and(eq(migrations.id, row.id), eq(migrations.status, "pending")));
+      travelling += stillTravelling;
+    } else {
+      await db.update(migrations).set({ status: "settled", settledAt: now })
+        .where(and(eq(migrations.id, row.id), eq(migrations.status, "pending")));
+    }
+    landed += placed; returned += cameBack;
   }
-  return { due: due.length, landed, lost };
+  return { due: due.length, landed, returned, travelling };
 }
 
 /**
@@ -863,9 +914,9 @@ export async function POST(request: Request) {
   catch { purses = { due: 0, landed: 0, exposed: 0 }; }
   // Yolda olan göçmenler: aynı sarma gerekçesi, bu turun düşmesi diğer
   // turları etkilemesin (bkz. settleMigrations).
-  let migrationRound = { due: 0, landed: 0, lost: 0 };
+  let migrationRound = { due: 0, landed: 0, returned: 0, travelling: 0 };
   try { migrationRound = await settleMigrations(now); }
-  catch { migrationRound = { due: 0, landed: 0, lost: 0 }; }
+  catch { migrationRound = { due: 0, landed: 0, returned: 0, travelling: 0 }; }
   // HALKIN SESİ: talep defteri artık Kralın General'le konuşmasını beklemiyor.
   // Aynı sarma gerekçesi. Bu tur MODEL ÇAĞIRMAZ, sıfır token harcar
   // (bkz. server/populace-round.ts dosya başı).

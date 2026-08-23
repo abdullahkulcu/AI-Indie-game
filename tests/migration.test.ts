@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  MIGRATION, arrivingMigrants, migrationArrivalNotice, migrationTravelMs, pickMigrationTarget,
+  MIGRATION, migrationArrivalNotice, migrationReturnNotice, migrationTravelMs, spreadMigrants,
   type MigrationCandidate,
 } from "../engine/migration";
 import { capacityFor, tick } from "../engine/tick";
@@ -27,76 +27,146 @@ function newGame(overrides: Partial<Game> = {}): Game {
   };
 }
 
-// --- Hedef seçimi: kapasite ve çekicilik -----------------------------------
+// --- Dağıtım: kapasite, çekicilik ve "kimse kaybolmaz" -------------------
 
-test("kapasitesi dolu ya da aşmış aday hiç seçilmez", () => {
+/** Bir dağıtımda fiilen yerleşen kişi sayısı. */
+const placed = (spread: ReturnType<typeof spreadMigrants>) =>
+  spread.allocations.reduce((sum, allocation) => sum + allocation.count, 0);
+
+/** Dağıtımın altın kuralı: giren = yerleşen + geri dönen. Hiçbir koşulda kişi buharlaşmaz. */
+function assertKimseKaybolmadi(count: number, spread: ReturnType<typeof spreadMigrants>) {
+  assert.equal(placed(spread) + spread.returning, count,
+    `giren ${count} ≠ yerleşen ${placed(spread)} + dönen ${spread.returning}`);
+}
+
+test("kapasitesi dolu ya da aşmış aday hiç pay almaz", () => {
   const candidates: MigrationCandidate[] = [
     { userId: "a", population: 400, capacity: 400, popularity: 80 }, // tam dolu
     { userId: "b", population: 450, capacity: 400, popularity: 80 }, // aşmış
     { userId: "c", population: 100, capacity: 400, popularity: 10 }, // tek açık aday
   ];
-  const pick = pickMigrationTarget(candidates, "sabit-tohum");
-  assert.equal(pick?.userId, "c");
-  assert.equal(pick?.room, 300);
+  const spread = spreadMigrants(30, candidates);
+  assert.deepEqual(spread.allocations, [{ userId: "c", count: 30 }]);
+  assert.equal(spread.returning, 0);
+  assertKimseKaybolmadi(30, spread);
 });
 
-test("aday yoksa ya da hiçbirinde boş konut yoksa null döner", () => {
-  assert.equal(pickMigrationTarget([], "x"), null);
-  assert.equal(pickMigrationTarget([{ userId: "a", population: 400, capacity: 400, popularity: 90 }], "x"), null);
+test("aday yoksa ya da hiçbirinde boş konut yoksa HERKES geri döner (kimse kaybolmaz)", () => {
+  // Tek kişilik channel: aday listesi boş. ESKİ DAVRANIŞ bu kişileri siliyordu
+  // ve bu, oyunun en sık yaşanan hâliydi.
+  const bosChannel = spreadMigrants(12, []);
+  assert.deepEqual(bosChannel.allocations, []);
+  assert.equal(bosChannel.returning, 12);
+  assertKimseKaybolmadi(12, bosChannel);
+
+  const doluChannel = spreadMigrants(12, [{ userId: "a", population: 400, capacity: 400, popularity: 90 }]);
+  assert.equal(doluChannel.returning, 12);
+  assertKimseKaybolmadi(12, doluChannel);
 });
 
-test("rızası dibe vurmuş bir krallık da (taban çekicilikle) göçmen çekebilir", () => {
-  // Tek aday: rızası 0 olsa bile ATTRACTIVENESS_FLOOR sayesinde seçilir —
+test("hedeflerin boş konutu yetmezse yalnızca sığan kadarı yerleşir, gerisi geri döner", () => {
+  const spread = spreadMigrants(100, [
+    { userId: "a", population: 98, capacity: 100, popularity: 90 },  // 2 boş
+    { userId: "b", population: 297, capacity: 300, popularity: 90 }, // 3 boş
+  ]);
+  assert.equal(placed(spread), 5, "toplam boş konut 5");
+  assert.equal(spread.returning, 95);
+  assertKimseKaybolmadi(100, spread);
+  for (const allocation of spread.allocations) {
+    assert.ok(allocation.count <= (allocation.userId === "a" ? 2 : 3), "boş konuttan fazla yazılmamalı");
+  }
+});
+
+test("kervan TEK hedefe değil TÜM uygun adaylara dağılır", () => {
+  const spread = spreadMigrants(30, [
+    { userId: "a", population: 100, capacity: 400, popularity: 60 },
+    { userId: "b", population: 100, capacity: 400, popularity: 60 },
+    { userId: "c", population: 100, capacity: 400, popularity: 60 },
+  ]);
+  assert.equal(spread.allocations.length, 3, "üç adayın hepsi pay almalı");
+  assert.deepEqual(spread.allocations.map(allocation => allocation.count), [10, 10, 10]);
+  assertKimseKaybolmadi(30, spread);
+});
+
+test("rızası dibe vurmuş bir krallık da (taban çekicilikle) göçmen çeker", () => {
+  // Tek aday: rızası 0 olsa bile ATTRACTIVENESS_FLOOR sayesinde pay alır —
   // göçmenler zaten bir yerden kaçıyor, mutlak mükemmeli değil eldeki en az
   // kötüyü arıyorlar.
-  const pick = pickMigrationTarget([{ userId: "isyanci", population: 50, capacity: 200, popularity: 0 }], "tohum");
-  assert.equal(pick?.userId, "isyanci");
+  const spread = spreadMigrants(10, [{ userId: "isyanci", population: 50, capacity: 200, popularity: 0 }]);
+  assert.deepEqual(spread.allocations, [{ userId: "isyanci", count: 10 }]);
+  assertKimseKaybolmadi(10, spread);
 });
 
-test("yüksek rızalı ve boş konutu bol aday, çoğunlukla daha çok seçilir", () => {
-  const candidates: MigrationCandidate[] = [
+test("yüksek rızalı aday daha büyük pay alır ama kaynayan krallık da payını alır", () => {
+  const spread = spreadMigrants(100, [
     { userId: "mutlu", population: 100, capacity: 400, popularity: 90 },
     { userId: "kaynayan", population: 100, capacity: 400, popularity: 5 },
-  ];
-  let mutluSecildi = 0;
-  const samples = 500;
-  for (let i = 0; i < samples; i += 1) {
-    const pick = pickMigrationTarget(candidates, `göç-${i}`);
-    if (pick?.userId === "mutlu") mutluSecildi += 1;
-  }
-  // Rıza yalnızca ince ayardır, veto değildir: mutlu krallık ÇOĞUNLUKLA
-  // seçilir ama kaynayan krallık da payını alır (taban çekicilik).
-  assert.ok(mutluSecildi > samples * 0.6, `mutlu ${mutluSecildi}/${samples}`);
-  assert.ok(mutluSecildi < samples, "kaynıyan krallık da bazen seçilmeli");
+  ]);
+  const mutlu = spread.allocations.find(allocation => allocation.userId === "mutlu")!.count;
+  const kaynayan = spread.allocations.find(allocation => allocation.userId === "kaynayan")!.count;
+  // Rıza yalnızca ince ayardır, veto değildir.
+  assert.ok(mutlu > kaynayan, `mutlu ${mutlu} > kaynayan ${kaynayan}`);
+  assert.ok(kaynayan > 0, "taban çekicilik sayesinde kaynayan krallık da pay alır");
+  assertKimseKaybolmadi(100, spread);
 });
 
-test("aynı tohum hep aynı hedefi seçer: save-scum işe yaramaz", () => {
+test("boş konutu bol aday, aynı rızada daha büyük pay alır", () => {
+  const spread = spreadMigrants(60, [
+    { userId: "genis", population: 100, capacity: 700, popularity: 50 },
+    { userId: "kucuk", population: 100, capacity: 250, popularity: 50 },
+  ]);
+  const genis = spread.allocations.find(allocation => allocation.userId === "genis")!.count;
+  const kucuk = spread.allocations.find(allocation => allocation.userId === "kucuk")!.count;
+  assert.ok(genis > kucuk, `geniş ${genis} > küçük ${kucuk}`);
+  assertKimseKaybolmadi(60, spread);
+});
+
+test("dağıtım belirlenimcidir: aynı girdi hep aynı dağılım (save-scum işe yaramaz)", () => {
   const candidates: MigrationCandidate[] = [
     { userId: "a", population: 100, capacity: 400, popularity: 60 },
     { userId: "b", population: 50, capacity: 300, popularity: 40 },
   ];
-  const first = pickMigrationTarget(candidates, "olay-42");
-  const second = pickMigrationTarget(candidates, "olay-42");
-  assert.deepEqual(first, second);
+  assert.deepEqual(spreadMigrants(37, candidates), spreadMigrants(37, candidates));
 });
 
-test("aday sırası (DB'den dönüş sırası) sonucu değiştirmez: userId'ye göre sabitlenir", () => {
+test("aday sırası (DB'den dönüş sırası) dağılımı değiştirmez", () => {
   const candidates: MigrationCandidate[] = [
     { userId: "z-krallik", population: 100, capacity: 400, popularity: 60 },
     { userId: "a-krallik", population: 50, capacity: 300, popularity: 40 },
   ];
-  const forward = pickMigrationTarget(candidates, "olay-7");
-  const backward = pickMigrationTarget([...candidates].reverse(), "olay-7");
+  const forward = spreadMigrants(23, candidates);
+  const backward = spreadMigrants(23, [...candidates].reverse());
   assert.deepEqual(forward, backward);
 });
 
-// --- Varan göçmen sayısı: kapasite tavanı ------------------------------
+test("tek kişilik kervan da kaybolmaz: en çekici adaya gider", () => {
+  const spread = spreadMigrants(1, [
+    { userId: "mutlu", population: 100, capacity: 400, popularity: 95 },
+    { userId: "kaynayan", population: 100, capacity: 400, popularity: 5 },
+  ]);
+  assert.deepEqual(spread.allocations, [{ userId: "mutlu", count: 1 }]);
+  assertKimseKaybolmadi(1, spread);
+});
 
-test("varan göçmen sayısı boş konuttan fazla olamaz", () => {
-  assert.equal(arrivingMigrants(50, 20), 20);
-  assert.equal(arrivingMigrants(5, 20), 5);
-  assert.equal(arrivingMigrants(-5, 20), 0);
-  assert.equal(arrivingMigrants(10, 0), 0);
+test("ondalık kalanlar yüzünden tek kişi bile buharlaşmaz", () => {
+  // 7 kişi / 3 eşit aday = 2.33 → tabana yuvarlanınca 2+2+2 = 6; artan 1 kişi
+  // EN BÜYÜK KALAN yöntemiyle dağıtılmazsa kaybolurdu.
+  for (const count of [1, 2, 5, 7, 11, 13, 29, 97]) {
+    const spread = spreadMigrants(count, [
+      { userId: "a", population: 0, capacity: 500, popularity: 33 },
+      { userId: "b", population: 0, capacity: 500, popularity: 66 },
+      { userId: "c", population: 0, capacity: 500, popularity: 99 },
+    ]);
+    assertKimseKaybolmadi(count, spread);
+    assert.equal(spread.returning, 0, `${count} kişilik kervanda yer bol, kimse dönmemeli`);
+  }
+});
+
+test("sıfır ya da eksi kervan hiçbir şey üretmez", () => {
+  assert.deepEqual(spreadMigrants(0, [{ userId: "a", population: 0, capacity: 100, popularity: 50 }]),
+    { allocations: [], returning: 0 });
+  assert.deepEqual(spreadMigrants(-5, [{ userId: "a", population: 0, capacity: 100, popularity: 50 }]),
+    { allocations: [], returning: 0 });
 });
 
 // --- Yol süresi --------------------------------------------------------
@@ -113,6 +183,13 @@ test("varış bildirimi kimden geldiğini söylemez (bilgi sınırı)", () => {
   const text = migrationArrivalNotice(7);
   assert.match(text, /^7 kişi/);
   assert.ok(!/[A-ZÇĞİÖŞÜ][a-zçğıöşü]+kale/.test(text), "kaynak krallığın adı sızmamalı");
+});
+
+test("dönüş bildirimi sayıyı ve SEBEBİ söyler, nereye gidildiğini söylemez", () => {
+  const text = migrationReturnNotice(12);
+  assert.match(text, /12 kişi/);
+  assert.match(text, /bulamadı/, "Kral nüfusunun neden geri geldiğini anlamalı");
+  assert.ok(!/[A-ZÇĞİÖŞÜ][a-zçğıöşü]+kale/.test(text), "denenen komşuların adı sızmamalı");
 });
 
 // --- Kapasite tavanı: engine/tick.ts ile AYNI kaynaktan okunur -----------
@@ -149,6 +226,29 @@ test("cron'un doğrudan yazdığı göçmen artışı, hedefin bir sonraki kayd�
   });
   assert.equal(result.ok, true);
   assert.ok(result.ok && result.game.population >= 130, "göçmenlerin getirdiği nüfus kalıcı olmalı");
+});
+
+test("cron'un kaynağa geri yazdığı dönüş, kaynağın bir sonraki kaydında reddedilmez", () => {
+  // settleMigrations'ın 2. aşaması: yer bulamayan göçmenler kaynağın kaydına
+  // DOĞRUDAN (validateGameSave'den GEÇMEDEN) geri yazılır. Hedef yazmasıyla
+  // aynı iki alan kullanılır (`population` + `peopleJoined`), bu yüzden yeni
+  // bir SERVER_DERIVED alanı GEREKMEZ.
+  const beforeReturn = newGame({ population: 70, capacity: 400, peopleJoined: 10, peopleLeft: 30, lastTickAt: T0 });
+  const afterCronWrite = {
+    ...beforeReturn,
+    population: 100,
+    peopleJoined: 40,
+    notices: [{ kind: "GÖÇ", text: migrationReturnNotice(30), at: T0 }, ...beforeReturn.notices],
+  };
+  const nextClientSave = tick(afterCronWrite, T0 + HOUR);
+  const result = validateGameSave(nextClientSave, {
+    previous: afterCronWrite as never, previousUpdatedAt: T0, channelSpeed: 1, now: T0 + HOUR,
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.ok && result.game.population >= 100, "geri dönen halk kalıcı olmalı");
+  // Zafer puanının baktığı NET (giren − çıkan) sıfıra döner: kimse gitmemiş gibi.
+  assert.equal((afterCronWrite.peopleJoined ?? 0) - (afterCronWrite.peopleLeft ?? 0), 10,
+    "dönüş `peopleJoined`e yazıldığı için NET, göç öncesindeki değerine döner");
 });
 
 // --- Motor saflığı ---------------------------------------------------------
