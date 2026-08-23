@@ -50,6 +50,13 @@
       "when": 1787457345657,
       "tag": "0006_bent_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787459629355,
+      "tag": "0007_sparkling_paper_doll",
+      "breakpoints": true
     }
   ]
 }

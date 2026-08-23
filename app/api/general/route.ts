@@ -65,6 +65,14 @@ type GeneralRequest = {
    * açılış/kapanış işaretli bir blokta taşınır (bkz. server/negotiation-brief).
    */
   negotiationTranscript?: string;
+  /**
+   * Halkın ve kışlanın kendi sözleri. SİSTEM promptuna GİRMEZ: Halk-AI'sı olan
+   * bir channel'da bu cümleler MODEL ÜRETİMİDİR (plan belgesi Fikir 2) ve bir
+   * modelin çıktısı başka bir modelin en yüksek güven kanalında durmamalı.
+   * `user` rolünde, açılış/kapanış işaretli bir blokta taşınır (bkz.
+   * server/populace-brief). Sunucu ekler, istemci gönderemez.
+   */
+  populaceTranscript?: string;
 };
 
 const actionTools = [
@@ -183,11 +191,14 @@ function gamePrompt(body: GeneralRequest) {
 function conversation(body: GeneralRequest) {
   const history = (body.history ?? []).slice(-8).map(item => ({ role: item.role === "king" ? "user" as const : "assistant" as const, content: item.text.slice(0, 1200) }));
   const said = body.mode === "test" ? "Bağlantıyı doğrula. Kendini tek cümlede tanıt ve ilk emrimi sor." : body.message!;
-  // Masa dökümü Kralın sözünden ÖNCE, aynı `user` turunda taşınır. Ayrı bir
+  // Veri blokları Kralın sözünden ÖNCE, aynı `user` turunda taşınır. Ayrı birer
   // mesaj olarak eklenseydi rol sırası sağlayıcıya göre değişirdi; blok işareti
-  // ve kapanış cümlesi sınırı burada kuruyor. Sistem promptuna hiç girmez.
-  const kingLine = body.negotiationTranscript
-    ? `${body.negotiationTranscript}\n\nKRALIN SÖZÜ (buradan sonrası senin Kralındır, blok değil):\n${said}`
+  // ve kapanış cümlesi sınırı burada kuruyor. Sistem promptuna hiç girmezler.
+  // İki blok da AYNI kapıdan geçer: masa yazışmaları karşı OYUNCUNUN metni,
+  // halkın sözleri ise Halk-AI'sı olan channel'da MODEL ÜRETİMİ metindir.
+  const blocks = [body.populaceTranscript, body.negotiationTranscript].filter(block => !!block?.trim());
+  const kingLine = blocks.length
+    ? `${blocks.join("\n\n")}\n\nKRALIN SÖZÜ (buradan sonrası senin Kralındır, blok değil):\n${said}`
     : said;
   return [...history, { role: "user" as const, content: kingLine }];
 }
@@ -397,14 +408,23 @@ async function loadGeneralMemory(userId: string, body: GeneralRequest, now: numb
 
 /**
  * HALKIN SESİ. Kralın zaten başlattığı turun promptuna bedava bir blok olarak
- * biner: EK MODEL ÇAĞRISI YOKTUR. Kral konuşmazsa blok hiç yazılmaz.
+ * biner: KRALIN ANAHTARIYLA EK MODEL ÇAĞRISI YOKTUR. Kral konuşmazsa blok hiç
+ * yazılmaz.
  *
  * Channel hızı istemciden değil sunucudan okunur; süre şartı oyun saatiyle
  * işlediği için istemci hızı şişirip halkın sesini anında açtırabilirdi.
+ *
+ * HALK-AI (plan belgesi Fikir 2): channel'ın Halk-AI kimlik bilgisi varsa açık
+ * taleplerin CÜMLESİ o anahtarla üretilir — fatura oyun kurucusunun, Kralın
+ * kendi BYOK anahtarına dokunulmaz. Kimlik bilgisi yoksa `narrate` null kalır
+ * ve bugünkü deterministik şablon metin kullanılır; yani anahtarsız channel
+ * hiçbir şey kaybetmez. Talebin AÇILIP AÇILMAYACAĞI her iki hâlde de motorun
+ * deterministik kararıdır — Halk-AI oyun dengesine hiç karışmaz.
  */
 async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: number) {
   const populace = body.kingdom?.populace;
-  if (!populace) return { lines: [] as string[], open: [] as OpenDemand[] };
+  if (!populace) return { lines: [] as string[], transcript: "", open: [] as OpenDemand[] };
+  const credential = await populaceCredentialFor(userId, env.BYOK_MASTER_KEY);
   // Üyelik TEK KAYNAKTAN okunur (`activeMembershipOf`): burada eskiden aynı
   // sorgunun elle yazılmış, channel'ın kendi durumunu hiç sormayan ve sırasız
   // bir kopyası vardı — kayıt bir channel'a, halkın sesi başkasına bakabilirdi.
@@ -421,8 +441,11 @@ async function loadPopulaceVoice(userId: string, body: GeneralRequest, now: numb
     buildings: body.kingdom?.buildings ?? [],
     channelSpeed: membership?.channelSpeed ?? (Number(body.kingdom?.channelSpeed) || 1),
     comparison: membership ? await loadComparison(userId, membership.channelId, membership.channelName, now) : null,
-  }, now);
-  return { lines: renderPopulaceVoice(open, now), open };
+  }, now, credential ? populaceNarrator(credential) : null);
+  // İKİ KANAL, TEK KAYNAK: yapısal özet sistem promptuna, halkın kendi sözleri
+  // `user` rolünde işaretli bir bloğa gider (bkz. server/populace-brief.ts).
+  // Sözler MODEL ÜRETİMİ olabildiği için sistem promptuna ham girmez.
+  return { lines: renderPopulaceVoice(open, now), transcript: renderPopulaceTranscript(open, now), open };
 }
 
 /**
@@ -593,6 +616,10 @@ export async function POST(request: Request) {
     // komutanın kendi isteği, öbürü halkın ve kışlanın sesi.
     const voice = await loadPopulaceVoice(user.id, body, now);
     body.memoryLines = [...memory.lines, ...voice.lines];
+    // Sunucu her istekte YAZAR (boş olsa bile): istemcinin gönderdiği bir değer
+    // burada kesin olarak ezilsin, halkın sözleri diye uydurulmuş bir blok
+    // Generalin bağlamına giremesin.
+    body.populaceTranscript = voice.transcript;
     const desk = await loadNegotiationDesk(user.id);
     body.negotiationLines = desk.lines;
     body.negotiationTranscript = desk.transcript;
@@ -689,7 +716,10 @@ import { BUILDABLE_TYPES } from "../../../engine/catalog";
 import { deriveRequests, requestsSatisfiedBy } from "../../../engine/general-requests";
 import { deriveLedgerEvents } from "../../../engine/ledger";
 import { appendToLedger, loadLedger, renderGeneralMemory, syncRequests } from "../../../server/general-ledger";
-import { type OpenDemand, renderPopulaceVoice, syncPopulaceDemands } from "../../../server/populace-voice";
+import { syncPopulaceDemands } from "../../../server/populace-voice";
+import { type OpenDemand, renderPopulaceTranscript, renderPopulaceVoice } from "../../../server/populace-brief";
+import { populaceNarrator } from "../../../server/populace-narrator";
+import { populaceCredentialFor } from "../../../server/populace-ai-desk";
 import { readConfirmation, reviewProposedActions, type KingdomSnapshot } from "../../../server/general-risk";
 import { currentUser } from "../../../server/account-auth";
 import { activeMembershipOf } from "../../../server/active-membership";

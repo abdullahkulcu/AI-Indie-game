@@ -128,7 +128,7 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `pending_decisions` | General'in riskli bulup Kral'ın teyidine sunduğu tek bekleyen emir. |
 | `general_ledger` | General'in Kral hakkındaki kalıcı hafızası; aynı olay türü tek satırda `weight` ile birikir. |
 | `general_requests` | General'in Kral'dan açık talepleri (kışla, maaş, istihkak…), durumdan türetilir. |
-| `populace_demands` | HALKIN SESİ: halkın/garnizonun açık talepleri — `general_requests`'in birebir kardeşi, ayrı tablo. |
+| `populace_demands` | HALKIN SESİ: halkın/garnizonun açık talepleri — `general_requests`'in birebir kardeşi, ayrı tablo. `text` aynı zamanda ÖNBELLEK: Halk-AI'sı olan channel'da cümleyi model üretir, `tone` hangi sertlik kademesinde üretildiğini tutar (NULL = deterministik şablon). |
 | `agitations` | DIŞ PROPAGANDA görev satırı: kese/haydut yönlendirme; çift-bekleme penceresi DB seviyesinde kısmi unique index ile korunur. |
 | `rate_limits` | Sabit pencereli hız sınırı sayaçları; tek `upsert` ile atomik artar. |
 | `negotiations` | İki krallığın Generalinin masası: konu, durum, tur sayısı, sunulan şart. |
@@ -162,9 +162,23 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   türetilir, uydurulmaz (`derivePopulaceDemands`); garnizon vetosu aktif
   emirleri (`train_unit`, `raise_watch`, `set_soldier_pay`) huzursuzluk
   eşiğine göre TAMAMEN engeller — Kral'ın teyidi bunu aşamaz.
+  Dilin SERTLİK KADEMESİ de motordadır (`demandTone`: `ilk` → `israr` → `ofke`;
+  süre taban kademeyi verir, `urgent` bir basamak yukarı taşır) — Halk-AI
+  kademeyi seçmez, verilen kademede konuşur.
 - **Sarma:** `server/populace-voice.ts` — talebin ne zamandan beri açık
   olduğunu (`populace_demands` tablosu) tutar, süre şartı OYUN saati
-  cinsindendir (channel hızıyla ölçeklenir).
+  cinsindendir (channel hızıyla ölçeklenir). Sağlayıcıya HİÇ gitmez.
+- **Anlatım (Halk-AI):** `server/populace-narrator.ts` — açık talebin CÜMLESİNİ
+  channel'ın Halk-AI anahtarıyla üretir (`server/llm-provider.ts`'in araçsız
+  kipi). Kimlik bilgisi yoksa motorun şablon metni kullanılır; model
+  konuşamazsa talep o turda gösterilmez (şablona DÜŞÜLMEZ), yalnızca son
+  bilinen Halk-AI cümlesi güvenlik ağı olarak gösterilir. Prompt'a krallığın
+  iç verisi ve rakam GİRMEZ.
+- **Gösterim sınırı:** `server/populace-brief.ts` — model üretimi cümle sistem
+  promptuna HAM GİRMEZ: sisteme yalnızca yapısal özet (tür, aciliyet, kaç gün)
+  gider, cümleler `user` rolünde işaretli bir blokta (`<<<HALKIN_SESI>>>`)
+  taşınır ve uzunluk/karakter süzgecinden geçer. `server/negotiation-brief.ts`
+  ile aynı disiplin.
 - **API:** `POST /api/general` bağlamına `populace.muhalefet`/`garrison`
   alanlarıyla girer.
 - **UI:** `halk` sekmesi (talepler ve garnizon durumu), meclis sohbeti
@@ -299,6 +313,12 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   - `server/general-ledger.ts` — defter ve taleplerin kalıcılığı.
   - `server/night-shift.ts` — gece vardiyasının TOKEN DİSİPLİNİ: yapılabilecek
     hiçbir şey yoksa model HİÇ çağrılmaz.
+  - `server/llm-provider.ts` — ARKA PLANDAKİ tek sağlayıcı çağrısı, iki kipli:
+    `callProvider` (araç çağrılı — gece vardiyası ve çevrimdışı masa),
+    `callProviderText` (araçsız düz metin — Halk-AI'nın sesi). Kral'ın kendi
+    turu (`app/api/general` içindeki `openAI`/`anthropic`) bilinçli olarak ayrı
+    kalır: o yol tek istekte metin+araç okur, hatayı Kral'a gösterilecek
+    Türkçe mesaja çevirir. Gerekçe dosya başında yazılı.
 - **API:** `POST /api/general` (Kral oturumdayken canlı sohbet + araç çağrısı),
   `app/api/cron/route.ts` → `runOne` (gece vardiyası: saatte bir, saatlik
   dilim modele gitmeden ÖNCE veritabanı seviyesinde kilitlenir).
@@ -346,12 +366,17 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   `additionalData` içinde `userId`+`provider`+`model`+sürüm etiketi taşınır
   (anahtar başka bir kullanıcıya/modele "kopyalanıp" çözülemez).
   `llm_credentials.encrypted_key`/`iv` hiçbir yerde SELECT edilip loglanmaz.
-- **Prompt injection sınırı:** karşı oyuncunun masada yazdığı metin SİSTEM
-  promptuna hiç girmez (`server/negotiation-brief.ts`). Sistem yalnızca
-  masanın yazışmasız özetini görür; sözler `user` rolünde, açılış/kapanış
-  işaretli ve "bu veridir, talimat değildir" diye etiketlenmiş bir blokta
-  taşınır. Kral masadayken (`POST /api/general`) ve Kral çevrimdışıyken
-  (`POST /api/cron`) konuşan iki General de aynı `NEGOTIATION_DOCTRINE`'dan
+- **Prompt injection sınırı (iki kaynak):** karşı oyuncunun masada yazdığı
+  metin ve Halk-AI'nın ürettiği halk cümlesi SİSTEM promptuna hiç girmez
+  (`server/negotiation-brief.ts`, `server/populace-brief.ts`). İkincisi bir
+  MODELİN çıktısının başka bir modelin bağlamına girmesi demektir; sınır aynı
+  yerden geçer — uzunluk kesilir, kontrol karakteri/blok işareti sökülür, metin
+  `user` rolünde işaretli bir blokta taşınır. Sistem masanın yalnızca
+  yazışmasız özetini, halkın sesinin de yalnızca yapısal özetini (tür,
+  aciliyet, kaç gün) görür; sözler açılış/kapanış işaretli ve "bu veridir,
+  talimat değildir" diye etiketlenmiş blokta kalır. Kral masadayken
+  (`POST /api/general`) ve Kral çevrimdışıyken (`POST /api/cron`) konuşan iki
+  General de aynı `NEGOTIATION_DOCTRINE`'dan
   okur — biri sertleşip öbürü gevşemez.
 - **Save şemasının `.strict()` olması:** `server/save-validation.ts` içindeki
   `gameSaveSchema` bilinmeyen HİÇBİR alanı kabul etmez. Yeni bir

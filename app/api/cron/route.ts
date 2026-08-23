@@ -19,7 +19,9 @@ import {
   type Side, type Terms, type TributeSettlement,
 } from "../../../engine/negotiation";
 import { reputationChange } from "../../../engine/diplomacy";
-import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta, type DeskTool } from "../../../server/negotiation-brief";
+import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta } from "../../../server/negotiation-brief";
+// Sağlayıcı çağrısı paylaşılan modülden gelir; bu dosyada artık `fetch` yok.
+import { callProvider } from "../../../server/llm-provider";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
 import { pruneExpiredSessions } from "../../../server/account-auth";
@@ -52,41 +54,13 @@ const NIGHT_PROMPT = [
 ].join("\n");
 
 /**
- * Arka plandaki tek sağlayıcı çağrısı. Hem gece vardiyası hem de Kral
- * çevrimdışıyken masaya oturan General buradan geçer; iki ayrı çağrı yazılsaydı
- * biri araç şemasını, öbürü zaman aşımını farklı kurar ve fark ancak yayında
- * görülürdü.
+ * Arka plandaki tek sağlayıcı çağrısı ARTIK BU DOSYADA DEĞİL: gövdesi
+ * `server/llm-provider.ts`'e taşındı ve orada araçsız (düz metin) bir kardeş
+ * kip kazandı. Sebep kısıt #5 — Halk-AI'nın sesi (plan belgesi Fikir 2) aynı
+ * uç noktalara, aynı zaman aşımıyla gitmek zorundaydı; burada bırakılsaydı
+ * üçüncü bir `fetch` kopyası doğardı. Bu yolun davranışı DEĞİŞMEDİ: aynı
+ * fonksiyon, aynı araç şeması, aynı 30 saniye.
  */
-async function callProvider(input: {
-  provider: string; model: string; apiKey: string;
-  system: string; tools: DeskTool[]; user: string; maxTokens?: number;
-}): Promise<GameAction | null> {
-  const maxTokens = input.maxTokens ?? 400;
-  if (input.provider === "anthropic") {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": input.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: input.model, max_tokens: maxTokens, system: input.system, messages: [{ role: "user", content: input.user }], tools: input.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) throw new Error(`anthropic ${response.status}`);
-    const data = await response.json() as { content?: Array<{ type: string; name?: string; input?: Record<string, unknown> }> };
-    const call = data.content?.find(part => part.type === "tool_use");
-    return call?.name ? { name: call.name, arguments: call.input ?? {} } : null;
-  }
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: input.model, max_completion_tokens: maxTokens, messages: [{ role: "system", content: input.system }, { role: "user", content: input.user }], tools: input.tools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`openai ${response.status}`);
-  const data = await response.json() as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> } }> };
-  const call = data.choices?.[0]?.message?.tool_calls?.[0]?.function;
-  if (!call?.name) return null;
-  try { return { name: call.name, arguments: JSON.parse(call.arguments ?? "{}") as Record<string, unknown> }; }
-  catch { return null; }
-}
 
 async function runOne(row: typeof standingOrders.$inferSelect, now: number): Promise<WakeReport> {
   const db = getDb();

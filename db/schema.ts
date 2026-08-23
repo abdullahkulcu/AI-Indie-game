@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { POPULACE_PERSONA_IDS } from "../engine/populace-persona";
+import { DEMAND_TONES } from "../engine/populace-voice";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -257,12 +258,22 @@ export const generalRequests = pgTable("general_requests", {
  *                 anlık dalgalanma talep açmaz.
  *   · `openedAt`— talep fiilen açıldığı an; "kaç gündür istiyoruz" bundan okunur.
  * Koşul düzelince satır silinir ve süre baştan sayılır.
+ *
+ * `text` sütunu artık yalnızca kalıcılık değil ÖNBELLEK: Halk-AI'sı olan bir
+ * channel'da cümleyi model üretir (plan belgesi Fikir 2) ve o cümle burada
+ * saklanır. `tone` cümlenin hangi sertlik kademesinde üretildiğini söyler;
+ * kademe değişmedikçe model yeniden çağrılmaz. NULL = cümle deterministik
+ * şablondan geliyor (Halk-AI yok). Bu ayrım aynı zamanda sağlayıcı hatasındaki
+ * güvenlik ağının koşulu: yalnızca `tone` dolu bir satırın metni "son bilinen
+ * halkın sesi" sayılır (bkz. `server/populace-narrator.ts`).
  */
 export const populaceDemands = pgTable("populace_demands", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),
   voice: text("voice", { enum: ["commons", "garrison"] }).notNull().default("commons"),
   text: text("text").notNull(),
+  /** Kademe listesi motorda TEK KAYNAKTA yaşar: engine/populace-voice.ts. */
+  tone: text("tone", { enum: DEMAND_TONES }),
   severity: text("severity", { enum: ["normal", "urgent"] }).notNull().default("normal"),
   seenAt: bigint("seen_at", { mode: "number" }).notNull(),
   openedAt: bigint("opened_at", { mode: "number" }),

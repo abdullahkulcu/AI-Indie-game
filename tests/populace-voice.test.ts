@@ -5,7 +5,8 @@ import { applyActions } from "../engine/actions";
 import {
   DEMAND_NOTICE_HOURS, MAX_OPEN_DEMANDS, VOICE_THRESHOLDS, type VoiceSignals,
   demandsSatisfiedBy, derivePopulaceDemands, garrisonMood, garrisonRefusal,
-  garrisonVetoes, openDemands, renderDemands,
+  DEMAND_SUBJECT, DEMAND_TONE_HOURS, DEMAND_TONES, demandTone,
+  garrisonVetoes, openDemands,
 } from "../engine/populace-voice";
 import { SOLDIER_THRESHOLDS } from "../engine/populace";
 import { COMPARE_BETTER, type CompareMetric } from "../engine/comparison";
@@ -298,13 +299,39 @@ test("yanlış yapı emri konut talebini kapatmaz", () => {
   assert.deepEqual(demandsSatisfiedBy(open, [{ name: "build_structure", arguments: { building_type: "town_square" } }]), ["roof"]);
 });
 
-test("gösterim sesi ayırır ve acil talebi işaretler", () => {
-  const text = renderDemands([
-    { text: "Ekmek yok.", severity: "urgent", voice: "commons" },
-    { text: "Maaş yok.", severity: "normal", voice: "garrison" },
-  ]);
-  assert.equal(text, "- [ACİL] Halk: Ekmek yok.\n- Garnizon: Maaş yok.");
-  assert.equal(renderDemands([]), "");
+// --- Dilin sertlik kademesi (Fikir 2) --------------------------------------
+
+test("kademe SÜREDEN türer ve sırayla sertleşir", () => {
+  assert.equal(demandTone("normal", 0), "ilk");
+  assert.equal(demandTone("normal", DEMAND_TONE_HOURS.israr - 0.1), "ilk");
+  assert.equal(demandTone("normal", DEMAND_TONE_HOURS.israr), "israr");
+  assert.equal(demandTone("normal", DEMAND_TONE_HOURS.ofke), "ofke");
+  // Tavan aşılmaz: 10 gün beklemek de öfkedir.
+  assert.equal(demandTone("normal", 240), "ofke");
+});
+
+test("acil şiddet kademeyi BİR basamak yukarı taşır, tavanı geçmez", () => {
+  assert.equal(demandTone("urgent", 0), "israr");
+  assert.equal(demandTone("urgent", DEMAND_TONE_HOURS.israr), "ofke");
+  assert.equal(demandTone("urgent", DEMAND_TONE_HOURS.ofke), "ofke");
+});
+
+test("bozuk süre girdisi en yumuşak kademeye düşer", () => {
+  assert.equal(demandTone("normal", Number.NaN), "ilk");
+  assert.equal(demandTone("normal", -5), "ilk");
+});
+
+test("kademe listesi ve konu listesi tek kaynakta, tam", () => {
+  assert.deepEqual([...DEMAND_TONES], ["ilk", "israr", "ofke"]);
+  // Her talep türünün Halk-AI'ya verilecek bir konusu OLMAK ZORUNDA: eksik
+  // kalan tür promptta boş konuyla giderdi.
+  for (const demand of derivePopulaceDemands(good({ servedFood: 40, taxRate: 40, popularity: 20, soldierUnrest: 90, population: 300, capacity: 300, livingCost: 2 }))) {
+    assert.ok(DEMAND_SUBJECT[demand.kind]?.length > 10, demand.kind);
+  }
+  // Konu metinleri Halk-AI promptuna giriyor: sayı ya da yüzde taşımamalı.
+  for (const subject of Object.values(DEMAND_SUBJECT)) {
+    assert.ok(!/[0-9%]/.test(subject), subject);
+  }
 });
 
 // --- Garnizon vetosu -------------------------------------------------------
@@ -388,16 +415,40 @@ test("veto yalnızca ilgili emirleri kapatır; istihkak ve vergi serbest kalır"
   assert.match(lines(game, "set_tax_rate", { rate_percent: 10 })[0], /^✓/);
 });
 
-// --- Sıfır ek model çağrısı ------------------------------------------------
+// --- Sağlayıcı çağrısının yeri ---------------------------------------------
 
-test("halkın sesi hiçbir yeni model çağrısı açmaz", () => {
-  // Mekaniğin taşıyıcı ilkesi: motor karar verir (bedava), model yalnızca ses
-  // verir ve o ses Kralın ZATEN başlattığı turun promptuna biner. Bu yüzden yeni
-  // kod yollarının hiçbiri sağlayıcıya gitmemeli; kaynak dosya bunu kanıtlar.
+test("tetikleyici ve defter sağlayıcıya HİÇ gitmez", () => {
+  // Mekaniğin taşıyıcı ilkesi değişmedi: KARAR motorda verilir (bedava) ve
+  // Kralın kendi anahtarıyla fazladan tek bir çağrı açılmaz. Fikir 2 ile
+  // eklenen tek şey CÜMLENİN üretimi; o da ayrı bir dosyada, oyun kurucusunun
+  // anahtarıyla yaşıyor. Bu iki dosya sağlayıcıya gitmemeye devam etmeli:
+  // biri motorun saf kararı, öbürü veritabanı defteri.
   const files = ["engine/populace-voice.ts", "server/populace-voice.ts"];
   for (const file of files) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     for (const forbidden of ["fetch(", "callProvider", "decryptByok", "api.openai.com", "api.anthropic.com"]) {
+      assert.ok(!source.includes(forbidden), `${file} içinde ${forbidden} olmamalı`);
+    }
+  }
+});
+
+test("sağlayıcı uç noktası TEK dosyada yaşıyor", () => {
+  // CLAUDE.md kısıt #5. Halk-AI için üçüncü bir sağlayıcı çağrısı yazılmadı:
+  // gece vardiyasının çağrısı `server/llm-provider.ts`'e taşındı ve orada
+  // araçsız bir kardeş kip kazandı. Kralın kendi turu (app/api/general) ayrı
+  // kalıyor ve bu bilinçli — gerekçesi llm-provider.ts dosya başında yazılı.
+  const owners = ["server/llm-provider.ts", "app/api/general/route.ts"];
+  const suspects = [
+    "app/api/cron/route.ts", "server/populace-narrator.ts", "server/populace-voice.ts",
+    "server/populace-brief.ts", "server/populace-ai-desk.ts",
+  ];
+  for (const file of owners) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.ok(source.includes("api.openai.com"), `${file} sağlayıcı uç noktasını taşımalı`);
+  }
+  for (const file of suspects) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    for (const forbidden of ["api.openai.com", "api.anthropic.com"]) {
       assert.ok(!source.includes(forbidden), `${file} içinde ${forbidden} olmamalı`);
     }
   }

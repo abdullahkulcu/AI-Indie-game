@@ -335,13 +335,96 @@ export function demandsSatisfiedBy(
     .map(demand => demand.kind);
 }
 
-/** Talepleri modele ve panele verilecek kısa metne çevirir. */
-export function renderDemands(demands: Array<{ text: string; severity: DemandSeverity; voice: DemandCandidate["voice"] }>): string {
-  if (!demands.length) return "";
-  return demands
-    .map(demand => `- ${demand.severity === "urgent" ? "[ACİL] " : ""}${demand.voice === "garrison" ? "Garnizon" : "Halk"}: ${demand.text}`)
-    .join("\n");
+/*
+ * `renderDemands` BURADAN KALDIRILDI (plan belgesi Fikir 2).
+ *
+ * Talepleri "- [ACİL] Halk: ..." satırlarına çeviren bu yardımcı, cümleyi
+ * doğrudan sistem promptuna basan tek yoldu. Fikir 2'den sonra cümle MODEL
+ * ÜRETİMİ olabildiği için gösterim iki kanala ayrıldı (yapısal özet sisteme,
+ * sözler `user` rolünde işaretli bloğa) ve tek gösterim yeri
+ * `server/populace-brief.ts` oldu. İkinci bir gösterici bırakmak, sınırı
+ * atlayan bir yolu açık tutmak olurdu.
+ */
+
+// --- DİLİN SERTLİK KADEMESİ ------------------------------------------------
+
+/**
+ * Talebin dili ne kadar sert? (plan belgesi Fikir 2 → "Karar (2026-08-22)")
+ *
+ * `engine/ledger.ts`'in `phraseFor` deseninin birebir karşılığı: orada ağırlık
+ * (kaç kez oldu) arttıkça cümle gözlemden karakter tespitine geçer, burada
+ * SÜRE uzadıkça rica sitemden öfkeye geçer. Kademe MOTORDA, saf bir kuralla
+ * hesaplanır; Halk-AI yalnızca verilen kademede KONUŞUR, kademeyi kendisi
+ * seçmez. Sebebi kısıt #1'in ötesinde pratik: kademeyi modele bıraksaydık aynı
+ * talep her istekte rastgele sertlikte görünür ve Kral halkın gidişatını
+ * okuyamazdı.
+ *
+ * ÜÇ kademe var, çünkü ikisi "rica / öfke" ikiliğinden fazlasını taşımıyor ve
+ * dördü metinde ayırt edilemeyecek kadar yakın kalıyordu:
+ *  - `ilk`   → halk ilk kez söylüyor: dilek/rica.
+ *  - `israr` → söylenmiş ama karşılanmamış: sitem, hatırlatma.
+ *  - `ofke`  → uzun süredir bekliyor: açık kızgınlık, muhalefetin dili.
+ */
+/**
+ * Kademe kimlikleri — veritabanı sütununun enum'u da bu diziden türer
+ * (`db/schema.ts` → `populace_demands.tone`), tip de. Sıra ANLAMLIDIR: en
+ * yumuşaktan en serte, `demandTone` bu sıraya göre kaydırır.
+ */
+export const DEMAND_TONES = ["ilk", "israr", "ofke"] as const;
+
+export type DemandTone = typeof DEMAND_TONES[number];
+
+/**
+ * Kademe sınırları OYUN saati cinsindendir (channel hızı çağıran tarafta
+ * çarpılır, bkz. `server/populace-voice.ts`).
+ *
+ * 12 → en uzun süre şartının (`kiyas`, 8 saat) bir tık üstü: her talep en az
+ * bir kademe "ilk" olarak görünür, yani halk daha ilk cümlesinde bağırmaz.
+ * 36 → bir buçuk oyun günü. Bir gün boyunca cevapsız kalmak ihmal sayılmaz
+ * (Kral uyuyor olabilir, bkz. gece vardiyası); bir buçuk gün sayılır.
+ */
+export const DEMAND_TONE_HOURS = { israr: 12, ofke: 36 } as const;
+
+/**
+ * Kademe SÜREDEN ve ŞİDDETTEN türer.
+ *
+ * Süre taban kademeyi verir; `urgent` şiddeti onu BİR kademe yukarı taşır.
+ * Şiddeti ayrı bir eksen yapmak yerine aynı ekseni kaydırmak bilinçli: aç
+ * kalmış halkın "ilk" cümlesi de zaten sitemlidir, ama süre geçtikçe hâlâ
+ * sertleşebilmesi gerekir. Tavan `ofke`dir; ötesi yok, çünkü halkın üzerinde
+ * emir süreci olmadığı gibi (bkz. dosya başı) öfkenin de bir üst basamağı
+ * mekanikte karşılıksız kalırdı.
+ */
+export function demandTone(severity: DemandSeverity, heldGameHours: number): DemandTone {
+  const held = Math.max(0, Number(heldGameHours) || 0);
+  const base = held >= DEMAND_TONE_HOURS.ofke ? 2 : held >= DEMAND_TONE_HOURS.israr ? 1 : 0;
+  const bumped = base + (severity === "urgent" ? 1 : 0);
+  return DEMAND_TONES[Math.min(DEMAND_TONES.length - 1, bumped)];
 }
+
+/**
+ * Talebin SAYISIZ ve İSİMSİZ konusu — Halk-AI'ya prompt kurulurken kullanılır.
+ *
+ * Neden sayısız: Halk-AI kimlik bilgisi oyun kurucusunun (channel'ın)
+ * anahtarıdır, Kralın kendi anahtarı DEĞİL. Krallığın iç rakamlarını (ambar,
+ * istihkak yüzdesi, huzursuzluk puanı, vergi oranı) o anahtara göndermek, plan
+ * belgesinin §2'deki bilgi asimetrisi sınırını halkın sesi üzerinden aşmak
+ * olurdu. Halk zaten kendi hayatını yaşıyor; ne istediğini söylemek için
+ * Kralın defterindeki sayıya ihtiyacı yok.
+ *
+ * Rakamlar KAYBOLMUYOR: General'in sistem promptuna talebin yapısal özeti
+ * (tür, şiddet, kaç gündür açık) JSON olarak gider; sayısal durumu General
+ * `KRALLIK_DURUMU`dan zaten okur. Halk-AI'nın ürettiği tek şey TON'dur.
+ */
+export const DEMAND_SUBJECT: Record<DemandKind, string> = {
+  bread: "sofradaki ekmeğin azalması; tam istihkak istiyorlar",
+  price: "pazarda fiyatların yükselmesi; kalenin ambarını açmasını istiyorlar",
+  tax: "vergi yükünün ağırlığı; verginin indirilmesini istiyorlar",
+  roof: "konutların dolması; başlarına damaltı istiyorlar",
+  joy: "hayatın tatsızlaşması; bir şenlik ya da meydan eğlencesi istiyorlar",
+  wage: "kışlada maaşın ödenmemesi; maaş defterinin açılmasını istiyorlar",
+  kiyas: "komşu sancaklarda hayatın daha kolay görünmesi; aynı düzeni kendi kapılarında istiyorlar",
+};
 
 // --- GARNİZON VETOSU -------------------------------------------------------
 
