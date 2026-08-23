@@ -19,7 +19,15 @@ export async function GET(request: Request) {
   const saveMap = new Map(saves.map((save) => { try { const game = JSON.parse(save.gameState) as { kingdomName?: string }; return [save.userId, { kingdomName: game.kingdomName ?? "—", updatedAt: save.updatedAt }]; } catch { return [save.userId, { kingdomName: "Bozuk kayıt", updatedAt: save.updatedAt }]; } }));
   const nameMap = new Map(channelRows.map((channel) => [channel.id, channel.name]));
   return Response.json({
-    players: playerRows.map((player) => ({ ...player, save: saveMap.get(player.id) ?? null, channels: memberships.filter((member) => member.userId === player.id && member.status === "active").map((member) => nameMap.get(member.channelId) ?? member.channelId) })),
+    // `channels` insan için (ad), `channelIds` panelin seçim kutuları için:
+    // Halk-AI override'ı bir channel KİMLİĞİ ister ve channel adları tekil
+    // değil, yani adı kimliğe geri çevirmek yanlış krallığa yazabilirdi.
+    players: playerRows.map((player) => ({
+      ...player,
+      save: saveMap.get(player.id) ?? null,
+      channels: memberships.filter((member) => member.userId === player.id && member.status === "active").map((member) => nameMap.get(member.channelId) ?? member.channelId),
+      channelIds: memberships.filter((member) => member.userId === player.id && member.status === "active").map((member) => member.channelId),
+    })),
     channels: channelRows.map((channel) => ({ ...channel, playerCount: memberships.filter((member) => member.channelId === channel.id && member.status === "active").length })),
   }, { headers: noStore });
 }

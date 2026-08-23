@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, doublePrecision, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { POPULACE_PERSONA_IDS } from "../engine/populace-persona";
 
 /**
  * Postgres şeması. Epoch-milisaniye alanları bigint'tir (JS number olarak okunur),
@@ -78,6 +79,53 @@ export const llmCredentials = pgTable("llm_credentials", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * HALK-AI KİMLİK BİLGİSİ — token'ı oyun kurucusu (admin) öder.
+ *
+ * `llm_credentials`'ın kardeşi DEĞİL, ayrı bir modeli: orada sahip oyuncudur ve
+ * kendi Generalinin faturasını kendi öder; burada sahip channel'dır ve halkın
+ * faturasını admin öder (bkz. `docs/plans/2026-08-22-canli-dunya-ve-halk-ai-vizyonu.md`,
+ * §2 madde 1 ve Fikir 0). Aynı tabloya sığmazlar: `llm_credentials`'ın birincil
+ * anahtarı `user_id`, yani "kullanıcı başına tek satır" — Halk-AI'da ise bir
+ * channel'ın varsayılanı ve o channel içindeki krallık override'ları BİR ARADA
+ * yaşamak zorunda.
+ *
+ * `user_id` NULL ise satır **channel varsayılanıdır**; doluysa yalnızca o
+ * krallığın halkı için geçerli **override**'dır. Çözümleme sırası tek yerde
+ * yaşar: `server/populace-ai-credentials.ts` → override > varsayılan > yok.
+ *
+ * İki KISMİ unique index bu ikiliği veritabanı seviyesinde tutar. Düz bir
+ * `unique(channel_id, user_id)` yetmezdi: Postgres NULL'ları birbirinden farklı
+ * sayar, yani aynı channel'a iki (hatta yüz) varsayılan satır girebilirdi ve
+ * hangisinin kullanıldığı sıralamaya kalırdı.
+ *
+ * Anahtar burada YALNIZCA şifreli durur (`encrypted_key`/`iv`), AES-GCM'in
+ * ek verisi kapsamı taşır (`server/byok-crypto.ts` → `populaceChannelScope` /
+ * `populaceKingdomScope`): bir channel'ın anahtarı başka bir channel adına
+ * çözülemez. Bu iki sütun HİÇBİR cevaba, loga ya da panele girmez
+ * (CLAUDE.md kısıt #4).
+ */
+export const populaceCredentials = pgTable("populace_credentials", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull().references(() => channels.id, { onDelete: "cascade" }),
+  /** NULL = channel varsayılanı; dolu = o krallığa özel override. */
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  /** Kişilik listesi motorda TEK KAYNAKTA yaşar: engine/populace-persona.ts. */
+  persona: text("persona", { enum: POPULACE_PERSONA_IDS }).notNull(),
+  provider: text("provider", { enum: ["openai", "anthropic"] }).notNull(),
+  model: text("model").notNull(),
+  encryptedKey: text("encrypted_key").notNull(),
+  iv: text("iv").notNull(),
+  keyVersion: text("key_version").notNull().default("v1"),
+  /** Kimlik bilgisini giren admin; faturanın sahibi kim olduğu denetim için tutulur. */
+  createdBy: text("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("idx_populace_credentials_default").on(table.channelId).where(sql`${table.userId} is null`),
+  uniqueIndex("idx_populace_credentials_kingdom").on(table.channelId, table.userId).where(sql`${table.userId} is not null`),
+]);
 
 export const intelDefenses = pgTable("intel_defenses", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
