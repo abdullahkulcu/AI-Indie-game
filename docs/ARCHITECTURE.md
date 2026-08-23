@@ -122,8 +122,8 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `llm_credentials` | BYOK: sağlayıcı, model, AES-256-GCM şifreli anahtar + IV + `additionalData` sürüm etiketi. |
 | `intel_defenses` | Karşı-istihbarat seviyesi ve aktif olduğu süre (casus tespiti ve kese ifşası buradan okunur). |
 | `intel_missions` | Gönderilen ajan görevi: TÜR (`kind`: `scout` / `deep`), başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
-| `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher. |
-| `shared_mine_workers` | Bir krallığın madendeki işçisi ve henüz teslim edilmemiş kesirli cevheri (`pendingOre`). |
+| `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher, **bölge sahibi** (`influence_user_id`) ve sahipliğin tartıldığı pencere (`influence_window`). |
+| `shared_mine_workers` | Bir krallığın madendeki işçisi, henüz teslim edilmemiş kesirli cevheri (`pendingOre`) ve nüfuz ölçütü olan zaman ağırlıklı ortalama işçi sayısı (`worker_avg`). |
 | `standing_orders` | Kralın gece vardiyası için verdiği kalıcı emir: otonomi (`autonomous`/`ask`), günlük eylem tavanı, durum. |
 | `pending_decisions` | General'in riskli bulup Kral'ın teyidine sunduğu tek bekleyen emir. |
 | `general_ledger` | General'in Kral hakkındaki kalıcı hafızası; aynı olay türü tek satırda `weight` ile birikir. |
@@ -216,6 +216,19 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
   birikir (10 dk'da bir tam sayıya döner), damar bitince üretim durur,
   sıra deterministik (userId'ye göre) olduğu için "son cevher kime gider"
   sorusu her zaman aynı cevabı verir.
+- **NÜFUZ MÜCADELESİ (plan belgesi Fikir 22):** damarda açık üstünlüğü olan
+  krallık "bölge sahibi" olur ve ÖTEKİLERİN aktif üretiminden `INFLUENCE_CUT`
+  kadar pay alır — dosyanın kuruluşundan beri taşıdığı "kimse başkasının
+  payını yemez" ilkesine getirilen BİLİNÇLİ istisna (dosyanın kendi yorumu da
+  bu yüzden güncellendi). Ölçüt anlık işçi sayısı DEĞİL, kapalı çözümlü üstel
+  bir zaman ağırlıklı ortalamadır (`advanceWorkerAvg`, `worker_avg` sütunu);
+  sahiplik ayrıca mutlak zamana oturan pencerelere KİLİTLİDİR
+  (`influenceWindowAt`, akın penceresinin deseni) ve pencere içinde
+  değişmez. İki fren: nüfuz cevher ÜRETMEZ (pay yalnızca yer değiştirir,
+  damardan çıkan toplam aynı kalır) ve madende o an işçisi olmayan krallık
+  pay alamaz. Kısıt #2 buradan geçer: ortalamanın kapalı çözümü + pencere
+  kilidi, hesabın kaç adıma bölündüğünün sonucu değiştirmemesini sağlar
+  (`tests/mine-influence.test.ts` iki ayrı senaryoyla tutar).
 - **Sarma:** `app/api/mine/route.ts` doğrudan çağırır; ayrı bir `server/`
   dosyası yoktur (route kısa ve odaklı).
 - **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al —

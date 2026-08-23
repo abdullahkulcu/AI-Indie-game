@@ -245,3 +245,12 @@
 .kingdom-contact button.deep-scout{background:#3b2a46;border-color:#6d5583;color:#eadcf3}
 .kingdom-contact small.intel-mood{grid-column:1/2;color:#5d4326}
 .kingdom-contact small.intel-mood b{color:#7d2930;font-weight:700;letter-spacing:.06em}
+
+/* NÜFUZ MÜCADELESİ (plan belgesi Fikir 22) — ortak madende bölge sahipliği.
+   Sahiplik satırı kendi sancağımızsa vurgulanır; sahibin rozeti listede de
+   işaretlenir. Ortalama işçi sayısı bilinçli olarak GÖSTERİLMEZ. */
+.shared-mine small.mine-influence{color:#5e4a2f}
+.shared-mine small.mine-influence b{color:#7d2930;font-weight:700}
+.shared-mine small.mine-influence.mine{color:#3f5f2c}
+.shared-mine small.mine-influence.mine b{color:#3f5f2c}
+.shared-mine i.owner{background:#7d2930;box-shadow:inset 0 -2px #d2a64d}

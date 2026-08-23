@@ -5,7 +5,7 @@ import { currentUser } from "../../../server/account-auth";
 import { projectPublicKingdom } from "../../../server/world-projection";
 import { CAPS, parseStoredSave } from "../../../server/save-validation";
 import { writeSaveIfUnchanged } from "../../../server/save-write";
-import { MINE_TICK_MIN_MS, oreRate, settleMine } from "../../../engine/mine";
+import { INFLUENCE_CUT, INFLUENCE_WINDOW_GAME_HOURS, MINE_TICK_MIN_MS, influenceWindowMs, oreRate, settleMine } from "../../../engine/mine";
 
 /** Madende çalışabilecek halkın oranı ve channel genelindeki toplam yuva. */
 const PERSONAL_SHARE = .2;
@@ -79,8 +79,12 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
   // süre `lastTickAt` üzerinde bekler, hiçbir cevher kaybolmaz.
   if (!options.forceUserId && now - mine.lastTickAt < MINE_TICK_MIN_MS) return { ...mine, totalWorkers };
   const settlement = settleMine(
-    crew.map(row => ({ userId: row.userId, workers: row.workers, pendingOre: row.pendingOre, lastDeliveryAt: row.lastDeliveryAt })),
-    { speed, hours: (now - mine.lastTickAt) / 3_600_000, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null },
+    crew.map(row => ({ userId: row.userId, workers: row.workers, pendingOre: row.pendingOre, lastDeliveryAt: row.lastDeliveryAt, workerAvg: row.workerAvg })),
+    { speed, hours: (now - mine.lastTickAt) / 3_600_000, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null,
+      // NÜFUZ (Fikir 22): sahiplik madenin satırında DURUR ve pencere sınırında
+      // motorda yeniden tartılır. Burada hesaplanmaz — istemci de, route da bu
+      // kararı vermez.
+      influence: { userId: mine.influenceUserId, window: mine.influenceWindow } },
   );
 
   const claimed = await getDb().update(sharedMines)
@@ -88,6 +92,8 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
       lastTickAt: now,
       oreRemaining: mine.oreRemaining - settlement.extracted,
       extractedOre: mine.extractedOre + settlement.extracted,
+      influenceUserId: settlement.influence.userId,
+      influenceWindow: settlement.influence.window,
     })
     .where(and(eq(sharedMines.id, mine.id), eq(sharedMines.lastTickAt, mine.lastTickAt)))
     .returning({ id: sharedMines.id });
@@ -98,10 +104,12 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
 
   let returned = 0;
   for (const share of settlement.shares) {
+    // Ortalama her hesapta geri yazılır: nüfuz ölçütü satırda yaşar, anlık
+    // işçi sayısından türetilmez (bkz. db/schema.ts → `worker_avg`).
     await getDb().update(sharedMineWorkers)
       .set(share.delivered > 0
-        ? { pendingOre: share.pendingOre, deliveredOre: sql`${sharedMineWorkers.deliveredOre} + ${share.delivered}`, lastDeliveryAt: now }
-        : { pendingOre: share.pendingOre })
+        ? { pendingOre: share.pendingOre, workerAvg: share.workerAvg, deliveredOre: sql`${sharedMineWorkers.deliveredOre} + ${share.delivered}`, lastDeliveryAt: now }
+        : { pendingOre: share.pendingOre, workerAvg: share.workerAvg })
       .where(and(eq(sharedMineWorkers.mineId, mine.id), eq(sharedMineWorkers.userId, share.userId)));
     if (share.delivered <= 0) continue;
     if (await deliverOre(share.userId, share.delivered, mine.name, now)) continue;
@@ -124,6 +132,8 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
     lastTickAt: now,
     oreRemaining: mine.oreRemaining - extracted,
     extractedOre: mine.extractedOre + extracted,
+    influenceUserId: settlement.influence.userId,
+    influenceWindow: settlement.influence.window,
     totalWorkers,
   };
 }
@@ -141,6 +151,26 @@ export async function GET(request: Request) {
     const kingdom = projectPublicKingdom(row.userId, row.gameState, value.channel.name);
     return kingdom ? [{ id: row.userId, name: kingdom.name, workers: row.workers, deliveredOre: row.deliveredOre, self: row.userId === user.id }] : [];
   });
+  /**
+   * BÖLGE SAHİPLİĞİ (Fikir 22) — panele SALT OKUNUR iner.
+   *
+   * Sahibin ADI iner ama ORTALAMASI (`worker_avg`) İNMEZ: ortalama sahipliğin
+   * ölçütüdür ve sızması "kaç işçiyle geçebilirim" hesabını birebir çözerdi.
+   * Panelin gördüğü şey madenin satırında yazılı olanla aynı; istemcinin
+   * bildirdiği hiçbir sayı bu karara girmez. Pay oranı ve pencere uzunluğu da
+   * motordan okunur, panel kendi kopyasını tutmaz.
+   */
+  const influence = mine.influenceUserId
+    ? {
+      userId: mine.influenceUserId,
+      name: participants.find(row => row.id === mine.influenceUserId)?.name ?? "Bilinmeyen Sancak",
+      self: mine.influenceUserId === user.id,
+      cut: INFLUENCE_CUT,
+      windowGameHours: INFLUENCE_WINDOW_GAME_HOURS,
+      /** Pencerenin bitişi: sahiplik en erken bu anda yeniden tartılır. */
+      windowEndsAt: (mine.influenceWindow + 1) * influenceWindowMs(value.channel.speed),
+    }
+    : null;
   // Tavan oyuncunun kendi kaydından okunur. Eskiden madendeki işçi listesinden
   // aranıyordu; madende işçisi olmayan oyuncu kendi tavanını göremiyordu.
   const [ownSave] = await getDb().select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
@@ -152,6 +182,7 @@ export async function GET(request: Request) {
     orePerWorkerHour: oreRate(1, value.channel.speed),
     mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } },
     participants,
+    influence,
   });
 }
 

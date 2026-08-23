@@ -169,6 +169,20 @@ export const sharedMines = pgTable("shared_mines", {
   oreRemaining: integer("ore_remaining").notNull().default(100000),
   extractedOre: integer("extracted_ore").notNull().default(0),
   lastTickAt: bigint("last_tick_at", { mode: "number" }).notNull(),
+  /**
+   * BÖLGE SAHİBİ (plan belgesi Fikir 22) ve sahipliğin tartıldığı pencere.
+   *
+   * Sahiplik ANLIK hesaplanmaz, madenin satırında DURUR: mutlak zamana oturan
+   * pencerelerin başında bir kez tartılır (`engine/mine.ts` →
+   * `influenceWindowAt`) ve pencere boyunca değişmez. Bu bir denge kararıdır
+   * (sahiplik kapma yarışını önler) ve aynı zamanda kısıt #2'nin gereği:
+   * hesap kaç parçaya bölünürse bölünsün sahip aynı kalsın.
+   *
+   * `set null`: sahibin hesabı silinirse sütun boşa düşer, madenin satırı
+   * silinmez.
+   */
+  influenceUserId: text("influence_user_id").references(() => users.id, { onDelete: "set null" }),
+  influenceWindow: bigint("influence_window", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("idx_shared_mines_channel").on(table.channelId)]);
 
@@ -190,6 +204,15 @@ export const sharedMineWorkers = pgTable("shared_mine_workers", {
   workers: integer("workers").notNull().default(5),
   pendingOre: doublePrecision("pending_ore").notNull().default(0),
   deliveredOre: integer("delivered_ore").notNull().default(0),
+  /**
+   * NÜFUZ ÖLÇÜTÜ (Fikir 22): zaman ağırlıklı ortalama işçi sayısı. ANLIK
+   * `workers` değil bu sütun tartılır; anlık olsaydı krallıklar her hesapta
+   * işçi sayısını oynatıp sahiplik kapma yarışına girerdi. Kapalı çözümlü
+   * üstel olarak ilerler (`engine/mine.ts` → `advanceWorkerAvg`), yani
+   * hesabın kaç adıma bölündüğü sonucu değiştirmez. Varsayılan 0: sütun
+   * eklenmeden önceki satırlar sahipliği sıfırdan kazanır.
+   */
+  workerAvg: doublePrecision("worker_avg").notNull().default(0),
   lastDeliveryAt: bigint("last_delivery_at", { mode: "number" }).notNull().default(0),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.mineId, table.userId] })]);
