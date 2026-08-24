@@ -73,16 +73,24 @@ olarak yaşandı (bkz. `engine/storage.ts`, `engine/market.ts`, `engine/faction.
 içindeki "kapalı çözüm" yorumları) ve artık modülün başköşesindeki bir tasarım
 ilkesi.
 
-**`tick()` uzun aralığı DİLİMLER.** Adım süresi `MAX_STEP_HOURS` (24 oyun
-saati) ile sınırlı — adım içindeki hesaplar (akın penceresi, bozulma, ruh hâli
-yaklaşımı) bu büyüklük için tasarlandı — ama aralığın TAMAMI uygulanır: `tick`
-gereken kadar dilim atar. Eskiden süre kırpılıp `lastTickAt` yine `now`
-damgalanıyordu, yani 24 saati aşan süre sessizce yok sayılıyordu; sekmesini
-açık bırakan oyuncunun istemcisi ise saniyelik adımlarla sürenin tamamını
-işlediği için iki taraf farklı toplam hesaplıyor ve MEŞRU kayıt 409 alıyordu
-(ölçüm ve gerekçe: `updates/2026-08-24-uzun-uzaklasma-dilimlenmesi.md`).
-Dilim sayısının bir tavanı var (`MAX_STEP_COUNT`); tavan iki tarafta aynı
-olduğu için sapma üretmez.
+**`tick()` uzun aralığı DİLİMLER.** Adım süresi `MAX_STEP_HOURS` = **1 oyun
+saati** ile sınırlı ama aralığın TAMAMI uygulanır: `tick` gereken kadar dilim
+atar (en fazla `MAX_STEP_COUNT` = 4200, yani en uzun sezonun tamamı). Eskiden
+süre 24 saatte kırpılıp `lastTickAt` yine `now` damgalanıyordu, yani aşan süre
+sessizce yok sayılıyordu; sekmesini açık bırakan oyuncunun istemcisi ise
+saniyelik adımlarla sürenin tamamını işlediği için iki taraf farklı toplam
+hesaplıyor ve MEŞRU kayıt 409 alıyordu
+(`updates/2026-08-24-uzun-uzaklasma-dilimlenmesi.md`).
+
+Dilimin bir SAAT olmasının sebebi ayrı: rıza hedefe doğru yürüyen bir gecikme
+süzgeci (`approachMood`, 5 puan/saat) ve nüfus oranı rızanın KESİKLİ bandından
+okunuyor. 24 saatlik dilimde süzgeç bir adımda 120 puan yürüyüp hedefe
+sıçrıyor, bir band atlanıyor ve nüfus donabiliyordu — kapalı çözümü olmayan
+tek yer bu, çünkü hedef nüfusa nüfus da rızaya bağlı. Ölçülen sapma dilim
+boyuyla birlikte iniyor: 24 saat %49.8 (RED), 6 saat %12.1 (RED), 2 saat
+%2.8, 1 saat %1.07. Gerekçe ve nüfusun kapalı çözümü:
+`updates/2026-08-24-nufus-adim-borcu.md`. Tavan iki tarafta aynı olduğu için
+sapma üretmez.
 
 ### 1.2 `server/` — yan etkiler (~2500 satır, 20 dosya)
 

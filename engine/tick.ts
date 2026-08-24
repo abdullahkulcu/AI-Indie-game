@@ -185,8 +185,27 @@ export function servedRations(g: Game, hours = 1) {
   };
 }
 
-/** Tek bir tick adımının kapsayabileceği en uzun oyun süresi (saat). */
-export const MAX_STEP_HOURS = 24;
+/**
+ * Tek bir tick adımının kapsayabileceği en uzun oyun süresi (saat).
+ *
+ * NEDEN 1 — RIZANIN GECİKME SÜZGECİ YÜZÜNDEN. Rıza hedefe `MOOD_APPROACH`
+ * (5 puan/saat) hızıyla yürür ve hedefe çarpınca kırpılır
+ * (`engine/populace.ts` → `approachMood`). Bu bir GECİKME SÜZGECİDİR ve
+ * hedefi hareket ederken çıktısı örnekleme sıklığına bağlıdır — kapalı
+ * çözümü yoktur, çünkü hedef nüfusa, nüfus da rızaya bağlı (kapalı devre).
+ * 24 saatlik dilimde süzgeç bir adımda 120 puan yürüyebiliyordu, yani rıza
+ * doğrudan hedefe SIÇRIYORDU; nüfus oranı ise rızanın KESİKLİ bandından
+ * okunduğu için (`MoodState.populationRate`) bir bandın atlanması büyümeyi
+ * tamamen donduruyordu. Ölçüldü: ×24 tempoda 6 saatte sunucu "Kaynıyor"
+ * bandına düşüp nüfusu 249'da donduruyor, istemcinin saniyelik adımları
+ * 41 rızada kalıp 363'e çıkıyordu — %50 sapma ve 409.
+ *
+ * Dilim bir saate indiğinde süzgeç bir adımda en fazla 5 puan yürüyor, yani
+ * rızanın ölçeğinin %5'i. Aynı ölçümde sapma %49.8'den %1.07'ye iniyor.
+ * Sayıyı büyütmek sapmayı geri getirir: 2 saat %2.84, 6 saat %12.1 (RED),
+ * 24 saat %49.8 (RED).
+ */
+export const MAX_STEP_HOURS = 1;
 
 /**
  * Bir `tick(g, now)` çağrısının atabileceği en fazla dilim sayısı.
@@ -194,11 +213,17 @@ export const MAX_STEP_HOURS = 24;
  * Sınırsız bırakılsa yıllar önce bırakılmış bir kayıt tek istekte on binlerce
  * dilim döndürebilirdi. Sayı iki tarafta AYNI olduğu için (saf motor, tek
  * doğru kaynak) tavana çarpmak sapma üretmez: istemci de sunucu da aynı
- * noktada durup kalan süreyi tek dilimde kapatır. ×1 tempoda 400 dilim 400
- * güne, ×24 tempoda 16 günlük gerçek zamana denk gelir — her ikisi de en uzun
- * sezondan uzun.
+ * noktada durup kalan süreyi tek dilimde kapatır.
+ *
+ * 4200 dilim × 1 oyun saati = 4200 oyun saati, yani en uzun sezonun tamamı
+ * her tempoda içine sığar (×1'de 84 gün = 2016, ×4'te 28 gün = 2688, ×24'te
+ * 7 gün = 4032 oyun saati). Bir oyuncu sezonun BAŞINDAN sonuna kaybolsa bile
+ * tavana çarpmaz. Ölçülen maliyet: bir haftalık toparlama 8 ms, en kötü
+ * durum (×24, tüm sezon) 100 ms mertebesinde ve yalnızca gerçekten uzun
+ * kalmış tek bir istekte ödenir; normal kayıt aralığı 5 saniye, yani tek
+ * dilim.
  */
-export const MAX_STEP_COUNT = 400;
+export const MAX_STEP_COUNT = 4200;
 
 /**
  * Kaynak üretimi, kuyruk tamamlanması ve nüfus/popülerliği `now` anına kadar
@@ -288,8 +313,23 @@ function tickStep(g: Game, now: number): Game {
   // --- Halk sistemi -------------------------------------------------------
   // İstihkak fiilen ne kadar dağıtılabildi? Stok yetmezse kâğıt üstündeki oran
   // değil, dağıtılabilen oran mutluluğu belirler.
+  //
+  // PENCERE ADIM BOYU DEĞİL, SABİT BİR SAAT — KISIT #2'NİN GEREĞİ. Buraya
+  // `hours` geçilirse `satisfaction` bir PENCERE İNTEGRALİ olur: küçük adımda
+  // "stok var, tam dağıtıldı" (oran ~1), 24 saatlik dilimde "bir günlük talebin
+  // ancak şu kadarı" (oran çok daha düşük) çıkar. Aynı duruma iki farklı
+  // tokluk, dolayısıyla iki farklı hedef rıza ve iki farklı nüfus. Ölçüldü:
+  // ×24 tempoda 6 saatte büyük dilimin rızası 33.7'ye düşüp nüfusu "Kaynıyor"
+  // bandında DONUYOR, küçük adımların rızası 41.6'da kalıp büyümeye devam
+  // ediyordu — nüfus 249 ve 363 gibi ayrışıyordu.
+  //
+  // Sabit bir saatlik pencere oranı bir DURUM FONKSİYONU yapar: aynı kayıt hep
+  // aynı tokluğu verir, adımın boyu ne olursa olsun. Panel
+  // (`components/KingdomGame.tsx`) ve halkın sesi (`engine/populace-voice.ts`)
+  // ZATEN varsayılan bir saatlik pencereyi okuyordu; motor tek ayrıksı
+  // okuyucuydu, yani bu aynı zamanda tek doğru kaynağa dönüş.
   const rations = rationsOf(g);
-  const served = servedRations(g, hours);
+  const served = servedRations(g);
 
   // --- Halkın defteri -----------------------------------------------------
   // Krallığın İKİNCİ defteri: halkın kendi stoğu. Fiyat buradan doğar ve

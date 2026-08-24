@@ -126,10 +126,24 @@ test("muhalefet durumu eşiklere göre isimlendirilir", () => {
 
 // --- Motorda ---------------------------------------------------------------
 
+/**
+ * BU TESTİN SENARYOSU DEĞİŞTİ. Önce `popularity: 20` ile başlayıp sekiz saat
+ * ilerletiyordu, ama o krallığın hedef rızası ~50 olduğu için rıza sekiz saatte
+ * yukarı TIRMANIYOR. Eski motor tek büyük adım attığından rızayı bir hamlede
+ * hedefe sıçratıyor, arada geçen düşük-rıza süresini de tam sayıyor ve baskıyı
+ * 42.88'e çıkarıp deftere "MUHALEFET" yazıyordu. Oyuncunun ekranında (saniyelik
+ * adımlar) aynı senaryonun gerçek sonucu 9.99 ve HİÇ bildirim yoktu — yani test
+ * kaba adımın uydurduğu bir muhalefet krizini doğruluyordu.
+ *
+ * Artık senaryo istihkakı sıfırlıyor: hedef rıza dibe oturduğu için rıza
+ * hareket etmiyor ve baskı GERÇEKTEN büyüyor. Ölçüldü, bu senaryoda tek
+ * dilimle saniyelik adımlar aynı sayıyı veriyor (42.88 = 42.88).
+ */
 test("tick baskıyı ilerletir ve eşik geçişini deftere yazar", () => {
-  const game = newGame({ popularity: 20 });
+  const game = newGame({ popularity: 20, foodRation: 0 });
   const after = tick(game, T0 + 8 * HOUR);
-  assert.ok((after.factionPressure ?? 0) > FACTION_THRESHOLDS.stirring);
+  assert.ok((after.factionPressure ?? 0) > FACTION_THRESHOLDS.stirring,
+    `baskı eşiği geçmeli, ölçülen: ${after.factionPressure}`);
   assert.ok(after.notices.some(notice => notice.kind === "MUHALEFET"));
 });
 
@@ -154,15 +168,21 @@ test("tick'in adımları muhalefette de aynı sonucu verir", () => {
 const save = (game: Game) => JSON.parse(JSON.stringify(game)) as Game;
 
 test("istemcinin bildirdiği muhalefet baskısı yok sayılır", () => {
-  const previous = save(newGame({ popularity: 20, lastTickAt: T0 }));
+  // İstihkak sıfır: baskının gerçekten büyüdüğü senaryo (bkz. yukarıdaki not).
+  const previous = save(newGame({ popularity: 20, foodRation: 0, lastTickAt: T0 }));
   // İstemci baskıyı sıfır bildirip cezadan kaçmaya çalışıyor.
   const claimed = save({ ...tick(previous, T0 + 12 * HOUR), factionPressure: 0 });
   const result = validateGameSave(claimed, {
     previous: previous as never, previousUpdatedAt: T0, channelSpeed: 1, now: T0 + 12 * HOUR,
   });
   assert.equal(result.ok, true);
-  assert.ok(result.ok && (result.game.factionPressure ?? 0) > 30,
-    `sunucunun kendi değeri yazılmalı, yazılan: ${result.ok ? result.game.factionPressure : "-"}`);
+  // İDDİA SUNUCUNUN KENDİ MOTORUNA BAĞLI, sabit bir sayıya değil: eşik sabit
+  // yazılırsa motorun her ayarı bu testi kırar ve test kuralı değil sayıyı
+  // korumuş olur. Asıl mesele istemcinin sıfırının yok sayılması.
+  const own = tick(previous as never, T0 + 12 * HOUR).factionPressure ?? 0;
+  assert.ok(own > 0, "senaryo gerçekten baskı üretmeli");
+  assert.equal(result.ok && result.game.factionPressure, own,
+    "sunucu kendi tick'inin değerini yazmalı");
 });
 
 test("istemci baskıyı şişiremez de", () => {

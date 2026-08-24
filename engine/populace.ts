@@ -363,12 +363,37 @@ export function growthMultiplier(buildings: Array<{ type: string; level: number 
 }
 
 /**
- * Bir saatteki nüfus değişimi.
+ * `hours` saatlik nüfus değişimi — KAPALI ÇÖZÜM.
  *
  * Büyüme lojistiktir: boş konut kaldıkça hızlıdır, kapasite dolarken durur.
  * Kayıp boş konuta bakmaz — insanlar yer olduğu için kalmaz, huzur olduğu
  * için kalır. Kaybın orantılı olması iki şeyi düzeltir: küçük bir krallık
  * dibe vurup orada donmaz, büyük bir krallık da isyanı ucuza atlatamaz.
+ *
+ * NEDEN KAPALI ÇÖZÜM — KISIT #2'NİN GEREĞİ, ZARAFET DEĞİL.
+ *
+ * İkisi de ORANSAL süreç: değişim mevcut nüfusun katı. Bu tür bir süreci
+ * `P × oran × saat` diye DOĞRUSAL yazmak, sonucu sürenin kaç adıma
+ * bölündüğüne bağlar. Aynı 24 saat tek adımda `P × (1 + r×24)`, 24 adımda
+ * `P × (1 + r)²⁴` verir — ikisi aynı sayı değildir. İstemci saniyelik adımlar
+ * atarken sunucu tek büyük adım attığı için iki taraf farklı nüfus hesaplıyor
+ * ve MEŞRU kayıt reddediliyordu (ölçüm: 96 oyun saatinde %24, 144 oyun
+ * saatinde %52 sapma). Bu, `engine/storage.ts`, `engine/market.ts` ve
+ * `engine/faction.ts`'te üç kez yaşanmış ve üç kez kapalı çözümle
+ * düzeltilmiş olan hatanın aynısıydı; nüfus son kalan yerdi.
+ *
+ * Kayıp için kesin çözüm ÜSTEL: `P(t) = P₀ · e^(r·t)`. Bölünebilir, çünkü
+ * `e^(r·t₁) · e^(r·t₂) = e^(r·(t₁+t₂))`. Ayrıca DOĞRU olan da bu: doğrusal
+ * biçim yeterince uzun bir aralıkta nüfusu eksiye düşürüyordu.
+ *
+ * Büyüme için kesin çözüm LOJİSTİK:
+ *   `P(t) = C·P₀·e^(k·t) / (C + P₀·(e^(k·t) − 1))`,  k = oran × yapı çarpanı.
+ * Bu da bölünebilir (lojistik akış tek parametreli bir grup) ve kapasiteyi
+ * asla aşmaz — eski doğrusal biçim aşıyor, sonra `tick` onu kırpıyordu ve
+ * kırpma noktası adım büyüklüğüne bağlı olduğu için sapmanın kendisi oluyordu.
+ *
+ * BU FONKSİYONA DOĞRUSAL BİR TERİM EKLENMEZ. Eklenirse yukarıdaki bölünebilme
+ * özelliği kırılır ve oyuncular ilerleme kaybetmeye geri döner.
  */
 export function populationChange(
   state: MoodState,
@@ -378,7 +403,21 @@ export function populationChange(
   hours: number,
 ) {
   if (population <= 0 || hours <= 0) return 0;
-  if (state.populationRate < 0) return population * state.populationRate * hours;
-  const room = capacity > 0 ? Math.max(0, 1 - population / capacity) : 0;
-  return population * state.populationRate * growthMultiplier(buildings) * room * hours;
+
+  // Kayıp: üstel erime. `expm1` küçük aralıkta `exp(x) - 1`den daha duyarlı.
+  if (state.populationRate < 0) return population * Math.expm1(state.populationRate * hours);
+
+  // Kapasitesi olmayan ya da dolmuş krallık büyümez. Nüfus kapasiteyi AŞMIŞSA
+  // da büyüme sıfırdır (eski `Math.max(0, 1 - P/C)` kırpmasının aynısı):
+  // lojistik akış onu kapasiteye doğru geri çekerdi, ama nüfus kaybı bu
+  // fonksiyonda yalnızca ruh hâlinden doğar, konut sıkışıklığından doğmaz.
+  if (state.populationRate === 0 || capacity <= 0 || population >= capacity) return 0;
+
+  const k = state.populationRate * growthMultiplier(buildings);
+  if (k <= 0) return 0;
+  const factor = Math.exp(k * hours);
+  // Taşma emniyeti: `factor` sonsuza kaçarsa lojistik eğri kapasiteye oturur.
+  if (!Number.isFinite(factor)) return capacity - population;
+  const next = capacity * population * factor / (capacity + population * (factor - 1));
+  return next - population;
 }
