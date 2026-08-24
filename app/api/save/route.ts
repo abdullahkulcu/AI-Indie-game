@@ -26,7 +26,16 @@ export async function GET(request: Request) {
     // olduğu için, onsuz istemci bir daha hiç yazamaz ve kalıcı olarak kilitlenir.
     return Response.json({ game: null, corrupt: true, revision: save.revision, user: { displayName: user.displayName } }, { headers: noStore });
   }
-  return Response.json({ game, revision: save.revision, updatedAt: save.updatedAt, user: { displayName: user.displayName } }, { headers: noStore });
+  // Kayıt DONMUŞ mu? Aynı kural iki uçtan da okunur (PUT'taki kapı ile aynı
+  // kaynak: `activeMembershipOf`). Bayrak GET'te de veriliyor ki arayüz kaydı
+  // açtığı anda sebebi gösterebilsin; aksi hâlde oyuncu her beş saniyede bir
+  // sessizce başarısız olan bir kayıt döngüsüne düşerdi.
+  const membership = await activeMembershipOf(user.id);
+  return Response.json({
+    game, revision: save.revision, updatedAt: save.updatedAt,
+    frozen: !membership,
+    user: { displayName: user.displayName },
+  }, { headers: noStore });
 }
 
 /** Sürüm çakışması: istemcinin elindeki kopya eskidir, sunucudaki durum geri verilir. */
@@ -58,6 +67,31 @@ export async function PUT(request: Request) {
   // kayıt bir sezona, masa başkasına giderdi.
   const channel = await activeMembershipOf(user.id);
   const previous = existing ? parseStoredSave(existing.gameState) : null;
+
+  /**
+   * DONMUŞ KAYIT: sezonu kapanmış Kral artık yazamaz.
+   *
+   * Buradaki kusur sessizdi. `activeMembershipOf` null döndüğünde kod
+   * `channelSpeed: 1` varsayılanına düşüp kaydı KABUL EDİYORDU. Sonuçları:
+   * süresi bitmiş bir sezonda oyun sonsuza kadar sürüyor, ve ×24 tempolu bir
+   * sezonun Kralı sezon kapandığı an farkında olmadan ×1 tempoya geçip büyüme
+   * tavanlarını yeni tempoya göre doğrulatıyordu.
+   *
+   * 423 (Locked) seçildi, 409 DEĞİL: 409 istemciye "kopyan eski, sunucudakini
+   * al ve devam et" demek ve istemci tam olarak bunu yapıyor
+   * (`components/KingdomGame.tsx`, çakışma dalı) — donmuş kayıtta bu sonsuz bir
+   * döngü olurdu. `frozen` bayrağı da veriliyor ki arayüz sebebi söyleyebilsin.
+   *
+   * KAYIT SİLİNMEZ ve okunmaya devam eder: Kral krallığını görür, ilerletemez.
+   * İlk kayıt (henüz satırı olmayan, kuruluş anındaki oyuncu) bu kapıya
+   * TAKILMAZ; kuruluş kendi channel'ını seçtiği için üyeliği o istekte doğar.
+   */
+  if (existing && !channel) {
+    return Response.json({
+      error: "Sezonunuz kapandı; krallığınız donduruldu ve artık ilerlemiyor.",
+      frozen: true,
+    }, { status: 423, headers: noStore });
+  }
   const result = validateGameSave(body.game, {
     previous,
     previousUpdatedAt: existing ? parseTimestamp(existing.updatedAt) : null,

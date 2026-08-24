@@ -35,6 +35,7 @@ import { decryptByok } from "../../../server/byok-crypto";
 import { pruneExpiredSessions } from "../../../server/account-auth";
 import { noteToKing } from "../../../server/king-notice";
 import { pruneRateLimits } from "../../../server/rate-limit";
+import { closeEndedChannels, purgeDormantAccounts } from "../../../server/lifecycle-desk";
 import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder, type WakeDecision, wakeBudget } from "../../../server/night-shift";
 import { parseStoredSave } from "../../../server/save-validation";
 // Koşullu (sürüm korumalı) yazma tek kopyadır; ortak maden de aynı kapıyı kullanır.
@@ -908,6 +909,14 @@ export async function POST(request: Request) {
     swept = `temizlik düştü: ${error instanceof Error ? error.message : "bilinmiyor"}`;
   }
 
+  // SEZON KAPANIŞI EN BAŞTA. Süresi dolan channel pasife düşünce bu turun
+  // GERİ KALANI o sezonu kendiliğinden atlar: aşağıdaki bütün sorgular
+  // `channels.status = 'active'` koşuluyla okuyor. Sıra tersine çevrilirse
+  // kapanmış bir sezon son bir kez daha ticklenirdi.
+  let seasons = { channels: 0, frozen: 0, noticed: 0 };
+  try { seasons = await closeEndedChannels(now); }
+  catch { seasons = { channels: 0, frozen: 0, noticed: 0 }; }
+
   // Yalnızca Kralın onayladığı, aktif channel'daki emirler işlenir. Emri olmayan
   // hesap bu sorguya hiç girmez; o oyuncu için tek satır kod bile çalışmaz.
   const rows = await getDb().select({ order: standingOrders }).from(standingOrders)
@@ -946,10 +955,19 @@ export async function POST(request: Request) {
     try { reports.push(await runOne(row.order, now)); }
     catch (error) { reports.push({ userId: row.order.userId, acted: false, detail: `Hata: ${error instanceof Error ? error.message : "bilinmiyor"}`, tokensUsed: false }); }
   }
+  // UYKUDAKİ HESAPLARIN SİLİNMESİ EN SONDA. Silme geri dönüşsüz ve cascade ile
+  // müzakere/anlaşma/kese satırlarını da götürüyor; turun ortasında çalışsaydı
+  // yukarıdaki turlar okuduğu satırların altından çekilmesini görürdü.
+  let purge = { deleted: 0, protected: 0 };
+  try { purge = await purgeDormantAccounts(now); }
+  catch { purge = { deleted: 0, protected: 0 }; }
+
   return Response.json({
     ranAt: new Date(now).toISOString(),
     considered: rows.length,
     swept,
+    seasons,
+    dormant: purge,
     tributes,
     agitations: purses,
     migrations: migrationRound,
