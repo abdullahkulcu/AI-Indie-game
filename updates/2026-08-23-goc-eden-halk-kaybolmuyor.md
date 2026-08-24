@@ -65,4 +65,5 @@ olmasına rağmen.
 - Kervanın sonsuza dek PENDING kalması teorik olarak mümkün (herkesin konutu
   kalıcı olarak dolu). İş yükü tek satır/tur olduğu için sınırlı, ve channel
   kapanınca sorgudan düşüyor.
-- Bu işin HTML sunumu HENÜZ HAZIRLANMADI (önceki beş iş için hazırlanmıştı).
+- Yolda bekleyen kervan (3. aşama) oyuncuya hiçbir yerde gösterilmiyor. Bir
+  sonraki tasarım turuna takip işi.

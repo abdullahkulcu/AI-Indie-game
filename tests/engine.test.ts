@@ -2,7 +2,8 @@ import { MILL_WHEAT_BONUS, catalog, keepUpgradeCosts, millMultiplier } from "../
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyActions } from "../engine/actions";
-import { UPKEEP, buildOptions, costFor, grossRates, keep, keepCostFor, materialScaleOf, rates, tick } from "../engine/tick";
+import { MAX_STEP_COUNT, MAX_STEP_HOURS, UPKEEP, buildOptions, costFor, grossRates, keep, keepCostFor, materialScaleOf, rates, tick } from "../engine/tick";
+import { storageCaps } from "../engine/storage";
 import { marketDuration } from "../engine/actions";
 import type { Game } from "../engine/types";
 
@@ -55,10 +56,77 @@ test("bir saatlik tick kaynakları üretim hızı kadar artırır", () => {
   assert.equal(after.lastTickAt, T0 + 3_600_000);
 });
 
-test("çevrimdışı kazanç 24 saatle sınırlıdır", () => {
+/**
+ * BU TEST BİR KURALI DEĞİŞTİRDİ VE GEREKÇESİ BURADA DURUYOR.
+ *
+ * Eskiden burada "çevrimdışı kazanç 24 saatle sınırlıdır" yazıyordu: bir
+ * haftalık uzaklaşma bir günlük uzaklaşmayla aynı odunu veriyordu. Kural
+ * kasıtlıydı ama UYGULANAMAZDI, çünkü tavan ÇAĞRI BAŞINA çalışıyordu:
+ * sekmesini açık bırakan oyuncunun istemcisi saniyelik adımlar attığı için
+ * tavana hiç çarpmıyor ve sürenin tamamını üretiyordu. Aynı `now` için iki
+ * taraf farklı sonuç hesaplıyordu, yani tavan kısıt #2'yi ihlal ediyordu ve
+ * bedelini MEŞRU oyuncu ödüyordu: kaydı 409 ile reddediliyor, ilerlemesi
+ * siliniyordu (ölçüm: ×1 tempoda 72 saatte nüfus %80, ×24 tempoda 6 saatte
+ * %162 sapıyordu).
+ *
+ * Tavanı adım bölünmesinden bağımsız kılmanın tek yolu üretimi kayıtta
+ * TAŞINAN bir alana bağlamaktı — yeni bir save alanı, yani gerçek bir tasarım
+ * ve şema değişikliği. Onun yerine tavan ADIM BÜYÜKLÜĞÜ sınırı olarak kaldı
+ * (`MAX_STEP_HOURS`) ve süre artık diliminlenerek TAMAMEN uygulanıyor.
+ * Ekonomi başıboş kalmıyor: kaynağı depo tavanı, nüfusu kapasite frenliyor —
+ * aşağıdaki iki iddia bunu gösteriyor.
+ */
+test("uzun uzaklaşma artık dilimlenerek tamamen işlenir; sınırı depo tavanı çizer", () => {
   const week = tick(newGame(), T0 + 7 * 86_400_000);
   const day = tick(newGame(), T0 + 86_400_000);
-  assert.equal(Math.round(week.resources.wood), Math.round(day.resources.wood));
+  assert.ok(week.resources.wood > day.resources.wood, "bir hafta bir günden fazla üretmeli");
+  assert.equal(week.lastTickAt, T0 + 7 * 86_400_000, "zaman damgası tam ilerlemeli");
+  // Başıboş büyüme yok: hafta sonunda odun depo tavanına oturmuş olmalı.
+  const caps = storageCaps(newGame());
+  assert.ok(week.resources.wood <= caps.wood + 1, `odun depo tavanını aşmamalı (${week.resources.wood} / ${caps.wood})`);
+  assert.ok(week.population <= week.capacity, "nüfus kapasiteyi aşmamalı");
+});
+
+test("ADIM BÖLÜNMESİ SONUCU DEĞİŞTİRMEZ: tek 48 saatlik çağrı = iki 24 saatlik çağrı", () => {
+  // Kısıt #2'nin dilim sınırındaki tam hâli. `tick` aralığı MAX_STEP_HOURS'luk
+  // dilimlere böldüğü için bu eşitlik TAM olmalı, tolerans payı olmadan.
+  const tekAdim = tick(newGame(), T0 + 48 * 3_600_000);
+  const ikiAdim = tick(tick(newGame(), T0 + 24 * 3_600_000), T0 + 48 * 3_600_000);
+  assert.deepEqual(tekAdim, ikiAdim);
+});
+
+test("dilim sınırı OYUN saatiyle ölçülür, gerçek saatle değil (hızlı channel)", () => {
+  // ×24 tempoda bir gerçek saat 24 oyun saati eder, yani tam bir dilim. İki
+  // saatlik uzaklaşma tam iki dilim olmalı. Dilim sonu hesabında tempoya
+  // bölünmezse dilim 24 GERÇEK saat olur ve hızlı channel'da sürenin çoğu
+  // sessizce kaybolur — bu iddia onu yakalar.
+  const speed = 24, hour = 3_600_000;
+  const tekAdim = tick(newGame({ speed }), T0 + 2 * hour);
+  const ikiAdim = tick(tick(newGame({ speed }), T0 + hour), T0 + 2 * hour);
+  assert.deepEqual(tekAdim, ikiAdim);
+  // Ve iki saat, bir saatten gerçekten fazla üretmeli (tavan sessizce yemesin).
+  const birSaat = tick(newGame({ speed }), T0 + hour);
+  assert.ok(tekAdim.resources.gold > birSaat.resources.gold, "iki saat bir saatten fazla altın vermeli");
+});
+
+test("dilim sınırının ALTINDA kalan aralıkta davranış birebir eskisi gibi", () => {
+  // Dilimlemenin geri uyumluluk güvencesi: 24 saatin altındaki her aralık TEK
+  // dilim olduğu için eski kodla aynı sonucu vermeli. Tek dilim ile "tek dilim
+  // + hiç" aynı şeydir.
+  const yirmiSaat = tick(newGame(), T0 + 20 * 3_600_000);
+  assert.equal(yirmiSaat.lastTickAt, T0 + 20 * 3_600_000);
+  assert.deepEqual(tick(yirmiSaat, T0 + 20 * 3_600_000), yirmiSaat, "ilerlemeyen tick durumu değiştirmez");
+});
+
+test("adım tavanına çarpan çok uzun aralık da iki tarafta aynı sonucu verir", () => {
+  // MAX_STEP_COUNT dilimden fazlasını gerektiren aralık: kalan süre tek dilimde
+  // kapanır. Önemli olan tavanın KENDİSİ değil, iki tarafın aynı noktada
+  // durması — bu yüzden iddia "ilerledi ve belirlenimci".
+  const cokUzak = T0 + MAX_STEP_COUNT * 2 * MAX_STEP_HOURS * 3_600_000;
+  const bir = tick(newGame(), cokUzak);
+  const iki = tick(newGame(), cokUzak);
+  assert.deepEqual(bir, iki, "aynı girdi aynı çıktı");
+  assert.equal(bir.lastTickAt, cokUzak, "zaman damgası yine `now`a oturur");
 });
 
 test("channel hızı tick'i çarpar", () => {

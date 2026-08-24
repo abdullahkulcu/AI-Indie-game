@@ -73,6 +73,17 @@ olarak yaşandı (bkz. `engine/storage.ts`, `engine/market.ts`, `engine/faction.
 içindeki "kapalı çözüm" yorumları) ve artık modülün başköşesindeki bir tasarım
 ilkesi.
 
+**`tick()` uzun aralığı DİLİMLER.** Adım süresi `MAX_STEP_HOURS` (24 oyun
+saati) ile sınırlı — adım içindeki hesaplar (akın penceresi, bozulma, ruh hâli
+yaklaşımı) bu büyüklük için tasarlandı — ama aralığın TAMAMI uygulanır: `tick`
+gereken kadar dilim atar. Eskiden süre kırpılıp `lastTickAt` yine `now`
+damgalanıyordu, yani 24 saati aşan süre sessizce yok sayılıyordu; sekmesini
+açık bırakan oyuncunun istemcisi ise saniyelik adımlarla sürenin tamamını
+işlediği için iki taraf farklı toplam hesaplıyor ve MEŞRU kayıt 409 alıyordu
+(ölçüm ve gerekçe: `updates/2026-08-24-uzun-uzaklasma-dilimlenmesi.md`).
+Dilim sayısının bir tavanı var (`MAX_STEP_COUNT`); tavan iki tarafta aynı
+olduğu için sapma üretmez.
+
 ### 1.2 `server/` — yan etkiler (~2500 satır, 20 dosya)
 
 `engine/`'in etrafındaki sunucu katmanı: veritabanı okuma/yazma, BYOK

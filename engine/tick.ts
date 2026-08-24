@@ -185,16 +185,64 @@ export function servedRations(g: Game, hours = 1) {
   };
 }
 
+/** Tek bir tick adımının kapsayabileceği en uzun oyun süresi (saat). */
+export const MAX_STEP_HOURS = 24;
+
+/**
+ * Bir `tick(g, now)` çağrısının atabileceği en fazla dilim sayısı.
+ *
+ * Sınırsız bırakılsa yıllar önce bırakılmış bir kayıt tek istekte on binlerce
+ * dilim döndürebilirdi. Sayı iki tarafta AYNI olduğu için (saf motor, tek
+ * doğru kaynak) tavana çarpmak sapma üretmez: istemci de sunucu da aynı
+ * noktada durup kalan süreyi tek dilimde kapatır. ×1 tempoda 400 dilim 400
+ * güne, ×24 tempoda 16 günlük gerçek zamana denk gelir — her ikisi de en uzun
+ * sezondan uzun.
+ */
+export const MAX_STEP_COUNT = 400;
+
 /**
  * Kaynak üretimi, kuyruk tamamlanması ve nüfus/popülerliği `now` anına kadar
  * ilerletir. Saf fonksiyon: aynı girdi hep aynı çıktıyı verir, böylece istemci
  * ve sunucu aynı sonucu hesaplar.
  *
+ * UZUN ARALIK DİLİMLENİR — VE BU BİR HATA DÜZELTMESİDİR, İYİLEŞTİRME DEĞİL.
+ * Eskiden tek adımın süresi `Math.min(24, ...)` ile kırpılıyor ama `lastTickAt`
+ * yine `now` damgalanıyordu, yani 24 saati aşan süre SESSİZCE YOK SAYILIYORDU.
+ * Sekmesini açık bırakan oyuncunun istemcisi ise saniyelik adımlarla sürenin
+ * TAMAMINI işliyordu. İki taraf farklı toplam hesaplıyordu ve MEŞRU kayıt
+ * reddediliyordu — kısıt #2'nin tam olarak yasakladığı şey. Ölçüldü: ×1 tempoda
+ * 72 saat uzaklaşmada nüfus %80, ×24 tempoda 6 saat uzaklaşmada %162 sapıyor ve
+ * kayıt 409 alıyordu (24 saatin ALTINDA kalan aralıklar kabul ediliyordu, yani
+ * suçlu tam olarak bu tavandı).
+ *
+ * Artık aralık `MAX_STEP_HOURS`'luk dilimlere bölünüp hepsi uygulanıyor. 24
+ * saatin altındaki her aralık TEK dilim olduğu için eski davranışla birebir
+ * aynı kalır; değişen yalnızca daha uzun aralıkların artık gerçekten
+ * uygulanması. Dilim sınırı kaldırılmadı, çünkü adım içindeki hesaplar (akın
+ * penceresi, bozulma, ruh hâli yaklaşımı) bu büyüklük için tasarlandı.
+ *
  * Emir kotası birikimi kaldırıldı; `quota`/`quotaAt` alanları yalnızca eski
  * kayıtlarla uyum için taşınır ve motor bunlara hiç dokunmaz.
  */
 export function tick(g: Game, now: number): Game {
-  const hours = Math.min(24, (now - g.lastTickAt) / 3_600_000 * g.speed);
+  let current = g;
+  for (let step = 0; step < MAX_STEP_COUNT; step += 1) {
+    const remaining = (now - current.lastTickAt) / 3_600_000 * current.speed;
+    if (remaining <= 0) return current;
+    // Son dilim `now`a TAM oturur: kayan nokta yüzünden bir kırıntı süre artıp
+    // gereksiz bir dilim daha dönmesin.
+    if (remaining <= MAX_STEP_HOURS) return tickStep(current, now);
+    const sliceEnd = current.lastTickAt + MAX_STEP_HOURS * 3_600_000 / Math.max(1, current.speed);
+    current = tickStep(current, sliceEnd);
+  }
+  // Tavana çarpıldı: kalan süre tek dilimde kapatılır. `tickStep`in kendi
+  // kırpması burada devreye girer ve iki tarafta aynı sonucu verir.
+  return current.lastTickAt < now ? tickStep(current, now) : current;
+}
+
+/** Tek dilim. Süresi `MAX_STEP_HOURS` ile kırpılır; `tick` bölmeyi üstlenir. */
+function tickStep(g: Game, now: number): Game {
+  const hours = Math.min(MAX_STEP_HOURS, (now - g.lastTickAt) / 3_600_000 * g.speed);
   if (hours <= 0) return g;
 
   const army = armySize(g.units ?? {});
