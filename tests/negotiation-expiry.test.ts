@@ -96,13 +96,36 @@ test("DAMGALANMIŞ masa da zamanla bitmiş sayılır — geçiş kuralı ile dur
 
 test("arayüz süresi geçmiş masayı 'cevap bekliyor' saymaz", () => {
   // Kalıcı hayalet rozetin kaynağı buydu: agreed/declined dışındaki her masa
-  // bekleyen sayılıyordu. İki sayaç noktası da motor kuralını okumak zorunda.
+  // bekleyen sayılıyordu. Sayaç noktaları motor kuralını okumak zorunda.
   const ui = readFileSync(new URL("../components/KingdomGame.tsx", import.meta.url), "utf8");
-  // İki sayaç noktası kuralı OLUMSUZ okur (`!isExpired`), durum etiketi ise
-  // olumlu okur; ikisini birlikte sayıyoruz.
   const negated = ui.split("!isTimedOut({status:").length - 1;
-  const plain = ui.split(":isTimedOut({status:").length - 1;
   assert.ok(negated >= 2, `bekleyen sayaçlarında motor kuralı eksik: ${negated}`);
-  assert.ok(plain >= 1, `durum etiketinde motor kuralı okunmuyor: ${plain}`);
-  assert.match(ui, /SÜRESİ DOLDU/, "durum etiketinde süresi dolmuş masa karşılığı yok");
+
+  // Durum etiketi TEK bir yardımcıda yaşar (`masaDurumu`) ve o da motor
+  // kuralını okur. Etiket zinciri iki yere kopyalanırsa canlı liste ile geçmiş
+  // listesi aynı masaya iki farklı şey der.
+  const helper = ui.slice(ui.indexOf("function masaDurumu"), ui.indexOf("function masaDurumu") + 900);
+  assert.match(helper, /isTimedOut\(\{status:/, "durum etiketi motor kuralını okumuyor");
+  assert.equal(ui.split("SÜRESİ DOLDU").length - 1, 1,
+    "'SÜRESİ DOLDU' etiketi yalnızca tek yerde yazılmalı");
+  assert.equal(ui.split("\"ANLAŞILDI\"").length - 1, 1,
+    "'ANLAŞILDI' etiketi yalnızca tek yerde yazılmalı");
+});
+
+test("kapanmış masa Kralın önündeki listede DURMAZ, geçmişte durur", () => {
+  // Kural motorda tek yerde (`isClosedTable`), listeyi bölen de tek yer
+  // (`loadTablesFor`). Uçta iki ayrı liste dönüyor.
+  const desk = readFileSync(new URL("../server/negotiation-desk.ts", import.meta.url), "utf8");
+  assert.match(desk, /live: desk\.filter\(row => !isClosedTable/, "canlı liste kuralı olumsuz okumalı");
+  assert.match(desk, /closed: desk\.filter\(row => isClosedTable/, "geçmiş listesi kuralı olumlu okumalı");
+  // General YALNIZCA canlı masaları görür: kapanmış masayı okumak boşa token.
+  assert.match(desk, /loadTablesFor\(userId, channelId\)\)\.live/, "brief canlı listeden beslenmeli");
+
+  const route = readFileSync(new URL("../app/api/negotiate/route.ts", import.meta.url), "utf8");
+  assert.match(route, /desk\.live\.map\(shape\)/, "panel canlı listeyi almalı");
+  assert.match(route, /desk\.closed\.map\(shape\)/, "panel geçmiş listesini de almalı");
+
+  const ui = readFileSync(new URL("../components/KingdomGame.tsx", import.meta.url), "utf8");
+  assert.match(ui, /setEnvoyHistory\(data\.history/, "arayüz geçmişi okumalı");
+  assert.match(ui, /envoy-history/, "geçmiş bölümü çizilmeli");
 });

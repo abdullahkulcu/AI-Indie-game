@@ -122,6 +122,23 @@
 .envoy-actions button{flex:1;padding:6px 10px;font-size:.7rem;letter-spacing:.05em;border:1px solid rgba(214,168,80,.45);border-radius:3px;background:rgba(214,168,80,.18);color:#f2e2be;cursor:pointer}
 .envoy-actions button.ghost{background:transparent;opacity:.75}
 .envoy-actions button:disabled{opacity:.4;cursor:not-allowed}
+/* GEÇMİŞ MASALAR. Kapanmış masa önündeki listeden çıktı; burada katlanmış
+   duruyor. Canlı masalardan görsel olarak AYRILMASI şart, yoksa Kral yine
+   cevap bekleyen bir masa sanır: kenarlık soluk, zemin yok, yazı küçük. */
+.envoy-history{margin-top:10px;border-top:1px solid rgba(255,236,200,.12);padding-top:8px}
+.envoy-history-tab{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:0;border-radius:3px;background:transparent;color:#e8dcc0;cursor:pointer;text-align:left}
+.envoy-history-tab:hover{background:rgba(255,236,200,.06)}
+.envoy-history-tab b{font-size:.68rem;letter-spacing:.1em;opacity:.72}
+.envoy-history-tab i{font-style:normal;font-size:.66rem;padding:1px 6px;border-radius:9px;background:rgba(255,236,200,.12);opacity:.8}
+.envoy-history-tab span{margin-left:auto;opacity:.55;font-size:.7rem}
+.envoy-history-list{margin-top:5px;display:flex;flex-direction:column;gap:5px}
+.envoy-past{border:1px solid rgba(255,236,200,.09);border-radius:4px;padding:6px 9px}
+.envoy-past>summary{display:flex;align-items:baseline;justify-content:space-between;gap:8px;cursor:pointer;list-style:none}
+.envoy-past>summary::-webkit-details-marker{display:none}
+.envoy-past>summary b{font-size:.76rem;opacity:.82;font-weight:600}
+.envoy-past>summary em{font-style:normal;font-size:.64rem;letter-spacing:.06em;opacity:.55}
+.envoy-past[open]>summary{margin-bottom:6px}
+.envoy-past-empty{margin:0;font-size:.72rem;opacity:.5}
 @media(max-width:900px){.envoy-dock{left:14px;top:440px;bottom:auto}.envoy-sheet{max-height:280px}}
 @media(max-width:560px){.envoy-dock{top:372px}}
 

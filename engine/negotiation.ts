@@ -422,6 +422,24 @@ export const DECLINABLE_STATUSES = ["open", SIGNABLE_STATUS] as const;
 export const EXPIRABLE_STATUSES = ["open", SIGNABLE_STATUS] as const;
 
 /**
+ * KAPANMIŞ masa durumları: masanın işi bitmiştir, bir daha söz söylenmez.
+ *
+ * Yukarıdaki iki sabitin AYNISI DEĞİL, tersi de değil — üç ayrı soru:
+ * "Kral reddedebilir mi", "zaman kapatır mı", "bu masa artık geçmiş mi".
+ * `agreed` masası reddedilemez ve süresi dolmaz ama KAPANMIŞTIR: imza atıldı,
+ * masa dağıldı, iş artık anlaşmanın kendisinde (`agreements`) sürüyor.
+ *
+ * Elçilik defteri bu ayrımla ikiye bölünür: önünde duran masalar ve geçmiş.
+ * Kral kapanmış bir masayı "cevap bekliyor" sanmasın, General de kapanmış masayı
+ * okuyup boşa token harcamasın.
+ */
+export const CLOSED_STATUSES = ["agreed", "declined", "expired"] as const;
+
+/** Masanın işi bitti mi? Tek soru, tek yer. */
+export const isClosedTable = (status: NegotiationStatus) =>
+  (CLOSED_STATUSES as readonly NegotiationStatus[]).includes(status);
+
+/**
  * SÜRE DOLDU MU? `canSpeak`'in eşiğiyle AYNI karşılaştırma (`now >= expiresAt`).
  *
  * NEDEN VAR: bu kural bugüne kadar yalnızca `canSpeak` içinde yaşıyordu, yani

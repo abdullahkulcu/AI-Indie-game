@@ -32,7 +32,7 @@ import { defenseOf, watchRatioOf } from "@/engine/raids";
 import { applyPolicy, clampPolicy, POLICY_AUTHORITY_NOTE, POLICY_LABELS, type PolicyKey } from "@/engine/policy";
 // Müzakere sınırları TEK kaynaktan gelir. Panelde elle yazılan bir tavan,
 // sunucunun uyguladığı tavandan sapınca Kral reddedilecek bir şart öneriyor.
-import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, canSpeak, carriesTribute, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
+import { MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT, MAX_TRIBUTE_RATE_PERCENT, TRIBUTE_RESOURCES, canProposeTerms, canSpeak, carriesTribute, isClosedTable, isTimedOut, tributeRateFromPercent, type Negotiation, type NegotiationStatus, type NegotiationTopic, type Side, type Terms } from "@/engine/negotiation";
 import type { Game, GameAction, TerrainId as EngineTerrainId } from "@/engine/types";
 
 
@@ -74,6 +74,21 @@ type Channel={id:string;name:string;detail:string;speed:number;remaining:string;
 type IntelReport={name:string;ruler:string;terrain:string;keepLevel:number;population:number;buildingCount:number;army:number;mood?:string|null};
 type WorldKingdom={id:string;name:string|null;terrain:string;position:{x:number;z:number};ring:number;discovered:boolean;mission:{status:"pending"|"succeeded"|"failed"|"detected";completesAt:number;successChance:number;kind?:"scout"|"deep"}|null;report:IntelReport|null;reportAt?:number|null;reportStale?:boolean};
 type NegotiationTable={id:string;topic:string;status:string;turns:number;side:"initiator"|"target";counterpart:string;proposed:{topic:string;resource?:string;tributeAmount?:number;tributeRate?:number;hours?:number;everyHours?:number}|null;proposedBy:string|null;canAccept:boolean;expiresAt:number;messages:Array<{mine:boolean;speaker:string;body:string;at:number}>};
+/**
+ * Masanın tek satırlık durumu. CANLI masa da GEÇMİŞ masa da buradan okur:
+ * etiket zinciri iki yerde elle yazılsaydı geçmiş listesi bir gün canlı
+ * listeden farklı bir şey derdi. (Etiketlerin tek yerde durduğunu
+ * tests/negotiation-expiry.test.ts iddia ediyor; bu yorumda etiket METNİ
+ * geçmiyor, yoksa sayım ikiye çıkardı.)
+ */
+function masaDurumu(table:NegotiationTable,at:number,maxTurns:number){
+ if(table.status==="awaiting_king")return "ŞART SUNULDU";
+ if(table.status==="agreed")return "ANLAŞILDI";
+ if(table.status==="declined")return "REDDEDİLDİ";
+ // isTimedOut zaten "expired" durumunu da doğru sayar (bkz. engine/negotiation.ts).
+ if(isTimedOut({status:table.status as NegotiationStatus,expiresAt:table.expiresAt},at))return "SÜRESİ DOLDU";
+ return `${table.turns}/${maxTurns} söz`;
+}
 type Agreement={id:string;topic:string;terms:{resource?:string;tributeAmount?:number;tributeRate?:number};iPay:boolean;counterpart:string;endsAt:number;paidCount:number;everyHours:number};
 // `influence`: ORTAK MADENDE BÖLGE SAHİPLİĞİ (plan belgesi Fikir 22).
 // SUNUCUDAN iner ve salt okunurdur; pay oranı da pencere de motorda karara
@@ -101,7 +116,7 @@ const left=(at:number,now:number)=>{const s=Math.max(0,Math.ceil((at-now)/1000))
 
 export default function KingdomGame(){
  const[ready,setReady]=useState(false),[account,setAccount]=useState<Account|null|undefined>(undefined),[setup,setSetup]=useState<Setup>("welcome"),[availableChannels,setAvailableChannels]=useState<Channel[]>(fallbackChannels),[selected,setSelected]=useState<Channel>(fallbackChannels[2]);const[name,setName]=useState(""),[ruler,setRuler]=useState(""),[terrain,setTerrain]=useState<TerrainId>("plain"),[provider,setProvider]=useState<keyof typeof modelOptions>("openai"),[model,setModel]=useState("gpt-5.6-terra"),[apiKey,setApiKey]=useState("");
- const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[envoyAccepts,setEnvoyAccepts]=useState(true),[envoyTerm,setEnvoyTerm]=useState<{tableId:string;mode:"amount"|"rate";value:string;resource:string;payer:"us"|"them";hours:string;everyHours:string;note:string}|null>(null),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<ChatLine[]>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[storedModel,setStoredModel]=useState(""),[storedProvider,setStoredProvider]=useState<keyof typeof modelOptions|"">(""),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[populaceDemands,setPopulaceDemands]=useState<PopulaceDemand[]>([]),[agitation,setAgitation]=useState<AgitationStatus>({accepts:true,cost:600,sentToday:0,perDay:4}),[channelCompare,setChannelCompare]=useState<ChannelCompare|null>(null),[victory,setVictory]=useState<VictoryStanding|null>(null),[channelIndex,setChannelIndex]=useState<ChannelIndex|null>(null),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null),
+ const[game,setGame]=useState<Game|null>(null),[now,setNow]=useState(Date.now()),[tab,setTab]=useState<Tab>("meclis"),[night,setNight]=useState(false),[autoRotate,setAutoRotate]=useState(true),[marketOpen,setMarketOpen]=useState(false),[worldError,setWorldError]=useState<string|null>(null),[negotiationTables,setNegotiationTables]=useState<NegotiationTable[]>([]),[agreementList,setAgreementList]=useState<Agreement[]>([]),[negotiationOpen,setNegotiationOpen]=useState(false),[envoyHistory,setEnvoyHistory]=useState<NegotiationTable[]>([]),[historyOpen,setHistoryOpen]=useState(false),[envoyTarget,setEnvoyTarget]=useState(""),[envoyTopic,setEnvoyTopic]=useState("non_aggression"),[envoyMessage,setEnvoyMessage]=useState(""),[envoyLimits,setEnvoyLimits]=useState({maxTurns:14,maxOpen:3}),[envoyAccepts,setEnvoyAccepts]=useState(true),[envoyTerm,setEnvoyTerm]=useState<{tableId:string;mode:"amount"|"rate";value:string;resource:string;payer:"us"|"them";hours:string;everyHours:string;note:string}|null>(null),[serverChannelId,setServerChannelId]=useState<string|null>(null),[worldView,setWorldView]=useState(false),[message,setMessage]=useState(""),[chat,setChat]=useState<ChatLine[]>([]),[toast,setToast]=useState(""),[connecting,setConnecting]=useState(false),[generalError,setGeneralError]=useState(""),[showConnect,setShowConnect]=useState(false),[tutorialStep,setTutorialStep]=useState<number|null>(null),[cloudReady,setCloudReady]=useState(false),[cloudStatus,setCloudStatus]=useState("BULUT ARANIYOR"),[cloudUser,setCloudUser]=useState(""),[storedByok,setStoredByok]=useState(false),[storedModel,setStoredModel]=useState(""),[storedProvider,setStoredProvider]=useState<keyof typeof modelOptions|"">(""),[replaceByok,setReplaceByok]=useState(false),[otherKingdoms,setOtherKingdoms]=useState<WorldKingdom[]>([]),[worldDefense,setWorldDefense]=useState<{active:boolean;activeUntil:number|null}>({active:false,activeUntil:null}),[incomingAlerts,setIncomingAlerts]=useState(0),[worldHome,setWorldHome]=useState<{x:number;z:number;ring:number;biome:string}>({x:0,z:0,ring:0,biome:"plain"}),[worldExtentValue,setWorldExtentValue]=useState(60),[sharedMine,setSharedMine]=useState<SharedMine|null>(null),[worldBusy,setWorldBusy]=useState(false),[generalRequests,setGeneralRequests]=useState<GeneralRequest[]>([]),[populaceDemands,setPopulaceDemands]=useState<PopulaceDemand[]>([]),[agitation,setAgitation]=useState<AgitationStatus>({accepts:true,cost:600,sentToday:0,perDay:4}),[channelCompare,setChannelCompare]=useState<ChannelCompare|null>(null),[victory,setVictory]=useState<VictoryStanding|null>(null),[channelIndex,setChannelIndex]=useState<ChannelIndex|null>(null),[infoPanel,setInfoPanel]=useState<"hedef"|"yetki"|null>(null),
  // DERİN GÖZETLEMENİN BEDELİ (Fikir 5). Sunucudan iner (app/api/world →
  // intel.deepCost, kaynağı engine/intel.ts); panel kendi kopyasını TUTMAZ.
  // Başlangıç değeri yalnızca ilk çizim içindir, karar sunucudadır.
@@ -157,17 +172,17 @@ export default function KingdomGame(){
    return Math.hypot(position.x,position.z)<=SCENE_REACH?{name:sharedMine.mine.name,totalWorkers:sharedMine.mine.totalWorkers,position}:undefined},[sharedMine,worldHome]);
 
  // Müzakere masaları ve yürürlükteki anlaşmalar.
- useEffect(()=>{if(!game?.channelId){setNegotiationTables([]);setAgreementList([]);return}
+ useEffect(()=>{if(!game?.channelId){setNegotiationTables([]);setEnvoyHistory([]);setAgreementList([]);return}
   let active=true;
   const load=async()=>{try{const response=await fetch("/api/negotiate",{cache:"no-store"});
-    if(!response.ok)return;const data=await response.json() as {tables?:NegotiationTable[];agreements?:Agreement[];limits?:{maxTurns:number;maxOpen:number};acceptsNegotiation?:boolean};
+    if(!response.ok)return;const data=await response.json() as {tables?:NegotiationTable[];history?:NegotiationTable[];agreements?:Agreement[];limits?:{maxTurns:number;maxOpen:number};acceptsNegotiation?:boolean};
     if(!active)return;
     if(typeof data.acceptsNegotiation==="boolean")setEnvoyAccepts(data.acceptsNegotiation);
     const tables=data.tables??[];
     // Karşı taraftan gelen en yeni sözün zamanı; büyüdüyse Kralı uyarırız.
     const latest=Math.max(0,...tables.flatMap(table=>table.messages.filter(message=>!message.mine).map(message=>message.at)));
     const bekleyenMasa=tables.filter(entry=>entry.canAccept
-      ||(entry.status!=="agreed"&&entry.status!=="declined"&&!isTimedOut({status:entry.status as NegotiationStatus,expiresAt:entry.expiresAt},Date.now())&&entry.messages.length>0&&!entry.messages[entry.messages.length-1].mine));
+      ||(!isClosedTable(entry.status as NegotiationStatus)&&!isTimedOut({status:entry.status as NegotiationStatus,expiresAt:entry.expiresAt},Date.now())&&entry.messages.length>0&&!entry.messages[entry.messages.length-1].mine));
     if(lastEnvoySeen.current===null){
       // Hesaba ilk girişte de haber ver: rozet tek başına gözden kaçıyordu.
       if(bekleyenMasa.length)setToast(`Elçilikte sizi bekleyen ${bekleyenMasa.length} masa var.`);
@@ -177,7 +192,7 @@ export default function KingdomGame(){
     }
     lastEnvoySeen.current=latest;
     if(data.limits)setEnvoyLimits(data.limits);
-    setNegotiationTables(tables);setAgreementList(data.agreements??[])}catch{/* sessiz: masa yoksa panel de yok */}};
+    setNegotiationTables(tables);setEnvoyHistory(data.history??[]);setAgreementList(data.agreements??[])}catch{/* sessiz: masa yoksa panel de yok */}};
   negotiationRefresh.current=()=>void load();void load();
   const timer=setInterval(()=>void load(),20_000);
   return()=>{active=false;negotiationRefresh.current=null;clearInterval(timer)}},[game?.channelId]);
@@ -495,7 +510,7 @@ async function openNegotiation(){
     <span>⚑</span><b>MÜZAKERE</b>{bekleyen>0&&<i>{bekleyen}</i>}
    </button>
    {negotiationOpen&&<div className="envoy-sheet">
-    <div className="envoy-head"><b>Elçilik</b><small>{negotiationTables.length} masa · {agreementList.length} anlaşma</small><button onClick={()=>setNegotiationOpen(false)}>✕</button></div>
+    <div className="envoy-head"><b>Elçilik</b><small>{negotiationTables.length} masa · {agreementList.length} anlaşma{envoyHistory.length>0&&` · ${envoyHistory.length} geçmiş`}</small><button onClick={()=>setNegotiationOpen(false)}>✕</button></div>
     <div className={envoyAccepts?"envoy-door":"envoy-door shut"}>
      <div><b>{envoyAccepts?"KAPI AÇIK":"KAPI KAPALI"}</b>
       <span>{envoyAccepts
@@ -543,7 +558,7 @@ async function openNegotiation(){
      const haracVar=carriesTribute(table.topic as NegotiationTopic);
      const form=envoyTerm&&envoyTerm.tableId===table.id?envoyTerm:null;
      return <article className={table.canAccept?"envoy-table pending":"envoy-table"} key={table.id}>
-      <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{table.status==="awaiting_king"?"ŞART SUNULDU":table.status==="agreed"?"ANLAŞILDI":table.status==="declined"?"REDDEDİLDİ":isTimedOut({status:table.status as NegotiationStatus,expiresAt:table.expiresAt},now)?"SÜRESİ DOLDU":`${table.turns}/${envoyLimits.maxTurns} söz`}</small></div>
+      <div className="envoy-title"><b>#{index+1} {table.counterpart}</b><small>{masaDurumu(table,now,envoyLimits.maxTurns)}</small></div>
       <div className="envoy-log">{table.messages.slice(-4).map((message,i)=><p className={message.mine?"mine":""} key={i}>{message.body}</p>)}</div>
       {table.proposed&&<div className="envoy-terms"><span>SUNULAN ŞART</span><b>{özet(table.proposed)}</b></div>}
       {table.canAccept&&<div className="envoy-actions">
@@ -600,6 +615,24 @@ async function openNegotiation(){
         </div>
       </div>}
     </article>})}
+   {/* GEÇMİŞ MASALAR. Kapanmış masa artık önündeki listede durmuyor: Kral onu
+       "cevap bekliyor" sanıp arıyordu. Burada kapanış sırasıyla, katlanmış
+       hâlde duruyor; açan tutanağı okuyabilir. Sayı gösterilmesi şart, yoksa
+       geçmişin var olduğu hiç belli olmaz. */}
+   {envoyHistory.length>0&&<div className="envoy-history">
+    <button className="envoy-history-tab" onClick={()=>setHistoryOpen(x=>!x)} aria-expanded={historyOpen}>
+     <b>GEÇMİŞ MASALAR</b><i>{envoyHistory.length}</i><span>{historyOpen?"▾":"▸"}</span>
+    </button>
+    {historyOpen&&<div className="envoy-history-list">
+     {envoyHistory.map(table=><details className="envoy-past" key={table.id}>
+      <summary><b>{table.counterpart}</b><em>{masaDurumu(table,now,envoyLimits.maxTurns)}</em></summary>
+      {table.proposed&&<div className="envoy-terms"><span>SON ŞART</span><b>{özet(table.proposed)}</b></div>}
+      {table.messages.length>0
+       ?<div className="envoy-log">{table.messages.map((message,i)=><p className={message.mine?"mine":""} key={i}>{message.body}</p>)}</div>
+       :<p className="envoy-past-empty">Bu masada hiç söz söylenmedi.</p>}
+     </details>)}
+    </div>}
+   </div>}
    </div>}
   </div>})()}
 {(()=>{const pazar=marketState(game,now,channelIndex??undefined);

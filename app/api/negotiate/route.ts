@@ -9,7 +9,7 @@ import {
 import { currentUser } from "../../../server/account-auth";
 import { activeMembershipOf } from "../../../server/active-membership";
 import { newId } from "../../../server/ids";
-import { displayNameOf, loadTablesFor, toEngine } from "../../../server/negotiation-desk";
+import { displayNameOf, loadTablesFor, toEngine, type DeskRow } from "../../../server/negotiation-desk";
 import { RATE_LIMITS, consumeRateLimit, rateLimitResponse } from "../../../server/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,13 @@ export async function GET(request: Request) {
   const deals = await getDb().select().from(agreements)
     .where(and(eq(agreements.status, "active"), or(eq(agreements.payerId, user.id), eq(agreements.payeeId, user.id))));
 
-  const tables = await Promise.all(desk.map(async ({ negotiation: row, side, messages }) => {
+  /**
+   * Bir masanın panele çıkan hâli. Aynı biçim iki liste için de kullanılır:
+   * ÖNÜNDE DURAN masalar ve GEÇMİŞ. Biçimi ayırmadım çünkü Kral geçmiş bir
+   * masayı açıp ne konuşulduğunu okuyabilmeli — geçmiş bir özet değil, kapanmış
+   * bir tutanak.
+   */
+  const shape = async ({ negotiation: row, side, messages }: DeskRow) => {
     const otherId = side === "initiator" ? row.targetId : row.initiatorId;
     return {
       id: row.id, topic: row.topic, status: row.status, turns: row.turns, side,
@@ -50,7 +56,12 @@ export async function GET(request: Request) {
       expiresAt: row.expiresAt,
       messages: messages.map(message => ({ mine: message.side === side, speaker: message.speaker, body: message.body, at: message.at })),
     };
-  }));
+  };
+  const tables = await Promise.all(desk.live.map(shape));
+  // Kapanmış masalar ayrı listede. `tables` içinde kalsalardı Kral onları
+  // "cevap bekliyor" sanıp arıyordu; sıra numarası da (General'in
+  // `table_ordinal`ı) kapanmış masaları sayarak kayıyordu.
+  const history = await Promise.all(desk.closed.map(shape));
 
   return json({
     acceptsNegotiation: membership.acceptsNegotiation,
@@ -58,6 +69,7 @@ export async function GET(request: Request) {
     // Panel konu listesini de motordan okusun; elle yazılan üçüncü bir kopya olmasın.
     topics: NEGOTIATION_TOPICS,
     tables,
+    history,
     agreements: await Promise.all(deals.map(async deal => ({
       id: deal.id, topic: deal.topic, terms: JSON.parse(deal.terms) as Terms,
       iPay: deal.payerId === user.id,

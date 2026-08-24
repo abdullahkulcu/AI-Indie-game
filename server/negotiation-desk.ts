@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, lte, or } from "drizzle-orm";
 import { getDb } from "../db";
 import { gameSaves, negotiationMessages, negotiations } from "../db/schema";
-import { EXPIRABLE_STATUSES, sideOf, type Negotiation, type Side, type Terms } from "../engine/negotiation";
+import { EXPIRABLE_STATUSES, isClosedTable, sideOf, type Negotiation, type Side, type Terms } from "../engine/negotiation";
 import { projectPublicKingdom } from "./world-projection";
 import { briefTable, type DeskMessage, type TableBrief } from "./negotiation-brief";
 
@@ -17,6 +17,17 @@ import { briefTable, type DeskMessage, type TableBrief } from "./negotiation-bri
 export const TABLE_LIST_LIMIT = 20;
 
 export type DeskRow = { negotiation: Negotiation; messages: DeskMessage[]; side: Side };
+
+/**
+ * Defterin iki yarısı: ÖNÜNDE DURAN masalar ve GEÇMİŞ.
+ *
+ * Bölme burada yapılır, çağıranlarda DEĞİL. Sebebi sıra numarası: General'in
+ * araç çağrısındaki `table_ordinal` ile Kralın panelde gördüğü sıra AYNI masayı
+ * göstermek zorunda (bkz. dosya başı). İki çağıran ayrı ayrı filtrelerse bir
+ * gün biri filtreyi değiştirir ve numaralar kayar — Kral bir masayı onaylarken
+ * General başka bir masadan konuşur. Tek liste, tek sıra, tek yer.
+ */
+export type Desk = { live: DeskRow[]; closed: DeskRow[] };
 
 /** Satırı motorun anladığı biçime çevirir. Bozuk JSON şartı yok sayılır. */
 export function toEngine(row: typeof negotiations.$inferSelect): Negotiation {
@@ -56,7 +67,7 @@ export async function expireStaleTables(now: number, scope: { channelId?: string
 }
 
 /** Bu Kralın masaları, kanonik sırada (en son konuşulan en üstte). */
-export async function loadTablesFor(userId: string, channelId: string): Promise<DeskRow[]> {
+export async function loadTablesFor(userId: string, channelId: string): Promise<Desk> {
   const db = getDb();
   // Okumadan ÖNCE kapat: Kral defterini açtığı anda süresi geçmiş masayı
   // "açık" görmesin. Kapatılacak bir şey yoksa bu çağrı hiçbir satıra dokunmaz.
@@ -67,18 +78,24 @@ export async function loadTablesFor(userId: string, channelId: string): Promise<
       or(eq(negotiations.initiatorId, userId), eq(negotiations.targetId, userId)),
     ))
     .orderBy(desc(negotiations.lastTurnAt)).limit(TABLE_LIST_LIMIT);
-  if (!rows.length) return [];
+  if (!rows.length) return { live: [], closed: [] };
 
   const messages = await db.select().from(negotiationMessages)
     .where(inArray(negotiationMessages.negotiationId, rows.map(row => row.id)))
     .orderBy(negotiationMessages.at);
 
-  return rows.map(row => ({
+  const desk = rows.map(row => ({
     negotiation: toEngine(row),
     side: sideOf(row, userId)!,
     messages: messages.filter(message => message.negotiationId === row.id)
       .map(message => ({ side: message.side, speaker: message.speaker, body: message.body, at: message.at })),
   }));
+  // Sıra korunur: iki yarı da `lastTurnAt` azalan sırayla, en son hareket eden
+  // en üstte. Geçmişte de en son kapanan masa en üstte olur.
+  return {
+    live: desk.filter(row => !isClosedTable(row.negotiation.status)),
+    closed: desk.filter(row => isClosedTable(row.negotiation.status)),
+  };
 }
 
 /**
@@ -93,7 +110,10 @@ export async function displayNameOf(userId: string, channelName: string) {
 
 /** Masaları modele gösterilecek özete çevirir; sıra numaraları listeyle aynıdır. */
 export async function briefsFor(userId: string, channelId: string, channelName: string): Promise<TableBrief[]> {
-  const desk = await loadTablesFor(userId, channelId);
+  // General YALNIZCA önünde duran masaları görür. Kapanmış masa ona hiç
+  // gösterilmez: söz söyleyemeyeceği bir masayı okumak boşa token, ve
+  // "imzalanmış" bir masayı açık sanıp yeniden pazarlık açmasının önü kesilir.
+  const desk = (await loadTablesFor(userId, channelId)).live;
   // Kendi krallığımızın adı; General bunu bilmezse imzalayacak isim bulamıyor.
   const own = await displayNameOf(userId, channelName);
   return Promise.all(desk.map(async (row, index) => briefTable({
