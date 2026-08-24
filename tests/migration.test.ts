@@ -179,13 +179,31 @@ test("göçmen kervanı yolda hızlı channel'da daha kısa kalır", () => {
 
 // --- Bildirim ------------------------------------------------------------
 
-test("varış bildirimi kimden geldiğini söylemez (bilgi sınırı)", () => {
-  const text = migrationArrivalNotice(7);
+test("varış bildirimi geldikleri sancağı SÖYLER: halk hedefin sınırından geçti", () => {
+  // Bilgi sınırı burada bilinçli olarak asimetrik. Dış kese gizli gönderilir ve
+  // göndereni saklar; göç ise hedefin sınırından geçerek gelir, yani karşılayan
+  // Kral onlara nereden geldiklerini sorabilir. Saklamak fiziksel olarak
+  // tutarsız olurdu.
+  const text = migrationArrivalNotice(7, "Karakale");
   assert.match(text, /^7 kişi/);
-  assert.ok(!/[A-ZÇĞİÖŞÜ][a-zçğıöşü]+kale/.test(text), "kaynak krallığın adı sızmamalı");
+  assert.match(text, /Karakale/, "geldikleri sancağın adı yazılmalı");
+  assert.match(text, /sınır/, "sebebini de söylemeli: sınırdan geçtiler");
+  // Sancağın ne kadar eridiği söylenmez; hedef yalnızca kendi sayımını bilir.
+  assert.ok(!/nüfus[a-zçğıöşü]*\s*\d/.test(text), "kaynağın nüfusu hakkında sayı vermemeli");
 });
 
-test("dönüş bildirimi sayıyı ve SEBEBİ söyler, nereye gidildiğini söylemez", () => {
+test("kaynağın adı çözülemezse varış bildirimi adsız cümleye düşer", () => {
+  // Kaydı okunamayan ya da hesabı silinmiş kaynak: bildirim hiç yazılmamaktan
+  // iyidir, ama uydurma bir ad da yazılmaz.
+  const text = migrationArrivalNotice(7);
+  assert.match(text, /^7 kişi/);
+  assert.match(text, /komşu bir sancaktan/);
+});
+
+test("DÖNÜŞ bildirimi sayıyı ve SEBEBİ söyler, ama nereye gidildiğini SÖYLEMEZ", () => {
+  // Asimetrinin öteki yarısı: Kral kendi sınırından çıkanı uğurlar, komşunun
+  // sınırından geçtiğini görmez. Komşularının konut durumunu göçmenlerinin
+  // dönüşünden öğrenemez.
   const text = migrationReturnNotice(12);
   assert.match(text, /12 kişi/);
   assert.match(text, /bulamadı/, "Kral nüfusunun neden geri geldiğini anlamalı");

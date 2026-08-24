@@ -158,17 +158,45 @@ export function spreadMigrants(count: number, candidates: MigrationCandidate[]):
   };
 }
 
-/** Hedefin defterine düşen bildirim. Kimden geldiği söylenmez — bilgi sınırı korunur (bkz. engine/agitation.ts). */
-export const migrationArrivalNotice = (count: number) =>
-  `${count} kişi komşu bir sancaktan göç etti; nüfusunuz arttı.`;
+/**
+ * HEDEFİN defterine düşen bildirim. Geldikleri sancağın ADINI SÖYLER.
+ *
+ * BİLGİ SINIRI BURADA ASİMETRİKTİR VE BU BİLİNÇLİ. Dış kese
+ * (`engine/agitation.ts`) gönderenin adını saklar, çünkü kese gizlice
+ * gönderilir. Göç öyle değil: halk hedefin SINIRINDAN GEÇEREK gelir, yani
+ * karşılayan Kral onlara nereden geldiklerini sorabilir. Saklamak fiziksel
+ * olarak tutarsız olurdu.
+ *
+ * Ters yön saklı KALIR: göç edenin kaynağı, halkının nereye gittiğini
+ * ÖĞRENMEZ (bkz. `migrationReturnNotice`). Kral kendi sınırından çıkanı
+ * uğurlar, komşunun sınırından geçtiğini görmez.
+ *
+ * Ad sızıntısı değil: `displayNameOf` adı PUBLIC projeksiyondan okur
+ * (`server/world-projection.ts` → `projectPublicKingdom`), yani dünya
+ * haritasının zaten gösterdiği bilgi. Yeni bir istihbarat kanalı açılmıyor,
+ * var olan bilgi okunabilir hâle geliyor.
+ *
+ * EK SESSİZLİK: sancağın nüfusunun ne kadar eridiği söylenmez, yalnızca
+ * "buradan geldiler". Kaç kişi geldiği hedefin kendi sayımıdır.
+ *
+ * `from` boşsa (kaynağın kaydı okunamıyor, hesabı silinmiş) eski, adsız
+ * cümleye düşer — bildirim hiç yazılmamaktan iyidir.
+ */
+export const migrationArrivalNotice = (count: number, from = "") =>
+  from
+    ? `${count} kişi ${from} sancağından göç etti; sınırınızdan geçip yerleştiler.`
+    : `${count} kişi komşu bir sancaktan göç etti; nüfusunuz arttı.`;
 
 /**
  * KAYNAĞIN defterine düşen bildirim: gidecek yer bulamayıp geri dönen halk.
  *
- * Nereye gitmeye çalıştıkları söylenmez — bilgi sınırı burada da geçerli;
- * Kral komşularının konut durumunu göçmenlerinin dönüşünden öğrenmez. Cümle
- * SEBEBİ söyler ("yer bulamadı") çünkü Kralın gördüğü tek şey nüfusunun geri
- * gelmesi olurdu ve bunu bir hata sanabilirdi.
+ * Nereye gitmeye çalıştıkları SÖYLENMEZ ve bu, varış bildiriminin tam
+ * tersidir (bkz. `migrationArrivalNotice`): gelen halk hedefin sınırından
+ * geçtiği için adres verir, giden halk kendi Kralına adres bırakmaz. Kral
+ * komşularının konut durumunu göçmenlerinin dönüşünden öğrenmez.
+ *
+ * Cümle SEBEBİ söyler ("yer bulamadı") çünkü Kralın gördüğü tek şey nüfusunun
+ * geri gelmesi olurdu ve bunu bir hata sanabilirdi.
  */
 export const migrationReturnNotice = (count: number) =>
   `Göç eden ${count} kişi kendine yeni bir yurt bulamadı ve geri döndü.`;

@@ -738,6 +738,10 @@ async function settleAgitations(now: number) {
  *      `count` yalnızca HÂLÂ YOLDA OLAN kişiye iner ve bir sonraki tur yeniden
  *      denenir. Kimse silinmez; Kral konut kurunca kervan varır.
  *
+ * BİLGİ SINIRI ASİMETRİK: varan halk hedefin defterine GELDİĞİ SANCAĞIN ADIYLA
+ * yazılır (sınırdan geçtiler, sorulur ve söylerler), ama kaynağın defterine
+ * nereye gittikleri YAZILMAZ. İki yön aynı olay değil.
+ *
  * `count` alanının anlamı bu yüzden "yola çıkan" değil "hâlâ yol alan"dır.
  * Alan başka hiçbir yerde okunmuyor (tek okuyucu bu fonksiyon), bu yüzden
  * azaltmak hiçbir görüntüyü bozmaz.
@@ -750,14 +754,14 @@ async function settleAgitations(now: number) {
  */
 async function settleMigrations(now: number) {
   const db = getDb();
-  const due = await db.select({ row: migrations })
+  const due = await db.select({ row: migrations, channelName: channels.name })
     .from(migrations)
     .innerJoin(channels, eq(channels.id, migrations.channelId))
     .where(and(eq(migrations.status, "pending"), lte(migrations.completesAt, now), eq(channels.status, "active")))
     .orderBy(migrations.completesAt);
 
   let landed = 0, returned = 0, travelling = 0;
-  for (const { row } of due) {
+  for (const { row, channelName } of due) {
     const members = await db.select({ userId: channelMembers.userId }).from(channelMembers)
       .where(and(eq(channelMembers.channelId, row.channelId), eq(channelMembers.status, "active")));
     const candidateIds = members.map(member => member.userId).filter(id => id !== row.sourceUserId);
@@ -777,6 +781,15 @@ async function settleMigrations(now: number) {
     })));
 
     // 1. AŞAMA — hedeflere yerleşenler.
+    //
+    // Kaynağın adı YALNIZCA yerleşecek biri varsa çözülür (fazladan sorgu
+    // atmamak için) ve adı TEK yerden okunur: `displayNameOf` public
+    // projeksiyondan okuyor, yani dünya haritasının zaten gösterdiği ad.
+    // Karşılayan Kral bunu bilmeye hak kazanır çünkü halk onun SINIRINDAN
+    // geçerek geliyor (bkz. engine/migration.ts → migrationArrivalNotice).
+    const sourceName = spread.allocations.length
+      ? await displayNameOf(row.sourceUserId, channelName)
+      : "";
     let placed = 0, conflicted = 0;
     for (const allocation of spread.allocations) {
       const target = parsed.find(entry => entry.userId === allocation.userId)!;
@@ -787,7 +800,7 @@ async function settleMigrations(now: number) {
         // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
         // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
         peopleJoined: (target.save.peopleJoined ?? 0) + allocation.count,
-        notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(allocation.count), at: now }, ...target.save.notices].slice(0, 20),
+        notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(allocation.count, sourceName), at: now }, ...target.save.notices].slice(0, 20),
       });
       // Yazma sürüm çakışmasıyla düşerse bu pay EVE DÖNMEZ, YOLDA KALIR: hedef
       // hâlâ uygun, yalnızca kaydı bu arada değişti. Bir sonraki tur aynı
