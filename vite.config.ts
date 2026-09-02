@@ -3,10 +3,7 @@ import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 
-const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
-  "00000000-0000-4000-8000-000000000000";
-
-const { d1, r2 } = hostingConfig;
+const { r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -14,15 +11,12 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-        },
-      ]
-    : [],
+  // D1 kasıtlı olarak yok: env.DB kodda hiç okunmuyor (oyun verisi Postgres'te,
+  // bkz. scripts/migrate-d1-to-postgres.ts) ve workerd'in D1'i emüle etmek için
+  // yazdığı SQLite dosyası bazı sandbox/dosya sistemlerinde (fcntl/mmap
+  // kilitlemesi desteklenmeyince) "disk I/O error: SQLITE_IOERR" ile
+  // çöküyordu. Kullanılmayan binding'i kaydetmeyince workerd SQLite'a hiç
+  // dokunmuyor.
   r2_buckets: r2
     ? [
         {
