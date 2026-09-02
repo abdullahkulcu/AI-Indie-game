@@ -60,13 +60,20 @@ services:
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
       - node_modules:/app/node_modules
       - vinext_cache:/app/.vinext
-      # workerd, D1/DO durumunu .wrangler altına SQLite dosyası olarak yazar;
-      # bind-mount üzerinde dosya kilitleme/mmap güvenilir değil ve
-      # "disk I/O error: SQLITE_IOERR" ile çöküyor. .next/types altına route
-      # tiplerini yazarken de aynı bind-mount "Unknown system error -35"
-      # veriyor. İkisini de gerçek Docker hacmine taşımak sorunu çözer.
-      - wrangler_state:/app/.wrangler
-      - next_cache:/app/.next
+    # workerd, kullanılmayan D1 binding'i (env.DB — kodda hiçbir yerde
+    # okunmuyor) için bile .wrangler altına SQLite dosyası yazıyor. SQLite'ın
+    # ihtiyaç duyduğu fcntl/mmap kilitlemesi bazı Docker depolama arka
+    # uçlarında (fuse-overlayfs, ağ/VM tabanlı hacimler) normal dosya
+    # yazımı çalışsa bile desteklenmiyor ve "disk I/O error: SQLITE_IOERR"
+    # ile çöküyor; .next/types altına route tiplerini yazarken de aynı katman
+    # "Unknown system error -35" veriyor. Adi bir named volume bunu düzeltmedi
+    # (node_modules'te sorun yok ama disk kilitlemesi hâlâ arızalı), o yüzden
+    # ikisini de RAM tabanlı tmpfs'e alıyoruz: gerçek POSIX kilitleme her
+    # zaman çalışır. İçerikleri zaten gitignore'da ve geliştirmede tek
+    # kullanımlık; oyun verisi burada DEĞİL, Postgres'te (postgres_data).
+    tmpfs:
+      - /app/.wrangler
+      - /app/.next
     depends_on:
       postgres: {condition: service_healthy}
     environment:
@@ -142,5 +149,3 @@ volumes:
   postgres_data: {}
   node_modules: {}
   vinext_cache: {}
-  wrangler_state: {}
-  next_cache: {}
