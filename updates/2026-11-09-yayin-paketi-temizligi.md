@@ -11,7 +11,9 @@ mimari/yayın belgeleri korunmuştur. Yayın denetiminde eksik olan son iki Diva
 göç kaydı da sıralı göç defterine eklendi.
 Üretim başlatmasında derleme çıktısının salt-okunur kaynak ağacına yazılamadığı
 görüldü. Kaynak ağacı yazılabilir yapılmadan, kapsayıcı başlangıcında geçici bir
-çalışma alanına kopyalanıp derleme yalnız orada yapıldı.
+çalışma alanına kopyalanıp derleme yalnız orada yapıldı. macOS'ta geçici bellek
+alanı çalıştırılabilir ikili dosyalara izin vermediği için bu alan kapsayıcıya
+özel, çalıştırılabilir bir Docker hacmine taşındı.
 
 ## Neden
 

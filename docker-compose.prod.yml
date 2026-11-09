@@ -31,9 +31,11 @@ services:
     # kalkan bir sunucu "relation ... does not exist" ile 500 döner ve hatayı
     # oyuncular bulur.
     command: >
-      sh -c "tar -C /app
+      sh -c "find /runtime -mindepth 1 -maxdepth 1 -exec rm -rf {} + &&
+      tar -C /app
       --exclude=node_modules --exclude=dist --exclude=.next --exclude=.vinext
-      --exclude=.wrangler --exclude=.git --exclude=.dev.vars -cf - . |
+      --exclude=.wrangler --exclude=.git --exclude=.dev.vars
+      --exclude=.claude/worktrees -cf - . |
       tar -C /runtime -xf - &&
       npm ci --include=dev --no-audit --no-fund &&
       npx drizzle-kit migrate &&
@@ -41,9 +43,9 @@ services:
       npm start"
     volumes:
       - .:/app:ro
-    # Vinext derlemesi ve bağımlılıklar yalnız geçici çalışma alanına yazılır.
-    tmpfs:
-      - /runtime
+      # Derleme ve bağımlılıklar yalnız kapsayıcıya ait, çalıştırılabilir
+      # hacme yazılır; kaynak ağacı salt-okunur kalır.
+      - runtime:/runtime
     healthcheck:
       # Derleme ilk açılışta uzun sürer; dev sunucusundan geç hazır olur.
       start_period: 300s
@@ -59,3 +61,6 @@ services:
 
   cron:
     restart: unless-stopped
+
+volumes:
+  runtime: {}
