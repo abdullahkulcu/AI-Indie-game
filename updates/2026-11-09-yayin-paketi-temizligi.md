@@ -16,6 +16,8 @@ alanı çalıştırılabilir ikili dosyalara izin vermediği için bu alan kapsa
 özel, çalıştırılabilir bir Docker hacmine taşındı.
 Üretim başlangıcı ayrıca Cloudflare bağlarını destekleyen Worker çalışma zamanına
 alındı; Node sunucusu bu bağları çözemediği için zamanlayıcı çağrısı 500 dönüyordu.
+Worker yapılandırmasının aradığı gizli ayar dosyası yalnız geçici çalışma alanına
+yerleştirildi; kaynak ağacı ve sürüm kaydı dışında kalmaya devam eder.
 
 ## Neden
 
