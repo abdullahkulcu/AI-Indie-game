@@ -14,6 +14,8 @@ görüldü. Kaynak ağacı yazılabilir yapılmadan, kapsayıcı başlangıcınd
 çalışma alanına kopyalanıp derleme yalnız orada yapıldı. macOS'ta geçici bellek
 alanı çalıştırılabilir ikili dosyalara izin vermediği için bu alan kapsayıcıya
 özel, çalıştırılabilir bir Docker hacmine taşındı.
+Üretim başlangıcı ayrıca Cloudflare bağlarını destekleyen Worker çalışma zamanına
+alındı; Node sunucusu bu bağları çözemediği için zamanlayıcı çağrısı 500 dönüyordu.
 
 ## Neden
 
