@@ -23,7 +23,7 @@ import { SOLDIER_THRESHOLDS } from "./populace";
  * (bkz. server/populace-voice.ts).
  */
 
-export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "kiyas";
+export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "shortfall" | "kiyas";
 
 export type DemandSeverity = "normal" | "urgent";
 
@@ -59,6 +59,8 @@ export const VOICE_THRESHOLDS = {
   roof: { occupancy: .95, urgent: 1, hours: 2 },
   joy: { mood: 38, ration: 90, urgent: 25, hours: 2 },
   wage: { unrest: SOLDIER_THRESHOLDS.demand, urgent: SOLDIER_THRESHOLDS.desertion, hours: 2 },
+  /** Ferman ile fiilî dağıtım arasındaki makas; halk boş vaat sayar. */
+  shortfall: { gap: 20, urgent: 45, hours: 4 },
   /**
    * SESSİZ KIYASLAMA (plan belgesindeki Fikir 13). Diğer kalemler krallığın
    * MUTLAK hâline bakar; bu kalem tek istisnadır: halk kendini komşuların
@@ -108,6 +110,10 @@ const MAX_LEVEL = 6;
 export type VoiceSignals = {
   /** Fiilen dağıtılabilen yiyecek istihkakı (%), kâğıt üstündeki oran değil. */
   servedFood: number;
+  /** Fermanla ilan edilen oranlar ve fiilen ulaşan karşılıkları. */
+  foodRation?: number;
+  servedPay?: number;
+  soldierPay?: number;
   /** `engine/market.ts → livingCost` geçim endeksi. 1 = normal. */
   livingCost: number;
   taxRate: number;
@@ -153,6 +159,8 @@ const levelOf = (signals: VoiceSignals, type: string) =>
 export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] {
   const demands: DemandCandidate[] = [];
   const food = Number(signals.servedFood) || 0;
+  const foodGap = Math.max(0, (Number(signals.foodRation) || 0) - food);
+  const payGap = Math.max(0, (Number(signals.soldierPay) || 0) - (Number(signals.servedPay) || 0));
   const index = Number.isFinite(signals.livingCost) ? signals.livingCost : 1;
   const mood = Number(signals.popularity) || 0;
   const unrest = Number(signals.soldierUnrest) || 0;
@@ -182,6 +190,22 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
         ? `Kışlada firar başladı; huzursuzluk ${Math.round(unrest)} puan. Adamlar maaş defterinin açılmasını istiyor.`
         : `Garnizon maaşını istiyor; huzursuzluk ${Math.round(unrest)} puana çıktı.`,
       satisfiedBy: { actions: ["set_soldier_pay"] },
+    });
+  }
+
+  // Kral fermanı gerçekten vermiş olabilir; fakat ambar/maaş yetmediğinde halk
+  // sonucu ayrı bir hesap sorma olarak görür. Bu, ek ceza değil mevcut açlık
+  // ve huzursuzluğun doğrudan görünür dilidir.
+  const shortfall = Math.max(foodGap, payGap);
+  if (shortfall >= VOICE_THRESHOLDS.shortfall.gap) {
+    const urgent = shortfall >= VOICE_THRESHOLDS.shortfall.urgent;
+    demands.push({
+      kind: "shortfall", voice: payGap > foodGap ? "garrison" : "commons",
+      severity: urgent ? "urgent" : "normal", minGameHours: VOICE_THRESHOLDS.shortfall.hours,
+      text: payGap > foodGap
+        ? `Maaş fermanı tam yazılı ama kışlaya eksik ulaşıyor; askerler sözün tutulmasını istiyor.`
+        : `Ferman tam istihkak diyor ama sofraya eksik pay geliyor; halk sözün tutulmasını istiyor.`,
+      satisfiedBy: { actions: payGap > foodGap ? ["set_soldier_pay"] : ["set_food_ration", "trade_resource"] },
     });
   }
 
@@ -423,6 +447,7 @@ export const DEMAND_SUBJECT: Record<DemandKind, string> = {
   roof: "konutların dolması; başlarına damaltı istiyorlar",
   joy: "hayatın tatsızlaşması; bir şenlik ya da meydan eğlencesi istiyorlar",
   wage: "kışlada maaşın ödenmemesi; maaş defterinin açılmasını istiyorlar",
+  shortfall: "fermanla vaat edilen payın halka fiilen ulaşmaması; verilen sözün tutulmasını istiyorlar",
   kiyas: "komşu sancaklarda hayatın daha kolay görünmesi; aynı düzeni kendi kapılarında istiyorlar",
 };
 
@@ -484,5 +509,5 @@ export function garrisonMood(unrest: number, army: number): GarrisonMood {
   if (level >= SOLDIER_THRESHOLDS.demand) {
     return { id: "demanding", label: "Maaş istiyor", note: "Adamlar maaşını istiyor: yeni asker eğitimi geri çevrilir." };
   }
-  return { id: "steady", label: "Sakin", note: "Kışla sakin; bütün emirler yürür." };
+  return { id: "steady", label: "Sakin", note: "Kışla sakin; tüm emirler uygulanabilir." };
 }

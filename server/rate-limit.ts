@@ -13,6 +13,8 @@ export const RATE_LIMITS = {
   register: { scope: "register", limit: 5, windowMs: 60 * 60_000 },
   adminLogin: { scope: "admin-login", limit: 5, windowMs: 15 * 60_000 },
   general: { scope: "general", limit: 40, windowMs: 60 * 60_000 },
+  /** Divan üç araçsız model görüşü üretir; oyuncu başına saatte en çok 24 kurul. */
+  council: { scope: "council", limit: 24, windowMs: 60 * 60_000 },
   /**
    * Müzakere yazma emirleri. Masa açma ve söz hakkı zaten engine/negotiation.ts
    * içindeki canOpen/canSpeak ile tavanlı; ama `set_open` hiçbir kurala takılmıyor
@@ -31,6 +33,8 @@ export const RATE_LIMITS = {
    * sınıra değmez ama saniyede onlarca istek atan bir betik değer.
    */
   negotiateRead: { scope: "negotiate-read", limit: 600, windowMs: 60 * 60_000 },
+  /** Sefer mühürleri ve doktrin değişiklikleri; Kralın kendi emri sınırlanır. */
+  war: { scope: "war", limit: 30, windowMs: 60 * 60_000 },
   /**
    * Krallık kaydı (`PUT /api/save`).
    *

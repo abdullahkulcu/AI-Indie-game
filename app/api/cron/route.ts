@@ -4,13 +4,13 @@ import { applyActions } from "../../../engine/actions";
 import { capacityFor, tick } from "../../../engine/tick";
 import type { Game, GameAction, Key } from "../../../engine/types";
 import { getDb } from "../../../db";
-import { agitations, agreements, channelMembers, channels, gameSaves, intelDefenses, llmCredentials, migrations, negotiationMessages, negotiations, pendingDecisions, standingOrders } from "../../../db/schema";
+import { agitations, agreements, channelMembers, channels, gameSaves, intelDefenses, llmCredentials, mercenaryContracts, migrations, negotiationMessages, negotiations, pendingDecisions, spyNetworks, standingOrders, wars } from "../../../db/schema";
 import {
   AGITATION, AGITATION_NOTICE, type AgitationKind,
   agitationExposedNotice, agitationSenderNotice, applyAgitation, applyGlut, applyLure,
 } from "../../../engine/agitation";
 import { isTraded } from "../../../engine/market";
-import { arrivingMigrants, migrationArrivalNotice, pickMigrationTarget } from "../../../engine/migration";
+import { distributeMigrants, migrationArrivalNotice, migrationReturnNotice } from "../../../engine/migration";
 import { queueEmigrants } from "../../../server/migration-desk";
 import {
   LIMITS, MAX_KING_NOTE_LENGTH, MAX_MESSAGE_LENGTH, MISSES_BEFORE_BREACH, TRIBUTE_TOPICS,
@@ -19,18 +19,32 @@ import {
   type Side, type Terms, type TributeSettlement,
 } from "../../../engine/negotiation";
 import { reputationChange } from "../../../engine/diplomacy";
-import { OFFLINE_DESK_PROMPT, briefTable, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta } from "../../../server/negotiation-brief";
+import { briefTable, offlineDeskPrompt, offlineDeskTools, payerSideOf, renderNegotiationTranscript, tableMeta } from "../../../server/negotiation-brief";
 // Sağlayıcı çağrısı paylaşılan modülden gelir; bu dosyada artık `fetch` yok.
 import { callProvider } from "../../../server/llm-provider";
+import { aiGuidedSystemPrompt } from "../../../server/ai-guides";
 import { displayNameOf, toEngine } from "../../../server/negotiation-desk";
 import { decryptByok } from "../../../server/byok-crypto";
 import { pruneExpiredSessions } from "../../../server/account-auth";
 import { noteToKing } from "../../../server/king-notice";
 import { pruneRateLimits } from "../../../server/rate-limit";
-import { WAKE_INTERVAL_MS, compactContext, rollDailyWindow, shouldWake, type StandingOrder } from "../../../server/night-shift";
-import { parseStoredSave } from "../../../server/save-validation";
+import { WAKE_INTERVAL_MS, compactContext, nightActionLimit, nightLedgerEvents, plannedNightActions, rollDailyWindow, shouldWake, successfulNightActions, type StandingOrder } from "../../../server/night-shift";
+import { appendToLedger } from "../../../server/general-ledger";
+import { parseStoredSave, type GameSave } from "../../../server/save-validation";
 // Koşullu (sürüm korumalı) yazma tek kopyadır; ortak maden de aynı kapıyı kullanır.
 import { writeSaveIfUnchanged } from "../../../server/save-write";
+import { refreshDueCouncilBriefings } from "../../../server/council-briefing";
+import { refreshDuePopulaceFeeds } from "../../../server/populace-feed";
+import { refreshDueFactionCoalitions } from "../../../server/faction-coalition";
+import { refreshDueFateEvents } from "../../../server/fate-desk";
+import { generalNameFor } from "../../../engine/general-name";
+import { propagandaReception } from "../../../engine/populace-persona";
+import { survivorUnitExperience } from "../../../engine/units";
+import { ACTIVE_WAR_STATUSES, advanceWars } from "../../../server/war-desk";
+import { populaceCredentialFor } from "../../../server/populace-ai-desk";
+import { propagandaNarrator } from "../../../server/propaganda-narrator";
+import { intelReportOf, projectPublicKingdom } from "../../../server/world-projection";
+import { spyNetworkReportMs } from "../../../engine/intelligence";
 
 export const dynamic = "force-dynamic";
 const headers = { "cache-control": "no-store" };
@@ -39,19 +53,19 @@ type WakeReport = { userId: string; acted: boolean; detail: string; tokensUsed: 
 
 /** Gece vardiyasında General yalnızca bu araçları kullanabilir; hepsi tek adımlıktır. */
 const nightTools = [
-  { name: "build_structure", description: "Bir yapı kurar veya bir seviye yükseltir.", parameters: { type: "object", properties: { building_type: { type: "string" }, target_level: { type: "integer" } }, required: ["building_type", "target_level"], additionalProperties: false } },
-  { name: "train_unit", description: "Mızrakçı eğitir.", parameters: { type: "object", properties: { unit_type: { type: "string", enum: ["spearman"] }, count: { type: "integer", minimum: 1, maximum: 20 } }, required: ["unit_type", "count"], additionalProperties: false } },
-  { name: "host_festival", description: "Halkın rızasını artırmak için şenlik düzenler.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+  { name: "night_plan", description: "Bu uyanışta uygulanacak, sıralı ve güvenli gece planını verir. Her eylem yalnız build_structure, train_unit veya host_festival olabilir.", parameters: { type: "object", properties: { actions: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", properties: { name: { type: "string", enum: ["build_structure", "train_unit", "host_festival"] }, arguments: { type: "object" } }, required: ["name", "arguments"], additionalProperties: false } } }, required: ["actions"], additionalProperties: false } },
   { name: "no_action", description: "Bu saatte beklemek daha doğruysa hiçbir şey yapma.", parameters: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"], additionalProperties: false } },
 ];
 
-const NIGHT_PROMPT = [
-  "Sen Demirkale'deki General Aldric'sin ve Kral uyurken tek bir karar veriyorsun.",
-  "Kralın kalıcı gece emrine sadık kal. Bu uyanmada EN FAZLA BİR araç çağır.",
-  "Yalnızca `secenekler` listesinde gerçekten bulunan bir eylemi seç; listede olmayanı önerme.",
+function nightPrompt(generalName: string, actionLimit: number) {
+  return [
+  `Sen Demirkale'deki ${generalName}'sın ve Kral uyurken sınırlı bir gece planı hazırlıyorsun.`,
+  `Kralın kalıcı gece emrine sadık kal. Bu uyanmada en fazla ${actionLimit} eylem seç; planı night_plan aracına sırayla yaz.`,
+  "Yalnızca `secenekler` listesinde gerçekten bulunan bir eylemi seç; liste dışı eylem uydurma.",
   "Acil durum bildirildiyse kalıcı emrin önüne geçebilirsin, ama gerekçeni tek cümleyle yaz.",
-  "Beklemek daha doğruysa no_action çağır. Uzun açıklama yazma; en fazla iki cümle.",
+  "Beklemek daha doğruysa no_action çağır. Aynı kuyrukta çakışacak iki iş planlama. Uzun açıklama yazma; en fazla iki cümle.",
 ].join("\n");
+}
 
 /**
  * Arka plandaki tek sağlayıcı çağrısı ARTIK BU DOSYADA DEĞİL: gövdesi
@@ -76,8 +90,9 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
 
   const game = tick(stored as Game, now);
   const order: StandingOrder = { ...row, lastRunAt: row.lastRunAt ?? null };
-  const window = rollDailyWindow(order, now);
-  const decision = shouldWake({ ...order, ...window }, game, now);
+  const window = rollDailyWindow(order, now, game.speed);
+  const activeOrder = { ...order, ...window };
+  const decision = shouldWake(activeOrder, game, now);
 
   // Ön eleme: model çağrılmadan karar verilir, bu uyanma sıfır token harcar.
   if (!decision.act) return finish(decision.reason, false, false);
@@ -109,31 +124,33 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     const apiKey = await decryptByok(credential.encryptedKey, credential.iv, env.BYOK_MASTER_KEY, row.userId, credential.provider, credential.model, credential.keyVersion);
     proposed = await callProvider({
       provider: credential.provider, model: credential.model, apiKey,
-      system: NIGHT_PROMPT, tools: nightTools,
-      user: `DURUM=${JSON.stringify(compactContext(game, order, decision))}`,
+      system: aiGuidedSystemPrompt("general", nightPrompt(generalNameFor(game.kingdomName, game.foundedAt), nightActionLimit(activeOrder))), tools: nightTools,
+      user: `DURUM=${JSON.stringify(compactContext(game, activeOrder, decision))}`,
     });
   } catch (error) {
     return finish(`Sağlayıcı hatası: ${error instanceof Error ? error.message : "bilinmiyor"}`, false, true);
   }
-  if (!proposed || proposed.name === "no_action") {
+  const planned = plannedNightActions(proposed, nightActionLimit(activeOrder));
+  if (!planned.length) {
     return finish(`General beklemeyi seçti: ${String(proposed?.arguments.reason ?? "gerekçe yok")}`, false, true);
   }
 
   // Yalnızca öneri yetkisi varsa uygulamayız; Kralın onayına bırakılır.
   if (row.autonomy === "ask") {
+    const proposedAction = planned[0];
     await db.insert(pendingDecisions).values({
-      userId: row.userId, action: JSON.stringify(proposed), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposed.name}`]),
+      userId: row.userId, action: JSON.stringify(proposedAction), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposedAction.name}`]),
       riskLevel: "elevated", expiresAt: now + 12 * 3_600_000,
     }).onConflictDoUpdate({
       target: pendingDecisions.userId,
-      set: { action: JSON.stringify(proposed), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposed.name}`]), riskLevel: "elevated", expiresAt: now + 12 * 3_600_000 },
+      set: { action: JSON.stringify(proposedAction), reasons: JSON.stringify([`Gece emriniz gereği önerim: ${proposedAction.name}`]), riskLevel: "elevated", expiresAt: now + 12 * 3_600_000 },
     });
-    return finish(`Öneri hazırlandı, onayınız bekleniyor: ${proposed.name}`, false, true);
+    return finish(`Öneri hazırlandı, onayınız bekleniyor: ${proposedAction.name}`, false, true);
   }
 
-  const applied = applyActions(game, [proposed], now);
-  const succeeded = applied.results.some(line => line.startsWith("✓"));
-  const summary = applied.results[0] ?? "Motor eylemi uygulamadı.";
+  const applied = applyActions(game, planned, now);
+  const succeeded = successfulNightActions(planned, applied.results);
+  const summary = applied.results.join(" ") || "Motor eylemi uygulamadı.";
   const next: Game = {
     ...applied.game,
     notices: [{ kind: "GECE VARDİYASI", text: summary.replace(/^[✓✕] /, ""), at: now }, ...applied.game.notices].slice(0, 20),
@@ -145,8 +162,8 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
     const [fresh] = await db.select().from(gameSaves).where(eq(gameSaves.userId, row.userId)).limit(1);
     const freshGame = fresh ? parseStoredSave(fresh.gameState) : null;
     if (!freshGame) return finish("Kayıt bu arada değişti; hamle uygulanmadı.", false, true);
-    const redone = applyActions(tick(freshGame as Game, now), [proposed], now);
-    const ok = redone.results.some(line => line.startsWith("✓"));
+    const redone = applyActions(tick(freshGame as Game, now), planned, now);
+    const ok = successfulNightActions(planned, redone.results);
     const again = { ...redone.game, notices: [{ kind: "GECE VARDİYASI", text: (redone.results[0] ?? summary).replace(/^[✓✕] /, ""), at: now }, ...redone.game.notices].slice(0, 20) };
     const retried = await writeSaveIfUnchanged(row.userId, fresh!.revision, again);
     if (!retried) return finish("Kayıt eşzamanlı değişti; hamle atlandı.", false, true);
@@ -160,8 +177,12 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
         before: freshGame.peopleLeft, after: redone.game.peopleLeft, now,
       });
     } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
-    if (ok) await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
-    return finish(redone.results[0] ?? summary, ok, true);
+    if (ok.length) {
+      const kinds = nightLedgerEvents(again, ok.map(action => action.name));
+      if (kinds.length) await appendToLedger(row.userId, kinds, now);
+      await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + ${ok.length}` }).where(eq(standingOrders.id, row.id));
+    }
+    return finish(redone.results.join(" ") || summary, ok.length > 0, true);
   }
   // Göç kuyruğu: `stored` (bu turun BAŞINDAKİ kayıt) ile `applied.game` (bu
   // turun SONUNDA GERÇEKTEN yazılan durum) arasındaki `peopleLeft` farkı.
@@ -171,10 +192,12 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
       before: stored.peopleLeft, after: applied.game.peopleLeft, now,
     });
   } catch { /* göç kuyruğu düşerse bile gece vardiyası düşmesin */ }
-  if (succeeded) {
-    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + 1` }).where(eq(standingOrders.id, row.id));
+  if (succeeded.length) {
+    const kinds = nightLedgerEvents(next, succeeded.map(action => action.name));
+    if (kinds.length) await appendToLedger(row.userId, kinds, now);
+    await db.update(standingOrders).set({ actionsToday: sql`${standingOrders.actionsToday} + ${succeeded.length}` }).where(eq(standingOrders.id, row.id));
   }
-  return finish(summary, succeeded, true);
+  return finish(summary, succeeded.length > 0, true);
 }
 
 /**
@@ -193,6 +216,18 @@ async function runOne(row: typeof standingOrders.$inferSelect, now: number): Pro
 const NEGOTIATION_REPLY_BUDGET = 4;
 
 type DeskReport = { negotiationId: string; userId: string; spoke: boolean; detail: string; tokensUsed: boolean };
+
+/**
+ * Süresi geçen masayı yalnız ekrandan saklamak yetmez: sonraki sorguların,
+ * Generalin ve denetimin aynı gerçeği görmesi için kalıcı durum da kapanır.
+ * Koşul iki cronun aynı masayı birlikte işlememesini sağlar.
+ */
+async function expireNegotiations(now: number) {
+  const rows = await getDb().update(negotiations).set({ status: "expired", lastTurnAt: now })
+    .where(and(inArray(negotiations.status, ["open", "awaiting_king"]), lte(negotiations.expiresAt, now)))
+    .returning({ id: negotiations.id });
+  return rows.length;
+}
 
 /** Haraç turunun raporu; `error` doluysa tur düşmüştür ama cron ayaktadır. */
 type TributeRound = { deals: number; paid: number; missed: number; error: string | null };
@@ -282,7 +317,7 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
       const apiKey = await decryptByok(credential.encryptedKey, credential.iv, env.BYOK_MASTER_KEY, userId, credential.provider, credential.model, credential.keyVersion);
       call = await callProvider({
         provider: credential.provider, model: credential.model, apiKey,
-        system: OFFLINE_DESK_PROMPT, tools: offlineDeskTools(canPropose),
+        system: aiGuidedSystemPrompt("general", offlineDeskPrompt(generalNameFor(game.kingdomName, game.foundedAt))), tools: offlineDeskTools(canPropose),
         user: transcript ? `DURUM=${JSON.stringify(context)}\n\n${transcript}` : `DURUM=${JSON.stringify(context)}`,
         maxTokens: 600,
       });
@@ -314,6 +349,9 @@ async function answerNegotiations(now: number): Promise<DeskReport[]> {
           // kurulmadan önce tributeRate'i yazan tek yer clampTerms'ti ve hiçbir
           // araç şeması oran sunmadığı için oranlı haraç hiç kurulamıyordu.
           tributeRate: tributeRateFromPercent(call.arguments.rate_percent),
+          lessorSide: payerSideOf(call.arguments.lessor, side),
+          mercenaryCount: Math.floor(Number(call.arguments.mercenary_count) || 0),
+          mercenaryFee: Math.floor(Number(call.arguments.mercenary_fee) || 0),
           everyHours: Math.floor(Number(call.arguments.every_hours) || 6),
           hours: Math.floor(Number(call.arguments.hours) || 24),
         }),
@@ -528,6 +566,69 @@ async function settleTributes(now: number) {
 }
 
 /**
+ * Süresi dolmuş Kiralık Birlik sözleşmelerini kapatır. Sözleşmeli askerler
+ * aktif seferdeyse dönüş ertelenir: savaş alanındaki sayı garnizondan ayrı
+ * tutulduğu için onları erken geri çağırmak ya da kayıpları yanlış nüfusa
+ * yazmak mümkün değildir. Sefer bitince ilk vardiyada sağ kalanlar döner.
+ */
+async function settleMercenaryContracts(now: number) {
+  const db = getDb();
+  const due = await db.select().from(mercenaryContracts)
+    .where(and(eq(mercenaryContracts.status, "active"), lte(mercenaryContracts.endsAt, now)));
+  let settled = 0, delayed = 0;
+  for (const contract of due) {
+    const [activeWar] = await db.select({ id: wars.id }).from(wars).where(and(
+      or(eq(wars.attackerId, contract.renterId), eq(wars.defenderId, contract.renterId)),
+      inArray(wars.status, ACTIVE_WAR_STATUSES),
+    )).limit(1);
+    if (activeWar) { delayed += 1; continue; }
+    const [lessorRow, renterRow] = await Promise.all([
+      db.select().from(gameSaves).where(eq(gameSaves.userId, contract.lessorId)).limit(1),
+      db.select().from(gameSaves).where(eq(gameSaves.userId, contract.renterId)).limit(1),
+    ]);
+    const lessor = lessorRow[0] ? parseStoredSave(lessorRow[0].gameState) : null;
+    const renter = renterRow[0] ? parseStoredSave(renterRow[0].gameState) : null;
+    if (!lessor || !renter) continue;
+    // Tek aktif kiracı sözleşmesi sayesinde bu birlik sayısı başka bir
+    // sözleşmeye ait olamaz. Kayıp, başlangıç sayısı ile sağ kalan farkıdır.
+    const survivors = Math.min(contract.count, Math.max(0, Math.floor(Number(renter.units.mercenary) || 0)));
+    const lost = Math.max(0, contract.count - survivors);
+    const nextLessor = {
+      ...lessor,
+      population: lessor.population + survivors,
+      notices: [{ kind: "KİRALIK BİRLİK", text: `${survivors} Kiralık Birlik sözleşme sonunda döndü.${lost ? ` ${lost} asker seferlerde kaybedildi.` : " Kayıp verilmedi."}`, at: now }, ...lessor.notices].slice(0, 20),
+    };
+    const nextRenter = {
+      ...renter,
+      units: { ...renter.units, mercenary: Math.max(0, (renter.units.mercenary ?? 0) - survivors) },
+      unitExperience: survivorUnitExperience({ ...renter.units, mercenary: Math.max(0, (renter.units.mercenary ?? 0) - survivors) }, renter.unitExperience),
+      notices: [{ kind: "KİRALIK BİRLİK", text: `Kiralık birlik sözleşmesi sona erdi; ${survivors} sağ kalan birlik kiralayan krallığa döndü.${lost ? ` ${lost} kayıp onların nüfusuna yazıldı.` : ""}`, at: now }, ...renter.notices].slice(0, 20),
+    };
+    const completed = await db.transaction(async trx => {
+      const [lessorWritten] = await trx.update(gameSaves)
+        .set({ gameState: JSON.stringify(nextLessor), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(and(eq(gameSaves.userId, contract.lessorId), eq(gameSaves.revision, lessorRow[0]!.revision)))
+        .returning({ userId: gameSaves.userId });
+      if (!lessorWritten) return false;
+      const [renterWritten] = await trx.update(gameSaves)
+        .set({ gameState: JSON.stringify(nextRenter), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+        .where(and(eq(gameSaves.userId, contract.renterId), eq(gameSaves.revision, renterRow[0]!.revision)))
+        .returning({ userId: gameSaves.userId });
+      if (!renterWritten) { trx.rollback(); return false; }
+      const [closed] = await trx.update(mercenaryContracts).set({ status: "completed", returnedAt: now })
+        .where(and(eq(mercenaryContracts.id, contract.id), eq(mercenaryContracts.status, "active")))
+        .returning({ id: mercenaryContracts.id });
+      if (!closed) { trx.rollback(); return false; }
+      await trx.update(agreements).set({ status: "completed" })
+        .where(and(eq(agreements.id, contract.agreementId), eq(agreements.status, "active")));
+      return true;
+    }).catch(() => false);
+    if (completed) settled += 1;
+  }
+  return { due: due.length, settled, delayed };
+}
+
+/**
  * DIŞ KESELERİN VARIŞI.
  *
  * Omurga: maliyet gönderenin kaydından zaten düşmüştü (POST /api/world, tek
@@ -560,6 +661,13 @@ async function settleAgitations(now: number) {
     const [shield] = await db.select().from(intelDefenses).where(eq(intelDefenses.userId, row.targetUserId)).limit(1);
     const exposed = Boolean(shield?.activeUntil && shield.activeUntil > row.completesAt);
     const kind = row.kind as AgitationKind;
+    // Propaganda anlatısı hedefin kendi Halk-AI kimliğinden gelir. Anahtar
+    // yoksa veya sağlayıcı susarsa mevcut şablon bildirim korunur; operasyon
+    // hiçbir zaman model yanıtına bağlı kalmaz.
+    const populaceCredential = (kind === "gold_commons" || kind === "support_movement")
+      ? await populaceCredentialFor(row.targetUserId, env.BYOK_MASTER_KEY)
+      : null;
+    const reception = populaceCredential ? propagandaReception(populaceCredential.persona) : 1;
     // Mal kesesi yığın taşıyıcısına, altın kesesi baskı/kese taşıyıcılarına
     // yazar. İkisi ayrı silahtır: mal kesesi muhalefet baskısı üretmez, çünkü bol
     // mal rızayı yükseltir ve ikisi bindirilirse birbirini götürür.
@@ -569,9 +677,12 @@ async function settleAgitations(now: number) {
         // Yönlendirme `completesAt`e damgalanır; akın penceresi bu damgayı
         // pencerenin BAŞLANGICINA göre okur, yani sonuç iki okumada da aynı.
         ? applyLure({ ...target, speed }, row.completesAt)
-        : applyAgitation({ ...target, speed }, kind, row.completesAt);
+        : applyAgitation({ ...target, speed }, kind, row.completesAt, reception);
     const senderName = exposed ? await displayNameOf(row.sourceUserId, channelName) : "";
-    const text = exposed ? agitationExposedNotice(senderName, kind) : AGITATION_NOTICE[kind];
+    const narrated = !exposed && kind === "gold_commons" && populaceCredential
+      ? await propagandaNarrator(populaceCredential)(kind)
+      : null;
+    const text = exposed ? agitationExposedNotice(senderName, kind) : narrated ?? AGITATION_NOTICE[kind];
 
     const written = await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, {
       ...target,
@@ -596,12 +707,88 @@ async function settleAgitations(now: number) {
   return { due: due.length, landed, exposed: exposedCount };
 }
 
+/** Aynı kronik satırının tekrar yazılmasını, yarım kalmış cron yeniden denemesinde önler. */
+function networkNotice(game: GameSave, kind: string, text: string, at: number): GameSave {
+  if (game.notices.some(notice => notice.kind === kind && notice.text === text)) return game;
+  return { ...game, notices: [{ kind, text, at }, ...game.notices].slice(0, 20) };
+}
+
+/**
+ * Kalıcı casus ağları. Ağ hedefe vardığında ve her rapor turunda karşı
+ * istihbarat o anda açıksa doğrudan açığa çıkar; aksi halde açık istihbarat
+ * raporu yenilenir. Zar yoktur ve rapor metni model çağrısı gerektirmez.
+ */
+async function settleSpyNetworks(now: number) {
+  const db = getDb();
+  const due = await db.select({ row: spyNetworks, speed: channels.speed, channelName: channels.name })
+    .from(spyNetworks).innerJoin(channels, eq(channels.id, spyNetworks.channelId))
+    .where(and(eq(channels.status, "active"), or(
+      and(eq(spyNetworks.status, "deploying"), lte(spyNetworks.deploysAt, now)),
+      and(eq(spyNetworks.status, "active"), lte(spyNetworks.nextReportAt, now)),
+    )))
+    .orderBy(spyNetworks.deploysAt);
+
+  let activated = 0, refreshed = 0, exposed = 0;
+  for (const { row, speed, channelName } of due) {
+    const [sourceRows, targetRows, defenseRows] = await Promise.all([
+      db.select().from(gameSaves).where(eq(gameSaves.userId, row.sourceUserId)).limit(1),
+      db.select().from(gameSaves).where(eq(gameSaves.userId, row.targetUserId)).limit(1),
+      db.select().from(intelDefenses).where(eq(intelDefenses.userId, row.targetUserId)).limit(1),
+    ]);
+    const sourceRow = sourceRows[0];
+    const targetRow = targetRows[0];
+    const shield = defenseRows[0];
+    const source = sourceRow ? parseStoredSave(sourceRow.gameState) : null;
+    const target = targetRow ? parseStoredSave(targetRow.gameState) : null;
+    if (!source || !target) continue;
+    const at = row.status === "deploying" ? row.deploysAt : row.nextReportAt ?? now;
+    const defended = Boolean(shield?.activeUntil && shield.activeUntil > at);
+    const targetName = await displayNameOf(row.targetUserId, channelName);
+    if (defended) {
+      const sourceName = await displayNameOf(row.sourceUserId, channelName);
+      const targetText = `Karşı-istihbarat nöbeti şüpheli faaliyeti açığa çıkardı: ${sourceName} hedefimizde casus ağı kurmaya çalışıyordu.`;
+      const sourceText = `${targetName} karşı-istihbaratı ağımızı açığa çıkardı; hat kapandı ve karşı taraf göndereni öğrendi.`;
+      const targetWritten = await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, networkNotice(target, "İSTİHBARAT", targetText, at));
+      if (!targetWritten) continue;
+      const sourceWritten = await writeSaveIfUnchanged(row.sourceUserId, sourceRow!.revision, networkNotice(source, "İSTİHBARAT", sourceText, at));
+      if (!sourceWritten) continue;
+      await db.update(spyNetworks).set({ status: "exposed", exposedAt: at }).where(and(eq(spyNetworks.id, row.id), or(eq(spyNetworks.status, "deploying"), eq(spyNetworks.status, "active"))));
+      exposed += 1;
+      continue;
+    }
+    const publicTarget = projectPublicKingdom(row.targetUserId, targetRow!.gameState, channelName);
+    if (!publicTarget) continue;
+    const report = intelReportOf(publicTarget);
+    const nextReportAt = at + spyNetworkReportMs(speed);
+    const sourceText = row.status === "deploying"
+      ? `${targetName} içinde casus ağımız yerleşti; ilk rapor Defter'e işlendi.`
+      : `${targetName} içindeki casus ağımız yeni bir rapor gönderdi.`;
+    const targetText = row.status === "deploying"
+      ? "Sınırda şüpheli bir faaliyet sezildi; kaynağı henüz belirlenemedi. Karşı-istihbarat nöbeti kurmak hattı açığa çıkarabilir."
+      : "Şüpheli faaliyet sürüyor; karşı-istihbarat nöbeti kurmak hattı açığa çıkarabilir.";
+    const targetWritten = row.status === "deploying"
+      ? await writeSaveIfUnchanged(row.targetUserId, targetRow!.revision, networkNotice(target, "İSTİHBARAT", targetText, at))
+      : true;
+    if (!targetWritten) continue;
+    const sourceWritten = await writeSaveIfUnchanged(row.sourceUserId, sourceRow!.revision, networkNotice(source, "İSTİHBARAT", sourceText, at));
+    if (!sourceWritten) continue;
+    const changed = await db.update(spyNetworks).set({
+      status: "active", lastReportAt: at, latestReport: JSON.stringify(report), nextReportAt,
+    }).where(and(eq(spyNetworks.id, row.id), eq(spyNetworks.status, row.status))).returning({ id: spyNetworks.id });
+    if (changed.length) {
+      if (row.status === "deploying") activated += 1;
+      else refreshed += 1;
+    }
+  }
+  return { due: due.length, activated, refreshed, exposed };
+}
+
 /**
  * GÖÇÜN VARIŞI (Faz 6).
  *
  * Kaynaktan ayrılan halk, kuyruğa alındığı anda DEĞİL, cron bu satırı işlerken
- * o anın GÜNCEL aday listesinden seçilen TEK bir hedefe gider (bkz.
- * engine/migration.ts → pickMigrationTarget). Hedef kuyruğa alma anında
+ * o anın GÜNCEL aday listesine kapasite ve çekiciliğe göre DAĞILIR (bkz.
+ * engine/migration.ts → distributeMigrants). Hedef kuyruğa alma anında
  * SEÇİLMEZ: aradaki sürede adayların boş konutu değişmiş olabilir, "an
  * fotoğrafı" hemen bayatlardı.
  *
@@ -612,9 +799,8 @@ async function settleAgitations(now: number) {
  * istismar yüzeyi açardı (kuruluşun hemen ardından sürekli göçmen alıp normalde
  * imkânsız bir hızda büyümek gibi).
  *
- * Hedef seçilemezse (uygun aday yok ya da hiçbirinde boş konut kalmamış)
- * göçmenler kaybolur — bu, `tick()`'in bugüne kadarki davranışının aynısı;
- * FARK şu ki artık ÇOĞU zaman gerçekten bir yer buluyorlar.
+ * Yer bulamayan göçmen kaynak krallığa döner. Böylece nüfus, aday darlığı ya da
+ * eşzamanlı kayıt çakışması yüzünden hiçbir zaman sessizce kaybolmaz.
  */
 async function settleMigrations(now: number) {
   const db = getDb();
@@ -624,10 +810,7 @@ async function settleMigrations(now: number) {
     .where(and(eq(migrations.status, "pending"), lte(migrations.completesAt, now), eq(channels.status, "active")))
     .orderBy(migrations.completesAt);
 
-  const settle = (id: string) =>
-    db.update(migrations).set({ status: "settled", settledAt: now }).where(and(eq(migrations.id, id), eq(migrations.status, "pending")));
-
-  let landed = 0, lost = 0;
+  let landed = 0, returned = 0;
   for (const { row } of due) {
     const members = await db.select({ userId: channelMembers.userId }).from(channelMembers)
       .where(and(eq(channelMembers.channelId, row.channelId), eq(channelMembers.status, "active")));
@@ -642,36 +825,59 @@ async function settleMigrations(now: number) {
       .filter(entry => entry.save && entry.save.protectionEndsAt <= now)
       .map(entry => ({ userId: entry.userId, revision: entry.revision, save: entry.save! }));
 
-    const pick = parsed.length
-      ? pickMigrationTarget(
-          parsed.map(entry => ({
-            userId: entry.userId, population: entry.save.population,
-            capacity: capacityFor(entry.save.buildings), popularity: entry.save.popularity,
-          })),
-          row.id,
-        )
-      : null;
-    if (!pick) { lost += row.count; await settle(row.id); continue; }
+    const distribution = distributeMigrants(parsed.map(entry => ({
+      userId: entry.userId, population: entry.save.population,
+      capacity: capacityFor(entry.save.buildings), popularity: entry.save.popularity,
+    })), row.count);
+    const recipients = distribution.allocations.map(allocation => ({
+      ...parsed.find(entry => entry.userId === allocation.userId)!,
+      count: allocation.count,
+    }));
+    const [sourceRow] = distribution.unplaced > 0
+      ? await db.select({ userId: gameSaves.userId, gameState: gameSaves.gameState, revision: gameSaves.revision })
+          .from(gameSaves).where(eq(gameSaves.userId, row.sourceUserId)).limit(1)
+      : [];
+    const source = sourceRow ? { ...sourceRow, save: parseStoredSave(sourceRow.gameState) } : null;
+    const sourceSave = source?.save ?? null;
+    // Kaynak kaydı okunamıyorsa yer bulamayan nüfusu kaybetmeyiz; satır
+    // pending kalır ve sonraki vardiyada yeniden denenir.
+    if (distribution.unplaced > 0 && !sourceSave) continue;
 
-    const target = parsed.find(entry => entry.userId === pick.userId)!;
-    const arrived = arrivingMigrants(row.count, pick.room);
-    if (arrived <= 0) { lost += row.count; await settle(row.id); continue; }
-
-    const written = await writeSaveIfUnchanged(target.userId, target.revision, {
-      ...target.save,
-      population: target.save.population + arrived,
-      // Kaynağı ne olursa olsun "krallığa katılan" ledger'ıdır (bkz.
-      // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
-      // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
-      peopleJoined: (target.save.peopleJoined ?? 0) + arrived,
-      notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(arrived), at: now }, ...target.save.notices].slice(0, 20),
-    });
-    // Yazma düşerse satır PENDING kalır; sonraki tur GÜNCEL adaylarla yeniden dener.
-    if (!written) continue;
-    landed += arrived;
-    await settle(row.id);
+    const settled = await db.transaction(async trx => {
+      for (const target of recipients) {
+        const written = await writeSaveIfUnchanged(target.userId, target.revision, {
+          ...target.save,
+          population: target.save.population + target.count,
+          // Kaynağı ne olursa olsun "krallığa katılan" ledger'ıdır (bkz.
+          // engine/tick.ts). Yeni bir taşıyıcı alan açmak yerine mevcut deftere
+          // yazılır — tek doğru kaynak, ikinci bir "nereden geldi" alanı yok.
+          peopleJoined: (target.save.peopleJoined ?? 0) + target.count,
+          notices: [{ kind: "GÖÇ", text: migrationArrivalNotice(target.count), at: now }, ...target.save.notices].slice(0, 20),
+        }, trx);
+        if (!written) { trx.rollback(); return false; }
+      }
+      if (distribution.unplaced > 0) {
+        const written = await writeSaveIfUnchanged(row.sourceUserId, source!.revision, {
+          ...sourceSave!,
+          population: sourceSave!.population + distribution.unplaced,
+          peopleJoined: (sourceSave!.peopleJoined ?? 0) + distribution.unplaced,
+          notices: [{ kind: "GÖÇ", text: migrationReturnNotice(distribution.unplaced), at: now }, ...sourceSave!.notices].slice(0, 20),
+        }, trx);
+        if (!written) { trx.rollback(); return false; }
+      }
+      const [closed] = await trx.update(migrations).set({ status: "settled", settledAt: now })
+        .where(and(eq(migrations.id, row.id), eq(migrations.status, "pending")))
+        .returning({ id: migrations.id });
+      if (!closed) { trx.rollback(); return false; }
+      return true;
+    }).catch(() => false);
+    // Tüm hedefler, dönüş ve kuyruk satırı TEK işlemde kapanır. Bir oyuncunun
+    // kaydı bu arada değiştiyse işlem geri alınır; kimse çift yazılmaz.
+    if (!settled) continue;
+    landed += row.count - distribution.unplaced;
+    returned += distribution.unplaced;
   }
-  return { due: due.length, landed, lost };
+  return { due: due.length, landed, returned };
 }
 
 /**
@@ -748,11 +954,33 @@ export async function POST(request: Request) {
   let purses = { due: 0, landed: 0, exposed: 0 };
   try { purses = await settleAgitations(now); }
   catch { purses = { due: 0, landed: 0, exposed: 0 }; }
+  // Kalıcı casus ağı tamamen sunucu ritminde ilerler. İstemcinin ekranı açması
+  // rapor üretmez; yalnızca Defter'e yazılmış sonucu gösterir.
+  let networks = { due: 0, activated: 0, refreshed: 0, exposed: 0 };
+  try { networks = await settleSpyNetworks(now); }
+  catch { networks = { due: 0, activated: 0, refreshed: 0, exposed: 0 }; }
   // Yolda olan göçmenler: aynı sarma gerekçesi, bu turun düşmesi diğer
   // turları etkilemesin (bkz. settleMigrations).
-  let migrationRound = { due: 0, landed: 0, lost: 0 };
+  let migrationRound = { due: 0, landed: 0, returned: 0 };
   try { migrationRound = await settleMigrations(now); }
-  catch { migrationRound = { due: 0, landed: 0, lost: 0 }; }
+  catch { migrationRound = { due: 0, landed: 0, returned: 0 }; }
+  // Sefer zaman çizelgesi LLM veya istemciye bağlı değildir. Aynı koşullu
+  // geçiş, cron iki kez çağrılsa bile yürüyüş/temas kaydını bir kez üretir.
+  let warsAdvanced = 0;
+  try { warsAdvanced = await advanceWars(now); }
+  catch { warsAdvanced = 0; }
+  // Kiralık birlik, aktif seferden dönmeden garnizondan ayrılamaz. Savaş
+  // çizelgesi ilerledikten sonra bakılır ki aynı cron turunda dönenler de
+  // sözleşme sonunda doğru nüfusa dönebilsin.
+  let mercenaries = { due: 0, settled: 0, delayed: 0 };
+  try { mercenaries = await settleMercenaryContracts(now); }
+  catch { mercenaries = { due: 0, settled: 0, delayed: 0 }; }
+  // Süre dolan masa, masadan kaldırılmış gibi görünse bile veritabanında açık
+  // kalmamalı. Bu geçiş LLM çağrısından önce yapılır; General eski bir masaya
+  // tek token bile harcamaz.
+  let expiredNegotiations = 0;
+  try { expiredNegotiations = await expireNegotiations(now); }
+  catch { expiredNegotiations = 0; }
   // Kral çevrimdışıyken masada bekleyen cevap; imza atılmaz, yalnızca konuşulur.
   let desks: DeskReport[] = [];
   try { desks = await answerNegotiations(now); }
@@ -763,16 +991,50 @@ export async function POST(request: Request) {
     try { reports.push(await runOne(row.order, now)); }
     catch (error) { reports.push({ userId: row.order.userId, acted: false, detail: `Hata: ${error instanceof Error ? error.message : "bilinmiyor"}`, tokensUsed: false }); }
   }
+  // Divan gündemi istemci ekranı açıldığında değil, bu oyun ritminde üretilir.
+  // Okunmamış belge bir oyun günü boyunca beklerse bir sonraki Divan hem
+  // hatırlatır hem de açık gündemin baskısını ölçülü biçimde ilerletir.
+  let council: Array<{ userId: string; generated: boolean; penalized: boolean }> = [];
+  let councilFailed = false;
+  try { council = await refreshDueCouncilBriefings(now, env.BYOK_MASTER_KEY); }
+  catch {
+    council = [];
+    // Bakım yanıtı, sessizce boş bir Divan raporu dönmek yerine sorunun
+    // yaşandığını bildirir; sağlayıcı ya da veritabanı ayrıntısı dışarı çıkmaz.
+    councilFailed = true;
+  }
+  // Halk güncesi talep ya da oyun sonucu değildir. Cron bağlamı gerçekten
+  // değişmedikçe ve Halk-AI kimliği olmadıkça model çağrısı yapmaz.
+  let populaceFeed: Array<{ userId: string; generated: boolean }> = [];
+  try { populaceFeed = await refreshDuePopulaceFeeds(now, env.BYOK_MASTER_KEY); }
+  catch { populaceFeed = []; }
+  // Örgütlü muhalefet varsa, Halk-AI koalisyon masasına yalnızca bir kez söz
+  // getirir. Açık talep ve aynı ret seviyesi yeniden token harcamaz.
+  let coalitions: Array<{ userId: string; generated: boolean }> = [];
+  try { coalitions = await refreshDueFactionCoalitions(now, env.BYOK_MASTER_KEY); }
+  catch { coalitions = []; }
+  // Kader, General'in kendiliğinden açtığı nadir ikilemdir. Model çağrısı ve
+  // ferman yoktur; yalnızca eşik geçildiğinde bir kez kalıcı bir kart açılır.
+  let fate: Array<{ userId: string; created: boolean }> = [];
+  try { fate = await refreshDueFateEvents(now); }
+  catch { fate = []; }
   return Response.json({
     ranAt: new Date(now).toISOString(),
     considered: rows.length,
     swept,
     tributes,
     agitations: purses,
+    networks,
     migrations: migrationRound,
-    negotiations: { spoke: desks.filter(desk => desk.spoke).length, reports: desks },
+    wars: { advanced: warsAdvanced },
+    mercenaries,
+    negotiations: { expired: expiredNegotiations, spoke: desks.filter(desk => desk.spoke).length, reports: desks },
     acted: reports.filter(report => report.acted).length,
     llmCalls: reports.filter(report => report.tokensUsed).length + desks.filter(desk => desk.tokensUsed).length,
+    council: { generated: council.filter(report => report.generated).length, penalized: council.filter(report => report.penalized).length, reports: council, failed: councilFailed },
+    populaceFeed: { generated: populaceFeed.filter(report => report.generated).length, reports: populaceFeed },
+    coalitions: { generated: coalitions.filter(report => report.generated).length, reports: coalitions },
+    fate: { created: fate.filter(report => report.created).length, reports: fate },
     reports,
   }, { headers });
 }

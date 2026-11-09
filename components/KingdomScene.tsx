@@ -25,6 +25,8 @@ type Props = {
   autoRotate?: boolean;
   /** Determinizm tohumu: aynı krallık her açılışta aynı sahneyi üretir. */
   seedKey?: string;
+  /** Sahnedeki bir yapı veya etiketi seçildiğinde gerçek oyun arayüzünü açar. */
+  onBuildingSelect?: (type: string) => void;
 };
 
 /** Bir eve düşen ortalama nüfus ve sahnedeki ev tavanı; 500 nüfusta sahne çökmemeli. */
@@ -46,8 +48,10 @@ export default function KingdomScene({
   night, keepLevel = 1, developed = false, terrain = "plain", constructionName,
   kingdoms = [], sharedMine, buildings = [], population = 0, capacity = 0,
   army = 0, watchRatio = 40, mood = "content", autoRotate = true, seedKey = "demirkale",
+  onBuildingSelect,
 }: Props) {
   const mount = useRef<HTMLDivElement>(null); const nightRef = useRef(night);
+  const buildingSelectRef = useRef(onBuildingSelect);
   // Ruh hâli ve nöbet oranı sık değişir; imzaya girselerdi sahne her değişimde
   // baştan kurulurdu. Bunlar ref'ten okunur, animasyon döngüsü davranışı CANLI
   // günceller ve tek bir geometri bile yeniden yaratılmaz.
@@ -66,6 +70,7 @@ export default function KingdomScene({
   useEffect(() => { moodRef.current = mood; watchRef.current = watchRatio; }, [mood, watchRatio]);
   // Dönüşü açıp kapatmak sahneyi yeniden kurmamalı; ref'ten okunur.
   useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
+  useEffect(() => { buildingSelectRef.current = onBuildingSelect; }, [onBuildingSelect]);
   useEffect(() => {
     const host = mount.current; if (!host) return;
     const plan = terrainPlans[terrain] ?? terrainPlans.plain;
@@ -124,6 +129,7 @@ export default function KingdomScene({
     };
 
     const detail=new THREE.Group(), castle=new THREE.Group();
+    castle.userData.buildingType="keep";
     // Figürler ayrı gruptadır: uzaklaşınca yalnızca onlar gizlenir. Eskiden
     // binalar da bu gruptaydı ve Kral uzaklaşınca şehir tamamen kayboluyordu.
     const figures=new THREE.Group(); scene.add(detail,castle,figures);
@@ -601,6 +607,7 @@ export default function KingdomScene({
     slots.forEach(slot=>{
       const build=builders[slot.item.type];if(!build)return;
       const group=new THREE.Group();group.position.set(slot.x,0,slot.z);group.rotation.y=-slot.angle+Math.PI/2;
+      group.userData.buildingType=slot.item.type;
       const level=Math.max(1,Math.min(6,slot.item.level||1));
       group.scale.setScalar(.84+Math.min(4,level)*.055); // Seviye ölçeği: Sv.1 ile Sv.3 gözle ayrılır.
       detail.add(group);build(group,level);
@@ -616,7 +623,7 @@ export default function KingdomScene({
       for(let i=0;i<4;i++){const angle=i*Math.PI/2,x=Math.cos(angle)*radius,z=Math.sin(angle)*radius,facing=-angle+Math.PI/2;
         // Sur parçası yarıçapa DİK durmalı; `-angle` onu radyal çeviriyor ve dört
         // parça kaleyi saracağına artı işareti gibi duruyordu.
-        const segment=box(radius*1.5,height,thickness,0x8e8578,x,height/2,z);segment.rotation.y=facing;
+        const segment=box(radius*1.5,height,thickness,0x8e8578,x,height/2,z);segment.rotation.y=facing;segment.userData.buildingType="wall";
         for(let c=-radius*.7;c<=radius*.7;c+=1.5)merlons.push({x:x+Math.cos(facing)*c,z:z+Math.sin(facing)*c,y:height+.28,rot:facing})}
       scatter(geom(`merlon${thickness}`,()=>new THREE.BoxGeometry(.6,.55,thickness)),mat(0x6f6a61),merlons);
       for(let i=0;i<4;i++){const angle=i*Math.PI/2+Math.PI/4,x=Math.cos(angle)*radius*1.08,z=Math.sin(angle)*radius*1.08;
@@ -816,12 +823,17 @@ export default function KingdomScene({
     if(mineVisible){const {x,z}=sharedMine.position;const mineRegion=add(geom("mineRegion",()=>new THREE.CircleGeometry(8,28)),mat(0x8d6f3f),x,-.01,z);mineRegion.rotation.x=-Math.PI/2;mineRegion.castShadow=false;for(const offset of[-2,0,2])cone(1.8,3.5,0x54534d,x+offset,1.75,z+(offset%4));box(4.8,2,2.4,0x57402e,x,1,z+4);}
     const network=[...kingdoms.slice(0,40).map(kingdom=>line([0,0],[kingdom.position.x,kingdom.position.z],kingdom.discovered?0xd6a53f:0x8d7e61)),...(mineVisible?[line([0,0],[sharedMine.position.x,sharedMine.position.z],0xc59a43)]:[])];
 
-    const labels:Array<{el:HTMLSpanElement;pos:THREE.Vector3;wide:boolean}>=[];
-    const label=(text:string,x:number,y:number,z:number,wide=false)=>{const el=document.createElement("span");el.className="world-label";el.textContent=text;host.appendChild(el);labels.push({el,pos:new THREE.Vector3(x,y,z),wide});};
+    const labels:Array<{el:HTMLElement;pos:THREE.Vector3;wide:boolean}>=[];
+    const label=(text:string,x:number,y:number,z:number,wide=false,buildingType?:string)=>{
+      const el=document.createElement(buildingType?"button":"span");
+      el.className=buildingType?"world-label building-label":"world-label";el.textContent=text;
+      if(buildingType){el.setAttribute("type","button");el.setAttribute("aria-label",`${text} ayrıntılarını aç`);el.addEventListener("click",()=>buildingSelectRef.current?.(buildingType));}
+      host.appendChild(el);labels.push({el,pos:new THREE.Vector3(x,y,z),wide});
+    };
     label(`${keepLevel===1?"AHŞAP KALE":"KALE"} · SV.${keepLevel}`,0,keepLevel===1?5.5:9,0);
     if(constructionName)label(`⚒ İNŞAAT · ${constructionName}`,constructionName.startsWith("Kale")?0:16,7,constructionName.startsWith("Kale")?0:-4);
     // Her yapı kendi adını ve seviyesini taşır; oyuncu "7 yapım var" dediğinde 7 etiket görür.
-    placed.forEach(item=>label(`${(buildingNames.get(item.type)??item.type).toLocaleUpperCase("tr")} · SV.${item.level}`,item.x,item.type==="wall"?4.5:5.2,item.z));
+    placed.forEach(item=>label(`${(buildingNames.get(item.type)??item.type).toLocaleUpperCase("tr")} · SV.${item.level}`,item.x,item.type==="wall"?4.5:5.2,item.z,false,item.type));
     // Etiket mahallenin AĞIRLIK MERKEZİNE otursun; sabit nokta evleri ıskalıyordu.
     if(homes.length)label(`⌂ MAHALLE · ${homes.length} HANE`,homes.reduce((sum,home)=>sum+home.x,0)/homes.length,3.4,homes.reduce((sum,home)=>sum+home.z,0)/homes.length);
     // Komşuya etiket yok: uzaktan yalnızca bir kale silueti seçilir, kim
@@ -830,7 +842,17 @@ export default function KingdomScene({
     terrainLabels.forEach(([text,x,y,z])=>label(text,x,y,z,true));
 
     const update=()=>{camera.position.set(Math.sin(theta)*46,35,Math.cos(theta)*46);camera.lookAt(0,1,0);camera.zoom=zoom;camera.updateProjectionMatrix();};update();let dragging=false,lastX=0,raf=0;
-    const down=(e:PointerEvent)=>{dragging=true;lastX=e.clientX;},up=()=>{dragging=false;},move=(e:PointerEvent)=>{if(!dragging)return;theta-=(e.clientX-lastX)*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.38,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
+    let dragDistance=0;
+    const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
+    const down=(e:PointerEvent)=>{dragging=true;dragDistance=0;lastX=e.clientX;},up=(e:PointerEvent)=>{
+      if(dragging&&dragDistance<6&&e.target===renderer.domElement){
+        const rect=renderer.domElement.getBoundingClientRect();pointer.x=(e.clientX-rect.left)/rect.width*2-1;pointer.y=-((e.clientY-rect.top)/rect.height*2-1);
+        raycaster.setFromCamera(pointer,camera);
+        const hit=raycaster.intersectObjects([castle,detail],true).find(entry=>{let node:THREE.Object3D|null=entry.object;while(node){if(node.userData.buildingType)return true;node=node.parent}return false});
+        if(hit){let node:THREE.Object3D|null=hit.object;while(node&&!node.userData.buildingType)node=node.parent;if(node?.userData.buildingType)buildingSelectRef.current?.(String(node.userData.buildingType));}
+      }
+      dragging=false;
+    },move=(e:PointerEvent)=>{if(!dragging)return;const delta=e.clientX-lastX;dragDistance+=Math.abs(delta);theta-=delta*.006;lastX=e.clientX;update();},wheel=(e:WheelEvent)=>{e.preventDefault();zoom=THREE.MathUtils.clamp(zoom-e.deltaY*.0015,.38,2.1);update();};renderer.domElement.addEventListener("pointerdown",down);window.addEventListener("pointerup",up);window.addEventListener("pointermove",move);renderer.domElement.addEventListener("wheel",wheel,{passive:false});
     const resize=()=>{const w=host.clientWidth,h=host.clientHeight;renderer.setSize(w,h);const a=w/Math.max(h,1);/* Dikey gorus sabit kalirsa genis ekranda yatay 130+ birime aciliyor ve krallik bos zeminin icinde kayboluyor. Orani bozmadan tek care yakinlasmak. */const half=Math.max(13,Math.min(22,22/Math.max(1,a/1.6)));camera.left=-half*a;camera.right=half*a;camera.top=half;camera.bottom=-half;camera.updateProjectionMatrix();};const observer=new ResizeObserver(resize);observer.observe(host);resize();const clock=new THREE.Clock();
     // Uzaklaşınca yalnızca insanlar silinir; şehrin kendisi çok uzakta bile
     // durur. Eskiden binalar da figürlerle aynı gruptaydı ve Kral biraz

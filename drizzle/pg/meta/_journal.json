@@ -57,6 +57,223 @@
       "when": 1787459629355,
       "tag": "0007_sparkling_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787702400000,
+      "tag": "0008_populace_temperature",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787918400000,
+      "tag": "0009_council_briefings",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793970000000,
+      "tag": "0010_wars",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793970600000,
+      "tag": "0011_war_siege",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793971200000,
+      "tag": "0012_war_sally",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793971800000,
+      "tag": "0013_war_peace_offer",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793972400000,
+      "tag": "0014_shared_mine_veins",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793973000000,
+      "tag": "0015_war_courier_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793973600000,
+      "tag": "0016_war_populace_response",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793974200000,
+      "tag": "0017_war_king_command",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793974800000,
+      "tag": "0018_war_support_convoys",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793975400000,
+      "tag": "0019_war_field_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793976000000,
+      "tag": "0020_war_defender_intel_warning",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793976600000,
+      "tag": "0021_war_pursuit",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793977200000,
+      "tag": "0022_war_blockade",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793977800000,
+      "tag": "0023_mercenary_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793978400000,
+      "tag": "0024_deep_intel_observation",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793979000000,
+      "tag": "0025_pending_decision_people_pulse",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793979600000,
+      "tag": "0026_populace_feed",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793980200000,
+      "tag": "0027_faction_coalitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793980800000,
+      "tag": "0028_referendums",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793981400000,
+      "tag": "0029_fate_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793982000000,
+      "tag": "0030_war_support_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793982600000,
+      "tag": "0031_war_battle_phases",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793983200000,
+      "tag": "0032_war_truce_negotiations",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793983800000,
+      "tag": "0033_diplomatic_relations",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793984400000,
+      "tag": "0034_spy_networks",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793985000000,
+      "tag": "0035_shared_mine_influence",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794163843359,
+      "tag": "0036_blue_ego",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794163900000,
+      "tag": "0037_council_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794164000000,
+      "tag": "0038_council_discussion",
+      "breakpoints": true
     }
   ]
 }

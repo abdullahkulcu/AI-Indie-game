@@ -18,7 +18,7 @@ import type { DeskTool } from "./negotiation-brief";
  *
  * KRALIN GENERALİ BURAYA TAŞINMADI ve bu bilinçli. `app/api/general/route.ts`
  * içindeki `openAI`/`anthropic` aynı istekte HEM metin HEM araç çağrısı okur,
- * `temperature` ile konuşma geçmişi taşır, hatayı Kral'a gösterilecek Türkçe
+ * konuşma geçmişi taşır, hatayı Kral'a gösterilecek Türkçe
  * mesaja (`providerError`) çevirir ve sağlayıcı gövdesini ham metin olarak
  * saklar. O yolu bu iki kipe sıkıştırmak, çalışan tek oyun-içi sohbeti anlatım
  * kalitesi uğruna riske atmak olurdu; sınır bu yüzden "arka plan çağrıları
@@ -44,6 +44,50 @@ type BaseInput = {
   user: string;
   maxTokens?: number;
 };
+
+export type ProviderFailureCode = "authentication" | "permission" | "model" | "quota" | "timeout" | "network" | "provider" | "empty";
+
+export type ProviderFailure = { ok: false; code: ProviderFailureCode; message: string };
+export type ProviderCheck = { ok: true } | ProviderFailure;
+
+/** Halk/Garnizon anlatımının mevcut davranışını koruyan varsayılan değer. */
+export const DEFAULT_TEXT_TEMPERATURE = 0.8;
+export const TEXT_TEMPERATURE_OPTIONS = [0, 0.2, 0.4, 0.6, 0.8, 1] as const;
+
+/** Yönetim ucundaki sayısal sınırın tek kaynağı. */
+export function validTextTemperature(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Sağlayıcı/model uyumluluğunun tek kaynağı.
+ *
+ * Anthropic'in uyarlamalı düşünme kullanan güncel modelleri, varsayılan dışı
+ * `temperature` değerini geçersiz istek (400) olarak reddeder. Model adlarını
+ * burada tek tek kovalamak gelecekte yeniden kırılacağı için Anthropic'e bu
+ * isteğe bağlı parametreyi hiç göndermiyoruz; ton sistem promptuyla kurulur.
+ */
+export function compatibleSamplingOptions(provider: string, temperature?: number): { temperature?: number } {
+  return provider === "anthropic" || temperature === undefined ? {} : { temperature };
+}
+
+/**
+ * Sağlayıcının ham hata gövdesini istemciye taşımadan yönlendirici bir neden
+ * üretir. `callProviderText` yalnızca sağlayıcı adı + HTTP durumunu fırlatır;
+ * anahtar ve sağlayıcının olası yankı gövdesi bu sınıra hiç ulaşmaz.
+ */
+export function describeProviderFailure(error: unknown): ProviderFailure {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const status = /^(?:openai|anthropic) (\d{3})$/.exec(message)?.[1];
+  if (status === "401") return { ok: false, code: "authentication", message: "API anahtarı sağlayıcı tarafından reddedildi." };
+  if (status === "403") return { ok: false, code: "permission", message: "Anahtarın bu modele erişim yetkisi yok." };
+  if (status === "404") return { ok: false, code: "model", message: "Model adı sağlayıcıda bulunamadı." };
+  if (status === "429") return { ok: false, code: "quota", message: "Sağlayıcı kotası veya hız sınırı aşıldı." };
+  if (status === "400") return { ok: false, code: "model", message: "Model adı ya da istek sağlayıcı tarafından geçersiz bulundu." };
+  if (status?.startsWith("5")) return { ok: false, code: "provider", message: "Sağlayıcı geçici olarak yanıt veremiyor." };
+  if (error instanceof DOMException && error.name === "TimeoutError") return { ok: false, code: "timeout", message: "Sağlayıcı bağlantısı zaman aşımına uğradı." };
+  return { ok: false, code: "network", message: "Sağlayıcıya ağ bağlantısı kurulamadı." };
+}
 
 const anthropicHeaders = (apiKey: string) => ({
   "x-api-key": apiKey,
@@ -108,7 +152,7 @@ export async function callProviderText(input: BaseInput & { temperature?: number
       headers: anthropicHeaders(input.apiKey),
       body: JSON.stringify({
         model: input.model, max_tokens: maxTokens,
-        ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+        ...compatibleSamplingOptions("anthropic", input.temperature),
         system: input.system, messages: [{ role: "user", content: input.user }],
       }),
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
@@ -123,7 +167,7 @@ export async function callProviderText(input: BaseInput & { temperature?: number
     headers: openAiHeaders(input.apiKey),
     body: JSON.stringify({
       model: input.model, max_completion_tokens: maxTokens,
-      ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+      ...compatibleSamplingOptions("openai", input.temperature),
       messages: [{ role: "system", content: input.system }, { role: "user", content: input.user }],
     }),
     signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
@@ -132,4 +176,26 @@ export async function callProviderText(input: BaseInput & { temperature?: number
   const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const text = data.choices?.[0]?.message?.content?.trim() ?? "";
   return text || null;
+}
+
+/**
+ * Admin kimliği yazılmadan önce gerçek, çok küçük bir sağlayıcı çağrısıyla
+ * anahtar + model ikilisini doğrular. Bu kontrolün başarılı olması yalnızca
+ * kaydın varlığını değil, modelin gerçekten konuşabildiğini ifade eder.
+ */
+export async function verifyProviderConnection(input: Pick<BaseInput, "provider" | "model" | "apiKey"> & { temperature?: number }): Promise<ProviderCheck> {
+  try {
+    const text = await callProviderText({
+      ...input,
+      system: "Bu bir bağlantı doğrulamasıdır. Yalnızca TAMAM yaz.",
+      user: "Bağlantıyı doğrula.",
+      maxTokens: 12,
+      ...(input.temperature === undefined ? {} : { temperature: input.temperature }),
+    });
+    return text
+      ? { ok: true }
+      : { ok: false, code: "empty", message: "Model bağlantı testine boş yanıt verdi." };
+  } catch (error) {
+    return describeProviderFailure(error);
+  }
 }

@@ -35,6 +35,7 @@ export async function populaceCredentialFor(userId: string, masterKey: string): 
     persona: populaceCredentials.persona,
     provider: populaceCredentials.provider,
     model: populaceCredentials.model,
+    temperature: populaceCredentials.temperature,
     encryptedKey: populaceCredentials.encryptedKey,
     iv: populaceCredentials.iv,
     keyVersion: populaceCredentials.keyVersion,

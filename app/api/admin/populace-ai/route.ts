@@ -5,6 +5,7 @@ import { channelMembers, channels, populaceCredentials } from "../../../../db/sc
 import { isPopulacePersona, POPULACE_PERSONAS, type PopulacePersona } from "../../../../engine/populace-persona";
 import { currentAdminUser } from "../../../../server/account-auth";
 import { decryptScopedKey, encryptScopedKey } from "../../../../server/byok-crypto";
+import { TEXT_TEMPERATURE_OPTIONS, validTextTemperature, verifyProviderConnection, type ProviderCheck } from "../../../../server/llm-provider";
 import { populaceCredentialSummary, populaceScopeOf, POPULACE_SUMMARY_COLUMNS } from "../../../../server/populace-ai-credentials";
 
 /**
@@ -31,8 +32,14 @@ import { populaceCredentialSummary, populaceScopeOf, POPULACE_SUMMARY_COLUMNS } 
 export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
 
-type SaveBody = { channelId?: string; userId?: string | null; persona?: string; provider?: string; model?: string; apiKey?: string };
-type PatchBody = { id?: string; persona?: string; model?: string };
+type SaveBody = { channelId?: string; userId?: string | null; persona?: string; provider?: string; model?: string; temperature?: unknown; apiKey?: string };
+type PatchBody = { id?: string; persona?: string; model?: string; temperature?: unknown; test?: boolean };
+
+function verificationError(check: ProviderCheck) {
+  return check.ok
+    ? null
+    : Response.json({ error: `Bağlantı doğrulanamadı: ${check.message}`, code: check.code }, { status: 422, headers: noStore });
+}
 
 /** Override yazılabilmesi için krallığın o channel'da AKTİF üyeliği olmalı. */
 async function isActiveMember(channelId: string, userId: string) {
@@ -51,7 +58,7 @@ export async function GET(request: Request) {
   const rows = await getDb().select(POPULACE_SUMMARY_COLUMNS).from(populaceCredentials).orderBy(populaceCredentials.channelId);
   // Kişilik listesi panele SUNUCUDAN iner; istemci kendi listesini yazmaz
   // (tek-doğru-kaynak: engine/populace-persona.ts).
-  return Response.json({ personas: POPULACE_PERSONAS, credentials: rows.map(populaceCredentialSummary) }, { headers: noStore });
+  return Response.json({ personas: POPULACE_PERSONAS, temperatureOptions: TEXT_TEMPERATURE_OPTIONS, credentials: rows.map(populaceCredentialSummary) }, { headers: noStore });
 }
 
 /**
@@ -68,23 +75,28 @@ export async function PUT(request: Request) {
   const channelId = body.channelId?.trim() ?? "";
   const userId = body.userId?.trim() ? body.userId.trim() : null;
   const model = body.model?.trim() ?? "";
+  const temperature = body.provider === "anthropic" ? null : body.temperature;
   if (!channelId || !isPopulacePersona(body.persona)) return Response.json({ error: "Channel ve geçerli bir halk kişiliği gerekli." }, { status: 400, headers: noStore });
   if ((body.provider !== "openai" && body.provider !== "anthropic") || !model || !body.apiKey || body.apiKey.length < 8) {
     return Response.json({ error: "Sağlayıcı, model ve geçerli API anahtarı gerekli." }, { status: 400, headers: noStore });
   }
+  if (temperature !== undefined && temperature !== null && !validTextTemperature(temperature)) return Response.json({ error: "Temperature 0 ile 1 arasında bir sayı olmalı." }, { status: 400, headers: noStore });
   if (!(await channelExists(channelId))) return Response.json({ error: "Channel bulunamadı." }, { status: 404, headers: noStore });
   if (userId && !(await isActiveMember(channelId, userId))) {
     return Response.json({ error: "Krallık bu channel'ın aktif üyesi değil." }, { status: 400, headers: noStore });
   }
+  const check = await verifyProviderConnection({ provider: body.provider, model, apiKey: body.apiKey, ...(temperature === undefined || temperature === null ? {} : { temperature }) });
+  const checkError = verificationError(check);
+  if (checkError) return checkError;
   const persona: PopulacePersona = body.persona;
   const value = await encryptScopedKey(body.apiKey, env.BYOK_MASTER_KEY, populaceScopeOf(channelId, userId), body.provider, model);
   const db = getDb();
   const scopeFilter = and(eq(populaceCredentials.channelId, channelId), userId ? eq(populaceCredentials.userId, userId) : isNull(populaceCredentials.userId));
   const [existing] = await db.select({ id: populaceCredentials.id }).from(populaceCredentials).where(scopeFilter).limit(1);
   if (existing) {
-    await db.update(populaceCredentials).set({ persona, provider: body.provider, model, ...value, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, existing.id));
+    await db.update(populaceCredentials).set({ persona, provider: body.provider, model, temperature: temperature ?? null, ...value, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, existing.id));
   } else {
-    await db.insert(populaceCredentials).values({ id: crypto.randomUUID(), channelId, userId, persona, provider: body.provider, model, ...value, createdBy: actor.id });
+    await db.insert(populaceCredentials).values({ id: crypto.randomUUID(), channelId, userId, persona, provider: body.provider, model, temperature: temperature ?? null, ...value, createdBy: actor.id });
   }
   const [saved] = await db.select(POPULACE_SUMMARY_COLUMNS).from(populaceCredentials).where(scopeFilter).limit(1);
   return Response.json({ credential: saved ? populaceCredentialSummary(saved) : null }, { status: existing ? 200 : 201, headers: noStore });
@@ -103,25 +115,39 @@ export async function PATCH(request: Request) {
   const body = await request.json() as PatchBody;
   const id = body.id?.trim() ?? "";
   const model = body.model?.trim();
-  if (!id || (!body.persona && !model)) return Response.json({ error: "Kimlik ve değiştirilecek en az bir alan gerekli." }, { status: 400, headers: noStore });
+  if (!id || (!body.persona && !model && body.temperature === undefined && !body.test)) return Response.json({ error: "Kimlik ve değiştirilecek en az bir alan gerekli." }, { status: 400, headers: noStore });
   if (body.persona !== undefined && !isPopulacePersona(body.persona)) return Response.json({ error: "Geçersiz halk kişiliği." }, { status: 400, headers: noStore });
   const db = getDb();
   const [row] = await db.select().from(populaceCredentials).where(eq(populaceCredentials.id, id)).limit(1);
   if (!row) return Response.json({ error: "Halk-AI kimlik bilgisi bulunamadı." }, { status: 404, headers: noStore });
   const persona = (body.persona ?? row.persona) as PopulacePersona;
-  if (!model || model === row.model) {
-    await db.update(populaceCredentials).set({ persona, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, id));
-  } else {
+  const targetModel = model || row.model;
+  const targetTemperature = row.provider === "anthropic" ? null : body.temperature === undefined ? row.temperature : body.temperature;
+  if (targetTemperature !== null && !validTextTemperature(targetTemperature)) return Response.json({ error: "Temperature 0 ile 1 arasında bir sayı olmalı." }, { status: 400, headers: noStore });
+  const mustVerify = Boolean(body.test || targetModel !== row.model || targetTemperature !== row.temperature);
+  let decryptedKey: string | null = null;
+  if (mustVerify) {
     const scope = populaceScopeOf(row.channelId, row.userId);
-    let apiKey: string;
     try {
-      apiKey = await decryptScopedKey(row.encryptedKey, row.iv, env.BYOK_MASTER_KEY, scope, row.provider, row.model, row.keyVersion);
+      decryptedKey = await decryptScopedKey(row.encryptedKey, row.iv, env.BYOK_MASTER_KEY, scope, row.provider, row.model, row.keyVersion);
     } catch {
       // Hata metni sır taşıyabilir; yutulur, yerine yönlendirici bir mesaj döner.
       return Response.json({ error: "Saklı anahtar çözülemedi; anahtarı yeniden girin." }, { status: 409, headers: noStore });
     }
-    const value = await encryptScopedKey(apiKey, env.BYOK_MASTER_KEY, scope, row.provider, model);
-    await db.update(populaceCredentials).set({ persona, model, ...value, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, id));
+    const check = await verifyProviderConnection({ provider: row.provider, model: targetModel, apiKey: decryptedKey, ...(targetTemperature === null ? {} : { temperature: targetTemperature }) });
+    const checkError = verificationError(check);
+    if (checkError) return checkError;
+    if (body.test) {
+      const summary = populaceCredentialSummary(row);
+      return Response.json({ credential: summary, verified: true }, { headers: noStore });
+    }
+  }
+  if (!model || model === row.model) {
+    await db.update(populaceCredentials).set({ persona, temperature: targetTemperature, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, id));
+  } else {
+    const scope = populaceScopeOf(row.channelId, row.userId);
+    const value = await encryptScopedKey(decryptedKey!, env.BYOK_MASTER_KEY, scope, row.provider, model);
+    await db.update(populaceCredentials).set({ persona, model, temperature: targetTemperature, ...value, updatedAt: sql`CURRENT_TIMESTAMP` }).where(eq(populaceCredentials.id, id));
   }
   const [saved] = await db.select(POPULACE_SUMMARY_COLUMNS).from(populaceCredentials).where(eq(populaceCredentials.id, id)).limit(1);
   return Response.json({ credential: saved ? populaceCredentialSummary(saved) : null }, { headers: noStore });

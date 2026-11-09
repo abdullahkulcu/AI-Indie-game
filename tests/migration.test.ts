@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  MIGRATION, arrivingMigrants, migrationArrivalNotice, migrationTravelMs, pickMigrationTarget,
+  MIGRATION, distributeMigrants, migrationArrivalNotice, migrationReturnNotice, migrationTravelMs,
   type MigrationCandidate,
 } from "../engine/migration";
 import { capacityFor, tick } from "../engine/tick";
@@ -27,76 +27,63 @@ function newGame(overrides: Partial<Game> = {}): Game {
   };
 }
 
-// --- Hedef seçimi: kapasite ve çekicilik -----------------------------------
+// --- Çoklu hedef dağıtımı: kapasite ve çekicilik ---------------------------
 
-test("kapasitesi dolu ya da aşmış aday hiç seçilmez", () => {
+test("kapasitesi dolu ya da aşmış aday göçmen almaz", () => {
   const candidates: MigrationCandidate[] = [
     { userId: "a", population: 400, capacity: 400, popularity: 80 }, // tam dolu
     { userId: "b", population: 450, capacity: 400, popularity: 80 }, // aşmış
     { userId: "c", population: 100, capacity: 400, popularity: 10 }, // tek açık aday
   ];
-  const pick = pickMigrationTarget(candidates, "sabit-tohum");
-  assert.equal(pick?.userId, "c");
-  assert.equal(pick?.room, 300);
+  assert.deepEqual(distributeMigrants(candidates, 40), {
+    allocations: [{ userId: "c", count: 40 }], unplaced: 0,
+  });
 });
 
-test("aday yoksa ya da hiçbirinde boş konut yoksa null döner", () => {
-  assert.equal(pickMigrationTarget([], "x"), null);
-  assert.equal(pickMigrationTarget([{ userId: "a", population: 400, capacity: 400, popularity: 90 }], "x"), null);
+test("aday yoksa ya da hiçbirinde boş konut yoksa herkes kaynağa döner", () => {
+  assert.deepEqual(distributeMigrants([], 12), { allocations: [], unplaced: 12 });
+  assert.deepEqual(distributeMigrants([{ userId: "a", population: 400, capacity: 400, popularity: 90 }], 12), {
+    allocations: [], unplaced: 12,
+  });
 });
 
-test("rızası dibe vurmuş bir krallık da (taban çekicilikle) göçmen çekebilir", () => {
+test("rızası dibe vurmuş bir krallık da taban çekicilikle göçmen alabilir", () => {
   // Tek aday: rızası 0 olsa bile ATTRACTIVENESS_FLOOR sayesinde seçilir —
   // göçmenler zaten bir yerden kaçıyor, mutlak mükemmeli değil eldeki en az
   // kötüyü arıyorlar.
-  const pick = pickMigrationTarget([{ userId: "isyanci", population: 50, capacity: 200, popularity: 0 }], "tohum");
-  assert.equal(pick?.userId, "isyanci");
+  assert.deepEqual(distributeMigrants([{ userId: "isyanci", population: 50, capacity: 200, popularity: 0 }], 25), {
+    allocations: [{ userId: "isyanci", count: 25 }], unplaced: 0,
+  });
 });
 
-test("yüksek rızalı ve boş konutu bol aday, çoğunlukla daha çok seçilir", () => {
+test("göçmenler birden çok hedefe çekicilik oranıyla bölünür", () => {
   const candidates: MigrationCandidate[] = [
-    { userId: "mutlu", population: 100, capacity: 400, popularity: 90 },
-    { userId: "kaynayan", population: 100, capacity: 400, popularity: 5 },
+    { userId: "mutlu", population: 100, capacity: 200, popularity: 100 },
+    { userId: "kaynayan", population: 100, capacity: 200, popularity: 0 },
   ];
-  let mutluSecildi = 0;
-  const samples = 500;
-  for (let i = 0; i < samples; i += 1) {
-    const pick = pickMigrationTarget(candidates, `göç-${i}`);
-    if (pick?.userId === "mutlu") mutluSecildi += 1;
-  }
-  // Rıza yalnızca ince ayardır, veto değildir: mutlu krallık ÇOĞUNLUKLA
-  // seçilir ama kaynayan krallık da payını alır (taban çekicilik).
-  assert.ok(mutluSecildi > samples * 0.6, `mutlu ${mutluSecildi}/${samples}`);
-  assert.ok(mutluSecildi < samples, "kaynıyan krallık da bazen seçilmeli");
+  const result = distributeMigrants(candidates, 50);
+  assert.equal(result.unplaced, 0);
+  assert.deepEqual(result.allocations, [{ userId: "kaynayan", count: 10 }, { userId: "mutlu", count: 40 }]);
 });
 
-test("aynı tohum hep aynı hedefi seçer: save-scum işe yaramaz", () => {
+test("toplam boş konutu aşan göçmenin kalanı kaynak krallığa döner", () => {
   const candidates: MigrationCandidate[] = [
-    { userId: "a", population: 100, capacity: 400, popularity: 60 },
-    { userId: "b", population: 50, capacity: 300, popularity: 40 },
+    { userId: "a", population: 95, capacity: 100, popularity: 60 },
+    { userId: "b", population: 98, capacity: 100, popularity: 40 },
   ];
-  const first = pickMigrationTarget(candidates, "olay-42");
-  const second = pickMigrationTarget(candidates, "olay-42");
-  assert.deepEqual(first, second);
+  assert.deepEqual(distributeMigrants(candidates, 12), {
+    allocations: [{ userId: "a", count: 5 }, { userId: "b", count: 2 }], unplaced: 5,
+  });
 });
 
-test("aday sırası (DB'den dönüş sırası) sonucu değiştirmez: userId'ye göre sabitlenir", () => {
+test("aday sırası sonucu değiştirmez: userId'ye göre kararlıdır", () => {
   const candidates: MigrationCandidate[] = [
     { userId: "z-krallik", population: 100, capacity: 400, popularity: 60 },
     { userId: "a-krallik", population: 50, capacity: 300, popularity: 40 },
   ];
-  const forward = pickMigrationTarget(candidates, "olay-7");
-  const backward = pickMigrationTarget([...candidates].reverse(), "olay-7");
+  const forward = distributeMigrants(candidates, 75);
+  const backward = distributeMigrants([...candidates].reverse(), 75);
   assert.deepEqual(forward, backward);
-});
-
-// --- Varan göçmen sayısı: kapasite tavanı ------------------------------
-
-test("varan göçmen sayısı boş konuttan fazla olamaz", () => {
-  assert.equal(arrivingMigrants(50, 20), 20);
-  assert.equal(arrivingMigrants(5, 20), 5);
-  assert.equal(arrivingMigrants(-5, 20), 0);
-  assert.equal(arrivingMigrants(10, 0), 0);
 });
 
 // --- Yol süresi --------------------------------------------------------
@@ -113,6 +100,11 @@ test("varış bildirimi kimden geldiğini söylemez (bilgi sınırı)", () => {
   const text = migrationArrivalNotice(7);
   assert.match(text, /^7 kişi/);
   assert.ok(!/[A-ZÇĞİÖŞÜ][a-zçğıöşü]+kale/.test(text), "kaynak krallığın adı sızmamalı");
+});
+
+test("dönüş bildirimi kaybolmayı değil kaynak krallığa dönüşü söyler", () => {
+  assert.match(migrationReturnNotice(7), /^7 kişi/);
+  assert.match(migrationReturnNotice(7), /geri döndü/);
 });
 
 // --- Kapasite tavanı: engine/tick.ts ile AYNI kaynaktan okunur -----------
@@ -168,4 +160,16 @@ test("göç hiçbir yeni model çağrısı açmaz", () => {
       assert.ok(!source.includes(forbidden), `${file} içinde ${forbidden} olmamalı`);
     }
   }
+});
+
+test("cron göçü tek hedefe yığmaz; dönüşle birlikte tek işlemde kapatır", () => {
+  const source = readFileSync(new URL("../app/api/cron/route.ts", import.meta.url), "utf8");
+  const start = source.indexOf("async function settleMigrations");
+  const end = source.indexOf("async function punishAgitator", start);
+  const settlement = source.slice(start, end);
+  assert.match(settlement, /distributeMigrants/);
+  assert.match(settlement, /migrationReturnNotice/);
+  assert.match(settlement, /db\.transaction/);
+  assert.ok(!settlement.includes("pickMigrationTarget"));
+  assert.ok(!settlement.includes("lost +="));
 });

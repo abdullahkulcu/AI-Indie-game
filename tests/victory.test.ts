@@ -126,7 +126,7 @@ test("İSTİSMAR: halkı göçe zorlayıp geri toplamak (çevrim) puan getirmez"
   assert.ok(real.quiet > churn.quiet);
 });
 
-test("halkını kaybetmek sessiz savaşı kaybetmektir: net eksi puan eksiye yazılır", () => {
+test("halkını kaybetmek dolaylı mücadeleyi kaybetmektir: net eksi puan eksiye yazılır", () => {
   const bleeding = score({ game: { ...neutral, peopleJoined: 20, peopleLeft: 120 } });
   assert.equal(line(bleeding, "settlers").points, Math.round(-100 * VICTORY.netSettler));
   assert.ok(bleeding.quiet < 0);

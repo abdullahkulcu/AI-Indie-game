@@ -38,6 +38,8 @@ export type PopulaceCredentialRow = {
   persona: PopulacePersona;
   provider: "openai" | "anthropic";
   model: string;
+  /** Eski çağıranlar bu alanı taşımayabilir; anlatıcı varsayılanına düşer. */
+  temperature?: number | null;
   encryptedKey: string;
   iv: string;
   keyVersion: string;
@@ -52,6 +54,8 @@ export type ResolvedPopulaceCredential = {
   persona: PopulacePersona;
   provider: "openai" | "anthropic";
   model: string;
+  /** Eski çağıranlar bu alanı taşımayabilir; anlatıcı varsayılanına düşer. */
+  temperature?: number | null;
   /** ÇÖZÜLMÜŞ anahtar. Loglanmaz, cevaba konmaz, deftere yazılmaz. */
   apiKey: string;
 };
@@ -109,7 +113,7 @@ export async function resolvePopulaceCredential(
       populaceScopeOf(row.channelId, row.userId),
       row.provider, row.model, row.keyVersion,
     );
-    return { channelId: row.channelId, source, persona: row.persona, provider: row.provider, model: row.model, apiKey };
+    return { channelId: row.channelId, source, persona: row.persona, provider: row.provider, model: row.model, temperature: row.temperature, apiKey };
   } catch {
     return null;
   }
@@ -128,6 +132,7 @@ export function populaceCredentialSummary(row: {
   persona: PopulacePersona;
   provider: "openai" | "anthropic";
   model: string;
+  temperature: number | null;
   updatedAt?: Date | string | null;
 }) {
   return {
@@ -138,6 +143,7 @@ export function populaceCredentialSummary(row: {
     persona: row.persona,
     provider: row.provider,
     model: row.model,
+    temperature: row.temperature,
     connected: true,
     updatedAt: row.updatedAt ?? null,
   };
@@ -157,5 +163,6 @@ export const POPULACE_SUMMARY_COLUMNS = {
   persona: populaceCredentials.persona,
   provider: populaceCredentials.provider,
   model: populaceCredentials.model,
+  temperature: populaceCredentials.temperature,
   updatedAt: populaceCredentials.updatedAt,
 } as const;

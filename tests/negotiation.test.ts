@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
-  DECLINABLE_STATUSES, KING_PRESENCE_MS, LIMITS, MAX_HOURS, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT,
+  DECLINABLE_STATUSES, KING_PRESENCE_MS, LIMITS, MAX_HOURS, MAX_MERCENARY_COUNT, MAX_MERCENARY_FEE, MAX_MESSAGE_LENGTH, MAX_TRIBUTE_AMOUNT,
   MAX_TRIBUTE_RATE, MAX_TRIBUTE_RATE_PERCENT, MISSES_BEFORE_BREACH, SIGNABLE_STATUS,
   TRIBUTE_RESOURCES, TRIBUTE_TOPICS,
   canBind, canDecline, canOpen, canProposeTerms, canSpeak, carriesTribute, clampTerms, duePayments,
@@ -15,6 +15,16 @@ import { REPUTATION_CHANGES, reputationChange } from "../engine/diplomacy";
 import { offlineDeskTools } from "../server/negotiation-brief";
 
 const T0 = 1_800_000_000_000;
+const cronSource = readFileSync(new URL("../app/api/cron/route.ts", import.meta.url), "utf8");
+
+test("Diyar ilişkileri krallık adıyla değil karşı hesabın kimliğiyle eşleşir", () => {
+  const endpoint = readFileSync(new URL("../app/api/negotiate/route.ts", import.meta.url), "utf8");
+  const screen = readFileSync(new URL("../components/KingdomGame.tsx", import.meta.url), "utf8");
+  assert.match(endpoint, /counterpartId: otherId/);
+  assert.match(endpoint, /counterpartId: deal\.payerId === user\.id/);
+  assert.match(screen, /counterpartId===kingdom\.id/);
+  assert.doesNotMatch(screen, /counterpart===kingdom\.name/);
+});
 
 function table(overrides: Partial<Negotiation> = {}): Negotiation {
   return {
@@ -72,6 +82,22 @@ test("saldırmazlıkta haraç sessizce sıfırlanır", () => {
   const result = validateTerms({ topic: "non_aggression", tributeRate: .4, hours: 24 });
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.terms.tributeRate, 0);
+});
+
+test("kiralık birlik yalnız sayı, peşin bedel ve kiralayan taraf ile bağlanır", () => {
+  const missing = validateTerms({ topic: "mercenary", hours: 24 });
+  assert.equal(missing.ok, false);
+  const accepted = validateTerms({ topic: "mercenary", mercenaryCount: 24, mercenaryFee: 900, lessorSide: "target", hours: 36 });
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) {
+    assert.equal(accepted.terms.mercenaryCount, 24);
+    assert.equal(accepted.terms.mercenaryFee, 900);
+    assert.equal(accepted.terms.lessorSide, "target");
+    assert.equal(accepted.terms.tributeAmount, 0, "kiralık birlik haraç tahsilatı doğurmamalı");
+  }
+  const capped = clampTerms({ topic: "mercenary", mercenaryCount: 9_999, mercenaryFee: 99_999, lessorSide: "initiator" });
+  assert.equal(capped.mercenaryCount, MAX_MERCENARY_COUNT);
+  assert.equal(capped.mercenaryFee, MAX_MERCENARY_FEE);
 });
 
 test("süre ve ödeme aralığı sınırlara oturur", () => {
@@ -401,9 +427,10 @@ test("uç imza yarışını koşullu UPDATE ile kapatır", () => {
   const accept = routeSource.slice(routeSource.indexOf('body.action === "accept"'));
   assert.match(accept, /eq\(negotiations\.status, SIGNABLE_STATUS\)/, "durum geçişi koşullu olmalı");
   assert.match(accept, /\.returning\(\{ id: negotiations\.id \}\)/, "yarışın kazananı returning ile anlaşılmalı");
-  assert.match(accept, /if \(!signed\) return json\([^)]*409\)/, "yarışı kaybeden 409 almalı");
-  // Anlaşma ANCAK koşullu update tuttuysa yazılır: sıra tersine dönerse yarış geri gelir.
-  assert.ok(accept.indexOf("if (!signed)") < accept.indexOf("db.insert(agreements)"),
+  assert.match(accept, /if \(!claimed\) return \{ ok: false as const, error: .*status: 409 \}/, "yarışı kaybeden 409 almalı");
+  // Anlaşma ANCAK koşullu update tuttuysa aynı transaction içinde yazılır:
+  // kiralık birlikte iki krallığın kayıtları da bu atomik sınırdadır.
+  assert.ok(accept.indexOf("if (!claimed)") < accept.indexOf("trx.insert(agreements)"),
     "anlaşma insert'i koşullu update'in ARDINDAN gelmeli");
   assert.doesNotMatch(accept, /status: "agreed" \}\)\.where\(eq\(negotiations\.id/, "koşulsuz update kalmamalı");
 });
@@ -477,4 +504,24 @@ test("panel oranlı haraç sunabilir ve tavanları motordan okur", () => {
   assert.match(panelSource, /max=\{MAX_HOURS\}/, "saat tavanı motordan okunmalı");
   assert.doesNotMatch(panelSource, /maxLength=\{600\}/, "mesaj tavanı elle yazılmamalı");
   assert.doesNotMatch(panelSource, /%50/, "oran tavanı panele elle yazılmamalı");
+});
+
+test("Kral açık masaya kendi sözünü yazabilir", () => {
+  assert.match(panelSource, /action:"reply",speaker:"king",negotiationId:table\.id,message:text/,
+    "Kralın cevabı General kimliğiyle gönderilmemeli");
+  assert.match(panelSource, /canSpeak\(asNegotiation,table\.side,now\)\.ok/,
+    "cevap alanı motorun konuşma hakkına göre açılmalı");
+  assert.match(panelSource, /KRALIN SÖZÜ/, "cevap alanının sahibi açıkça yazılmalı");
+  assert.match(panelSource, /maxLength=\{MAX_MESSAGE_LENGTH\}/,
+    "Kralın sözü sunucuyla aynı mesaj tavanını kullanmalı");
+});
+
+test("cron süresi geçen açık müzakere masasını kalıcı olarak expired yapar", () => {
+  assert.match(cronSource, /async function expireNegotiations\(now: number\)/);
+  assert.match(cronSource, /status: "expired", lastTurnAt: now/);
+  assert.match(cronSource, /inArray\(negotiations\.status, \["open", "awaiting_king"\]\)/);
+  assert.match(cronSource, /lte\(negotiations\.expiresAt, now\)/);
+  assert.match(cronSource, /expired: expiredNegotiations/);
+  assert.ok(cronSource.indexOf("expireNegotiations(now)") < cronSource.indexOf("answerNegotiations(now)"),
+    "General, süresi dolmuş masayı cevaplamadan önce masa kapanmalı");
 });

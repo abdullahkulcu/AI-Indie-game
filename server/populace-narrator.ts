@@ -4,7 +4,8 @@ import {
 } from "../engine/populace-voice";
 import { type PopulacePersona, populacePersonaProfile } from "../engine/populace-persona";
 import { POPULACE_TEXT_LIMIT, sanitizeDemandText } from "./populace-brief";
-import { callProviderText } from "./llm-provider";
+import { callProviderText, DEFAULT_TEXT_TEMPERATURE } from "./llm-provider";
+import { aiGuidedSystemPrompt } from "./ai-guides";
 import type { ResolvedPopulaceCredential } from "./populace-ai-credentials";
 
 /**
@@ -115,13 +116,11 @@ export function populaceNarrator(credential: ResolvedPopulaceCredential): Demand
         provider: credential.provider,
         model: credential.model,
         apiKey: credential.apiKey,
-        system: NARRATOR_PROMPT,
+        system: aiGuidedSystemPrompt(cue.voice, NARRATOR_PROMPT),
         user: narrationPrompt({ ...cue, persona: credential.persona }),
         maxTokens: NARRATOR_MAX_TOKENS,
-        // Halkın sesi her seferinde birebir aynı cümle olmasın. Kademe
-        // değişmedikçe metin zaten yeniden üretilmediği için bu sıcaklık
-        // Kral'ın gözünde tutarsızlık yaratmaz.
-        temperature: 0.8,
+        // Kanal yöneticisinin seçtiği değer yoksa eski anlatım davranışını koru.
+        temperature: credential.temperature ?? DEFAULT_TEXT_TEMPERATURE,
       });
       const clean = text ? sanitizeDemandText(text) : "";
       // Tek kelimelik ya da temizlemeden sonra boşalmış cevap "model konuşmadı"

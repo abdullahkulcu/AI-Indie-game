@@ -33,10 +33,10 @@ deyin ya da `--webroot` kullanın.
 ## 3. TLS profiliyle kaldırın
 
 ```bash
-DOMAIN=demirkale.example.com docker compose --profile tls up -d
+DOMAIN=demirkale.example.com ./run.sh prod:tls
 ```
 
-`tls` profili `nginx` yerine `nginx-tls` servisini çalıştırır:
+TLS üretim örtüsü mevcut `nginx` servisini HTTPS yapılandırmasıyla değiştirir:
 
 * 80 ve 443'ü dinler, 80'i kalıcı olarak 443'e yönlendirir,
 * `/etc/letsencrypt` dizinini salt-okunur bağlar,
@@ -50,8 +50,8 @@ Düz profil (`docker compose up -d`) yalnızca 80'i dinleyen `nginx` servisini
 ## 4. Yenileme
 
 ```bash
-sudo certbot renew --pre-hook 'docker compose --profile tls stop nginx-tls' \
-                   --post-hook 'docker compose --profile tls start nginx-tls'
+sudo certbot renew --pre-hook 'cd /srv/demirkale && ./run.sh down' \
+                   --post-hook 'cd /srv/demirkale && DOMAIN=demirkale.example.com ./run.sh prod:tls'
 ```
 
 ## Cloudflare'in arkasındaysanız

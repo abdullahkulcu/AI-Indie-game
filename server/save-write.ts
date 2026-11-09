@@ -2,6 +2,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { gameSaves } from "../db/schema";
 
+type SaveWriter = Pick<ReturnType<typeof getDb>, "update">;
+
 /**
  * Kaydı YALNIZCA okuduğumuz sürüm hâlâ geçerliyse yazar.
  *
@@ -14,8 +16,8 @@ import { gameSaves } from "../db/schema";
  * Tek kopya olması şart: aynı koşullu UPDATE iki yerde ayrı ayrı yazıldığında
  * biri sürüm artırmayı unutur ve kayıp yazma geri gelir.
  */
-export async function writeSaveIfUnchanged(userId: string, expectedRevision: number, game: unknown) {
-  const rows = await getDb().update(gameSaves)
+export async function writeSaveIfUnchanged(userId: string, expectedRevision: number, game: unknown, writer: SaveWriter = getDb()) {
+  const rows = await writer.update(gameSaves)
     .set({ gameState: JSON.stringify(game), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
     .where(and(eq(gameSaves.userId, userId), eq(gameSaves.revision, expectedRevision)))
     .returning({ revision: gameSaves.revision });

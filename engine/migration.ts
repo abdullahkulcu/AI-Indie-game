@@ -1,5 +1,3 @@
-import { rand01 } from "./raids";
-
 /**
  * FAZ 6 — GÖÇÜN ÇOK KRALLIĞA DAĞILMASI.
  *
@@ -17,22 +15,10 @@ import { rand01 } from "./raids";
  *
  * DESEN SEÇİMİ: bu, tam olarak DIŞ KESE'nin (`engine/agitation.ts`) ve ortak
  * madenin (`engine/mine.ts`) zaten kurduğu "channel-genelinde gecikmeli etki"
- * desenidir: bir krallıktaki bir olay, cron'da BAŞKA bir krallığın kaydına
- * sürüm korumalı olarak yazılır. Farkı: kese TEK bir gönderenden TEK bir
- * hedefe gider; göç TEK bir kaynaktan channel'daki ADAYLAR arasından TEK bir
- * hedefe (kapasitesi izin veren, en çekici olana) yönelir — mal kesesindeki
- * "hedef seçilmiş" modelin, hedefin SABİT değil ADAYLAR arasından seçildiği
- * hâli.
- *
- * NEDEN ZAR YOK (raids.ts'in tohumlu tekniği kullanılsa da): akınlar doğanın
- * kendiliğinden gelen bir olayıdır ve "olur mu olmaz mı" sorusuna cevap arar;
- * göç ise HANGİ krallığın göçmeni ÇEKTİĞİ sorusuna cevap arayan bir EKONOMİK
- * tercihtir (boş konut + rıza). Bu yüzden `pickMigrationTarget` klasik "zar
- * atıp eşiği geçti mi" modelini değil, AĞIRLIKLI TEK SEÇİM modelini kullanır:
- * ağırlıkların TOPLAMI üstünden TEK bir tohumlu sayı çekilir (rulet çarkı).
- * Yine de saf ve tohumludur — `rand01` `engine/raids.ts` ile AYNI karma
- * fonksiyonunu kullanır, ikinci bir rastgelelik kaynağı açılmaz (tek doğru
- * kaynak). Girdi aynıysa çıktı hep aynıdır; save-scum işe yaramaz.
+ * desenidir: bir krallıktaki bir olay, cron'da BAŞKA krallıkların kayıtlarına
+ * sürüm korumalı olarak yazılır. Göçmenler tek bir kazanana yığılmaz; uygun
+ * tüm hedeflere boş konut × çekicilik ağırlığıyla bölünür. Yerleşemeyenler
+ * kaynak krallığa geri döner, dolayısıyla nüfus asla sessizce kaybolmaz.
  *
  * KAPASİTE TAVANI: hedefin boş konutu (`capacity - population`) sıfırın
  * altındaysa aday listesinden düşer — "Kapasiteyi aşan bir krallığa göçmen
@@ -53,7 +39,8 @@ export type MigrationCandidate = {
   popularity: number;
 };
 
-export type MigrationTarget = { userId: string; room: number };
+export type MigrationAllocation = { userId: string; count: number };
+export type MigrationDistribution = { allocations: MigrationAllocation[]; unplaced: number };
 
 /** Rızası sıfır olsa bile bir krallığın taşıdığı taban çekicilik payı. */
 const ATTRACTIVENESS_FLOOR = .25;
@@ -67,50 +54,78 @@ export const MIGRATION = {
 export const migrationTravelMs = (channelSpeed: number) =>
   Math.max(15_000, Math.round(MIGRATION.travelMinutes * 60_000 / Math.max(1, channelSpeed || 1)));
 
-/**
- * Kapasitesi izin veren adaylar arasından TEK bir hedef seçer.
- *
- * Ağırlık = boş konut × çekicilik. Sıra tohumdan ÖNCE `userId`'ye göre sabitlenir
- * ki aynı ağırlık toplamında rulet ibresinin hangi dilime denk geldiği, adayların
- * DB'den hangi sırayla döndüğüne değil, kimliklerine bağlı olsun (aksi hâlde aynı
- * girdi farklı bir sorgu sırasıyla farklı bir hedef seçebilirdi).
- *
- * Aday yoksa ya da hiçbirinde boş konut kalmamışsa `null` döner: göçmenler yeni
- * bir yurt bulamaz (bugüne kadarki davranışın aynısı — kaybolurlar).
- */
-export function pickMigrationTarget(candidates: MigrationCandidate[], seed: string): MigrationTarget | null {
-  const open = candidates
+/** Uygun hedefleri kararlı bir sırada, boş konut ve çekicilik ağırlığıyla hazırlar. */
+function openCandidates(candidates: MigrationCandidate[]) {
+  return candidates
     .map(candidate => ({
       userId: candidate.userId,
       room: Math.max(0, Math.floor(candidate.capacity - candidate.population)),
       popularity: candidate.popularity,
     }))
     .filter(candidate => candidate.room > 0)
-    .sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
-  if (!open.length) return null;
+    .sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0))
+    .map(candidate => ({
+      ...candidate,
+      weight: candidate.room * (ATTRACTIVENESS_FLOOR
+        + (1 - ATTRACTIVENESS_FLOOR) * Math.max(0, Math.min(100, candidate.popularity)) / 100),
+      count: 0,
+    }));
+}
 
-  const weights = open.map(candidate =>
-    candidate.room * (ATTRACTIVENESS_FLOOR + (1 - ATTRACTIVENESS_FLOOR) * Math.max(0, Math.min(100, candidate.popularity)) / 100));
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
-  if (total <= 0) return null;
+/**
+ * Göçmenleri BÜTÜN uygun krallıklara, boş konut × çekicilik oranıyla dağıtır.
+ *
+ * Büyük kesirler önce tam kişi olarak yazılır; kalan kişiler en büyük kesre göre
+ * paylaştırılır. Bir hedef dolarsa kalanlar yeniden hesaplanır. Eşitlikte
+ * `userId` kazanır; böylece DB sorgu sırası sonucu değiştirmez.
+ */
+export function distributeMigrants(candidates: MigrationCandidate[], count: number): MigrationDistribution {
+  const wanted = Math.max(0, Math.floor(count || 0));
+  const open = openCandidates(candidates);
+  let remaining = Math.min(wanted, open.reduce((sum, candidate) => sum + candidate.room, 0));
 
-  const roll = rand01(seed) * total;
-  let cursor = 0;
-  for (let index = 0; index < open.length; index += 1) {
-    cursor += weights[index];
-    if (roll < cursor) return { userId: open[index].userId, room: open[index].room };
+  while (remaining > 0) {
+    const active = open.filter(candidate => candidate.count < candidate.room);
+    if (!active.length) break;
+    const totalWeight = active.reduce((sum, candidate) => sum + candidate.weight, 0);
+    if (totalWeight <= 0) break;
+
+    const shares = active.map(candidate => {
+      const exact = remaining * candidate.weight / totalWeight;
+      const whole = Math.min(candidate.room - candidate.count, Math.floor(exact));
+      return { candidate, exact, whole, fraction: exact - Math.floor(exact) };
+    });
+    let placedThisRound = 0;
+    for (const share of shares) {
+      share.candidate.count += share.whole;
+      remaining -= share.whole;
+      placedThisRound += share.whole;
+    }
+    if (!remaining) break;
+
+    // Yuvarlama artıkları: her uygun hedef tur başına en fazla bir kişi alır.
+    for (const share of shares
+      .filter(share => share.candidate.count < share.candidate.room)
+      .sort((a, b) => b.fraction - a.fraction || (a.candidate.userId < b.candidate.userId ? -1 : 1))) {
+      if (!remaining) break;
+      share.candidate.count += 1;
+      remaining -= 1;
+      placedThisRound += 1;
+    }
+    if (!placedThisRound) break;
   }
-  // Kayan nokta yuvarlaması yüzünden ibre son dilimi kılpayı aşarsa, en son
-  // adaya düşer — matematiksel olarak toplamı geçemez ama emniyet içindir.
-  const last = open[open.length - 1];
-  return { userId: last.userId, room: last.room };
+
+  return {
+    allocations: open.filter(candidate => candidate.count > 0)
+      .map(candidate => ({ userId: candidate.userId, count: candidate.count })),
+    unplaced: wanted - open.reduce((sum, candidate) => sum + candidate.count, 0),
+  };
 }
 
-/** Hedefe fiilen varacak göçmen sayısı: talep edilenle boş konuttan küçük olanı. */
-export function arrivingMigrants(count: number, room: number) {
-  return Math.max(0, Math.min(Math.floor(count || 0), Math.floor(room || 0)));
-}
-
-/** Hedefin defterine düşen bildirim. Kimden geldiği söylenmez — bilgi sınırı korunur (bkz. engine/agitation.ts). */
+/** Hedefin defterine düşen bildirim. Kimden geldiği söylenmez — bilgi sınırı korunur. */
 export const migrationArrivalNotice = (count: number) =>
   `${count} kişi komşu bir sancaktan göç etti; nüfusunuz arttı.`;
+
+/** Yer bulamayan göçmenin kaynak krallığın defterine dönüş bildirimi. */
+export const migrationReturnNotice = (count: number) =>
+  `${count} kişi yeni yurt bulamayınca krallığınıza geri döndü.`;

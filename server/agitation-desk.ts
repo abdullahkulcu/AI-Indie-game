@@ -2,8 +2,8 @@ import { and, count, desc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { agitations, channelMembers, gameSaves } from "../db/schema";
 import {
-  AGITATION, type AgitationKind, agitationDayStart, agitationPairWindow,
-  agitationSenderNotice, agitationTravelMs, glutCost,
+  AGITATION, type AgitationKind, agitationCost, agitationDayStart, agitationPairWindow, canSupportMovement,
+  agitationSenderNotice, agitationTravelMs,
 } from "../engine/agitation";
 import type { Game, Key, TradeKey } from "../engine/types";
 import { parseStoredSave } from "./save-validation";
@@ -29,6 +29,7 @@ const fail = (status: 400 | 403 | 404 | 409 | 429, error: string): AgitateOutcom
 
 export const AGITATION_LABELS: Record<AgitationKind, string> = {
   gold_commons: "halkın arasına",
+  support_movement: "meydandaki harekete",
   gold_garrison: "kışlaya",
   goods_glut: "pazarına",
   raid_lure: "yollarına",
@@ -39,9 +40,7 @@ export const AGITATION_LABELS: Record<AgitationKind, string> = {
  * altın değerinde başka mal). İkisi de sabit fiyatlıdır; serbest miktar yoktur.
  */
 export function agitationPrice(kind: AgitationKind, resource: TradeKey) {
-  return kind === "goods_glut"
-    ? { key: resource as Key, amount: glutCost(resource) }
-    : { key: "gold" as Key, amount: AGITATION.cost };
+  return agitationCost(kind, resource);
 }
 
 /** Bir oyun-günü içinde kaç kese gönderildi/alındı? Tavanlar buradan okunur. */
@@ -67,12 +66,11 @@ export async function sendAgitation(input: {
   const price = agitationPrice(kind, resource);
   if (sourceUserId === targetUserId) return fail(400, "Kendi krallığınıza kese gönderemezsiniz.");
 
-  const [target] = await db.select({ userId: channelMembers.userId, accepts: channelMembers.acceptsAgitation })
+  const [target] = await db.select({ userId: channelMembers.userId })
     .from(channelMembers)
     .where(and(eq(channelMembers.userId, targetUserId), eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active")))
     .limit(1);
   if (!target) return fail(404, "Hedef bu channel'da değil.");
-  if (!target.accepts) return fail(403, "Bu krallık dış keseye kapalı; kimse propaganda gönderemiyor.");
 
   const [sourceRow] = await db.select().from(gameSaves).where(eq(gameSaves.userId, sourceUserId)).limit(1);
   const [targetRow] = await db.select({ gameState: gameSaves.gameState }).from(gameSaves).where(eq(gameSaves.userId, targetUserId)).limit(1);
@@ -84,6 +82,9 @@ export async function sendAgitation(input: {
   // ilk dört günden önce hiç işlemez.
   if (source.protectionEndsAt > now) return fail(403, "Kuruluş korumanız sürerken dışarıya kese gönderemezsiniz.");
   if (targetSave.protectionEndsAt > now) return fail(403, "Hedefin kuruluş koruması sürüyor; keseye kapalı.");
+  if (kind === "support_movement" && !canSupportMovement(targetSave.factionPressure)) {
+    return fail(409, "Hedefte desteklenecek bir halk hareketi henüz oluşmadı; önce propaganda ya da kendi yönetim baskısı gerekir.");
+  }
 
   // Çift arası bekleme İKİ katmanda tutulur ve ikisi ayrı işe yarar:
   //   · burada, tam süre ölçülür (son keseden bu yana 6 oyun saati geçti mi?);

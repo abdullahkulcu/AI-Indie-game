@@ -140,7 +140,7 @@ test("başka channel'ın satırı bu krallığa sızmaz", () => {
 
 async function row(id: string, channelId: string, userId: string | null, apiKey: string): Promise<PopulaceCredentialRow> {
   const value = await encryptScopedKey(apiKey, SECRET, populaceScopeOf(channelId, userId), "openai", "m");
-  return { id, channelId, userId, persona: "isyankar", provider: "openai", model: "m", ...value };
+  return { id, channelId, userId, persona: "isyankar", provider: "openai", model: "m", temperature: null, ...value };
 }
 
 test("çözümleyici doğru satırı çözer ve kişiliğiyle döner", async () => {
@@ -183,7 +183,7 @@ test("panelin okuduğu SELECT listesi sır sütunu içermez", () => {
   for (const secret of ["encryptedKey", "iv", "keyVersion"]) {
     assert.equal(columns.includes(secret), false, `${secret} panel sorgusuna girmemeli`);
   }
-  assert.deepEqual(columns.sort(), ["channelId", "id", "model", "persona", "provider", "updatedAt", "userId"]);
+  assert.deepEqual(columns.sort(), ["channelId", "id", "model", "persona", "provider", "temperature", "updatedAt", "userId"]);
 });
 
 /**
@@ -194,6 +194,8 @@ test("panelin okuduğu SELECT listesi sır sütunu içermez", () => {
 const routeSource = readFileSync(new URL("../app/api/admin/populace-ai/route.ts", import.meta.url), "utf8");
 const deskSource = readFileSync(new URL("../server/populace-ai-desk.ts", import.meta.url), "utf8");
 const ruleSource = readFileSync(new URL("../server/populace-ai-credentials.ts", import.meta.url), "utf8");
+const adminScrollSource = readFileSync(new URL("../app/admin-scroll.css", import.meta.url), "utf8");
+const councilBriefingSource = readFileSync(new URL("../server/council-briefing.ts", import.meta.url), "utf8");
 
 test("admin ucu cevabında anahtar ya da iv geçmez", () => {
   // Cevaplar TEK yoldan kurulur; şifreli anahtar hiçbir Response.json'a girmez.
@@ -224,6 +226,23 @@ test("uç kapsamı ve kişilik listesini tek kaynaktan okur", () => {
   assert.doesNotMatch(routeSource, /"isyankar"|"zeki_istekli"|"bagli_itaatkar"/, "kişilik kimlikleri uca elle yazılmamalı");
   const schema = readFileSync(new URL("../db/schema.ts", import.meta.url), "utf8");
   assert.match(schema, /enum: POPULACE_PERSONA_IDS/, "şema kısıtı da aynı listeden türemeli");
+});
+
+test("admin kimliği canlı sağlayıcı doğrulamasından geçmeden yazılmaz", () => {
+  assert.match(routeSource, /verifyProviderConnection/, "PUT ve model değişimi gerçek sağlayıcıyı doğrulamalı");
+  assert.match(routeSource, /validTextTemperature/, "temperature değeri kaydedilmeden sınırlandırılmalı");
+  assert.match(routeSource, /temperature: targetTemperature/, "güncelleme testi kaydedilecek temperature ile yapılmalı");
+  assert.match(councilBriefingSource, /temperature: temperature \?\? \.55/, "Divan görüşü channel ayarını gerçekten kullanmalı");
+  assert.match(routeSource, /status: 422/, "geçersiz anahtar ya da model kaydedilmemeli");
+});
+
+test("Anthropic sağlayıcı varsayılanı geçerli bir temperature durumu olarak kabul edilir", () => {
+  assert.match(routeSource, /temperature !== null/, "Anthropic'in null varsayılanı sayı doğrulamasına takılmamalı");
+});
+
+test("global taşma kilidi admin panelinin dikey kaydırmasını engellemez", () => {
+  assert.match(adminScrollSource, /height:\s*100dvh/, "admin görünür ekran yüksekliğine sabitlenmeli");
+  assert.match(adminScrollSource, /overflow-y:\s*auto/, "admin kendi dikey kaydırma alanına sahip olmalı");
 });
 
 // --- Kişilik listesi -----------------------------------------------------

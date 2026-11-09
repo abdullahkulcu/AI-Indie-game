@@ -122,13 +122,15 @@ kısıtıdır — yeni bir değer eklemek migration istemez.
 | `llm_credentials` | BYOK: sağlayıcı, model, AES-256-GCM şifreli anahtar + IV + `additionalData` sürüm etiketi. |
 | `intel_defenses` | Karşı-istihbarat seviyesi ve aktif olduğu süre (casus tespiti ve kese ifşası buradan okunur). |
 | `intel_missions` | Gönderilen ajan görevi: başarı/tespit ihtimali, rapor (JSON), durum. Aynı hedefe ikinci ajan aynı anda yollanamaz (kısmi unique index). |
-| `shared_mines` | Channel başına ortak demir damarı: kalan/çıkarılan cevher. |
+| `spy_networks` | Başarılı keşiften sonra kurulan kalıcı hat: yerleşme, düzenli rapor, açığa çıkma zamanı ve yalnızca gönderenin görebildiği son rapor. |
+| `shared_mines` | Channel başına aktif ortak demir damarı: kalan/çıkarılan cevher, damar sırası ve harita konumu. Tükenince deterministik sonraki sahaya döner. |
 | `shared_mine_workers` | Bir krallığın madendeki işçisi ve henüz teslim edilmemiş kesirli cevheri (`pendingOre`). |
 | `standing_orders` | Kralın gece vardiyası için verdiği kalıcı emir: otonomi (`autonomous`/`ask`), günlük eylem tavanı, durum. |
 | `pending_decisions` | General'in riskli bulup Kral'ın teyidine sunduğu tek bekleyen emir. |
 | `general_ledger` | General'in Kral hakkındaki kalıcı hafızası; aynı olay türü tek satırda `weight` ile birikir. |
 | `general_requests` | General'in Kral'dan açık talepleri (kışla, maaş, istihkak…), durumdan türetilir. |
 | `populace_demands` | HALKIN SESİ: halkın/garnizonun açık talepleri — `general_requests`'in birebir kardeşi, ayrı tablo. `text` aynı zamanda ÖNBELLEK: Halk-AI'sı olan channel'da cümleyi model üretir, `tone` hangi sertlik kademesinde üretildiğini tutar (NULL = deterministik şablon). |
+| `council_briefings` | Kralın önündeki tek güncel Divan belgesi: üç görüş, bağlantı durumu, üretim zamanı ve okundu işareti. Cron üretir; oturum açıldıktan sonra Generalin yönettiği sözlü tutanak gerçek zamanda aşamalı ilerler, sonuç Kralın önüne gelmeden gündem kapanmaz. |
 | `agitations` | DIŞ PROPAGANDA görev satırı: kese/haydut yönlendirme; çift-bekleme penceresi DB seviyesinde kısmi unique index ile korunur. |
 | `rate_limits` | Sabit pencereli hız sınırı sayaçları; tek `upsert` ile atomik artar. |
 | `negotiations` | İki krallığın Generalinin masası: konu, durum, tur sayısı, sunulan şart. |
@@ -213,9 +215,9 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 ### 3.5 Ortak maden (mine)
 
 - **Motor:** `engine/mine.ts` — `settleMine`: kesirli üretim `pendingOre`'da
-  birikir (10 dk'da bir tam sayıya döner), damar bitince üretim durur,
-  sıra deterministik (userId'ye göre) olduğu için "son cevher kime gider"
-  sorusu her zaman aynı cevabı verir.
+  birikir (10 dk'da bir tam sayıya döner); son cevher teslim edilince ekip
+  köylerine döner ve haritada yeni damar belirir. Sıra deterministik (userId'ye
+  göre) olduğu için "son cevher kime gider" sorusu her zaman aynı cevabı verir.
 - **Sarma:** `app/api/mine/route.ts` doğrudan çağırır; ayrı bir `server/`
   dosyası yoktur (route kısa ve odaklı).
 - **API:** `GET/POST /api/mine` (işçi gönder/geri çek, cevher teslim al —
@@ -284,7 +286,8 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 
 ### 3.10 Casusluk / karşı-istihbarat (intel)
 
-- **Motor/veri:** `db/schema.ts` → `intel_missions`, `intel_defenses`.
+- **Motor/veri:** `db/schema.ts` → `intel_missions`, `intel_defenses`,
+  `spy_networks`; sabit ağ süresi/bedeli `engine/intelligence.ts`tedir.
   Başarı/tespit ihtimali zarla belirlenir (bu, `engine/`'in DIŞINDA —
   `app/api/world/route.ts` içinde `crypto.getRandomValues` ile — çünkü
   saf/deterministik olma zorunluluğu yalnızca `engine/`'e aittir, tek seferlik
@@ -292,9 +295,12 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 - **Sarma:** `server/world-projection.ts` (`projectPublicKingdom`,
   `intelReportOf` — rapor İÇERİĞİ TEK YERDE kararlaşır, hedefin ambarı asla
   sızmaz).
-- **API:** `POST /api/world` (ajan gönder), `GET /api/world`
-  (`resolveDueMissions`, biten görevleri çözer).
-- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu).
+- **API:** `POST /api/world` (ajan gönder veya ağ kur), `GET /api/world`
+  (`resolveDueMissions`, keşifleri çözer; ağ raporunu yalnızca sahibi görür).
+  Ağın yerleşmesi, rapor yenilemesi ve ifşası `POST /api/cron` turunda olur;
+  istemci ekranının açık olması sonuç üretmez.
+- **UI:** `diyar` sekmesi (komşu listesi, keşif raporu) ve Dolaylı Mücadele
+  → İstihbarat (kalıcı ağ emri).
 
 ### 3.11 General — BYOK LLM entegrasyonu
 
@@ -316,15 +322,26 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
     hiçbir şey yoksa model HİÇ çağrılmaz.
   - `server/llm-provider.ts` — ARKA PLANDAKİ tek sağlayıcı çağrısı, iki kipli:
     `callProvider` (araç çağrılı — gece vardiyası ve çevrimdışı masa),
-    `callProviderText` (araçsız düz metin — Halk-AI'nın sesi). Kral'ın kendi
+    `callProviderText` (araçsız düz metin — Halk-AI'nın sesi ve Divan
+    danışmanlarının görüşü), `verifyProviderConnection` (admin kimliğini
+    yazmadan önce küçük canlı doğrulama) ve sır taşımayan sağlayıcı hata
+    sınıflandırması. `compatibleSamplingOptions`, uyarlamalı düşünme kullanan
+    güncel Anthropic modellerine varsayılan dışı `temperature` göndermeyerek
+    admin bağlantı testi ile gerçek oyun çağrısının uyumlu kalmasını sağlar.
+    Channel Halk-AI kimliği OpenAI için 0–1 arası bir anlatım sıcaklığı da
+    taşıyabilir; admin seçimi hem Halk/Garnizon anlatımına hem Divan görüşüne
+    gider ve canlı doğrulama aynı değerle yapılır.
+    Kral'ın kendi
     turu (`app/api/general` içindeki `openAI`/`anthropic`) bilinçli olarak ayrı
     kalır: o yol tek istekte metin+araç okur, hatayı Kral'a gösterilecek
     Türkçe mesaja çevirir. Gerekçe dosya başında yazılı.
 - **API:** `POST /api/general` (Kral oturumdayken canlı sohbet + araç çağrısı),
+  `GET/POST /api/council` (saklı Divan belgesini okur ve Kralın okundu işaretini
+  yazar; görüş üretimi cron'daki `server/council-briefing.ts` yolundadır),
   `app/api/cron/route.ts` → `runOne` (gece vardiyası: saatte bir, saatlik
   dilim modele gitmeden ÖNCE veritabanı seviyesinde kilitlenir).
-- **UI:** `meclis` sekmesi (sohbet), `defter` sekmesi (General'in hafızası ve
-  talepleri).
+- **UI:** `meclis` sekmesi (Halk, Garnizon ve General görüşleri), `general`
+  sekmesi (sohbet), `defter` sekmesi (General'in hafızası ve talepleri).
 
 ### 3.12 Dünya haritası ve channel/sezon sistemi (world-map)
 
@@ -347,14 +364,16 @@ sarar, hangi API ucu tetikler, hangi UI sekmesinde görünür.
 | `auth` | GET/POST | Oyuncu girişi/kaydı/çıkışı; hız sınırlı (`login`, `register`). |
 | `admin-auth` | GET/POST | Ayrı yönetici oturumu (`demirkale_admin_session` çerezi); IP + e-posta ikili hız sınırı. |
 | `admin` | GET/POST/PATCH | Oyuncu/channel yönetimi (yalnızca `role=admin`). |
+| `admin/populace-ai` | GET/PUT/PATCH/DELETE | Channel Halk/Garnizon AI kimliklerini yönetir; yazma ve model değişiminde sağlayıcıyı canlı doğrular, sırları cevaba taşımaz. |
 | `channels` | GET | Aktif channel listesi + oyuncunun üyeliği; üyelik-onarım mantığı. |
 | `save` | GET/PUT/DELETE | Krallığın bulut kaydı. `PUT` → `validateGameSave` + iyimser kilit (`baseRevision`); `DELETE` → önce açık masalar/anlaşmalar kapatılır, sonra kayıt silinir. |
 | `general` | POST | Kral oturumdayken General'le sohbet + araç çağrısı; risk/itiraz, defter, talepler, müzakere özeti hep buradan geçer. |
+| `council` | GET/POST | Cron'un ürettiği saklı Divan belgesini okur; POST yalnızca Kralın “okudum” işaretini yazar. |
 | `world` | GET/POST | Harita, komşular, ortak maden konumu, ajan gönderme, dış kese/yönlendirme gönderme. |
 | `negotiate` | GET/POST | Müzakere masalarının okunması/açılması/cevaplanması/şart sunulması/imzalanması. |
 | `mine` | GET/POST | Ortak madende işçi gönder/geri çek, cevher teslim al. |
 | `byok` | GET/PUT | LLM kimlik bilgisinin (sağlayıcı/model/API anahtarı) okunması (yalnızca meta veri) ve şifreli yazılması. |
-| `cron` | POST | Tek giriş noktası: temizlik (`sessions`/`rate_limits`), haraç turu, dış kese varışı, çevrimdışı müzakere cevapları, gece vardiyası. `x-cron-secret` başlığıyla korunur. |
+| `cron` | POST | Tek giriş noktası: temizlik (`sessions`/`rate_limits`), haraç turu, dış kese varışı, çevrimdışı müzakere cevapları, gece vardiyası ve due Divan belgeleri. `x-cron-secret` başlığıyla korunur. |
 
 ## 5. Güvenlik sınırları
 

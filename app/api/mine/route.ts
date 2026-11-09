@@ -1,11 +1,12 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { channelMembers, channels, gameSaves, sharedMines, sharedMineWorkers } from "../../../db/schema";
+import { channelMembers, channels, gameSaves, sharedMineInfluence, sharedMines, sharedMineWorkers } from "../../../db/schema";
 import { currentUser } from "../../../server/account-auth";
 import { projectPublicKingdom } from "../../../server/world-projection";
 import { CAPS, parseStoredSave } from "../../../server/save-validation";
 import { writeSaveIfUnchanged } from "../../../server/save-write";
-import { MINE_TICK_MIN_MS, oreRate, settleMine } from "../../../engine/mine";
+import { MINE_ELAPSED_CAP_HOURS, MINE_INFLUENCE_WINDOW_HOURS, MINE_TICK_MIN_MS, SHARED_MINE_ORE_CAPACITY, advanceMineInfluence, mineSiteFor, oreRate, settleMine } from "../../../engine/mine";
+import { isCurrentMineCrew } from "../../../server/mine-roster";
 
 /** Madende çalışabilecek halkın oranı ve channel genelindeki toplam yuva. */
 const PERSONAL_SHARE = .2;
@@ -29,7 +30,11 @@ async function context(userId: string, channelId: string) {
   const [member] = await getDb().select().from(channelMembers).where(and(eq(channelMembers.userId, userId), eq(channelMembers.channelId, channel.id), eq(channelMembers.status, "active"))).limit(1);
   if (!member) return null;
   const id = `mine:${channel.id}`;
-  await getDb().insert(sharedMines).values({ id, channelId: channel.id, lastTickAt: Date.now() }).onConflictDoNothing();
+  const site = mineSiteFor(channel.id, 0);
+  await getDb().insert(sharedMines).values({
+    id, channelId: channel.id, name: site.name, vein: site.vein,
+    positionX: site.position.x, positionZ: site.position.z, lastTickAt: Date.now(),
+  }).onConflictDoNothing();
   const [mine] = await getDb().select().from(sharedMines).where(eq(sharedMines.id, id)).limit(1);
   return mine ? { channel, mine } : null;
 }
@@ -64,6 +69,107 @@ async function deliverOre(userId: string, ore: number, mineName: string, now: nu
 }
 
 /**
+ * Maden emri ve damar tükenmesi sonrasında işçilerin durumunu sunucu kaydına
+ * yazar. `mineWorkers` üretimi doğrudan etkilediği için yalnız tarayıcıdaki
+ * sayıyı değiştirmek, eski sekmenin işçileri hayalet gibi madende tutmasına
+ * neden olurdu.
+ */
+async function setMineWorkers(userId: string, workers: number, notice: string | null = null, now = Date.now()) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const [row] = await getDb().select().from(gameSaves).where(eq(gameSaves.userId, userId)).limit(1);
+    const game = row ? parseStoredSave(row.gameState) : null;
+    if (!row || !game) return false;
+    const next = {
+      ...game,
+      mineWorkers: Math.max(0, Math.floor(workers)),
+      notices: notice
+        ? [{ kind: "MADEN", text: notice, at: now }, ...game.notices].slice(0, 20)
+        : game.notices,
+    };
+    if (await writeSaveIfUnchanged(userId, row.revision, next)) return true;
+  }
+  return false;
+}
+
+type MineTransition = { previousName: string; nextName: string; message: string };
+type MineTick = typeof sharedMines.$inferSelect & { totalWorkers: number; renewal?: MineTransition };
+
+/**
+ * Channel değiştiren ya da kaydı artık okunamayan hesapların eski maden
+ * satırlarını kapasite hesabından çıkarır. Önceden bu satırlar Diyar panelinde
+ * görünmüyor, ama yine de 60 yuvayı doldurmuş sayılıyordu.
+ */
+async function currentMineCrew(mine: typeof sharedMines.$inferSelect, now: number) {
+  const db = getDb();
+  const crew = await db.select().from(sharedMineWorkers).where(eq(sharedMineWorkers.mineId, mine.id));
+  if (!crew.length) return crew;
+  const userIds = crew.map(row => row.userId);
+  const [members, saves] = await Promise.all([
+    db.select({ userId: channelMembers.userId }).from(channelMembers).where(and(
+      eq(channelMembers.channelId, mine.channelId),
+      eq(channelMembers.status, "active"),
+      inArray(channelMembers.userId, userIds),
+    )),
+    db.select({ userId: gameSaves.userId, gameState: gameSaves.gameState }).from(gameSaves).where(inArray(gameSaves.userId, userIds)),
+  ]);
+  const activeUsers = new Set(members.map(row => row.userId));
+  const gameByUser = new Map(saves.map(row => [row.userId, parseStoredSave(row.gameState)]));
+  const stale = crew.filter(row => !isCurrentMineCrew({
+    activeMembership: activeUsers.has(row.userId),
+    mineChannelId: mine.channelId,
+    game: gameByUser.get(row.userId) ?? null,
+  }));
+  if (!stale.length) return crew;
+
+  const staleIds = stale.map(row => row.userId);
+  await db.delete(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, mine.id), inArray(sharedMineWorkers.userId, staleIds)));
+  // Bu işçiler yerel üretimden de düşülüyordu. Satırları kaldırırken bu
+  // sunucu-türetilmiş alanı da düzeltiriz; eski channel'ın hayalet ekibi
+  // krallığın ekonomisini artık yavaşlatmaz.
+  await Promise.all(staleIds.map(userId => setMineWorkers(
+    userId,
+    0,
+    "Önceki channel'daki maden görevi kapatıldı; işçiler köylerine döndü.",
+    now,
+  )));
+  return crew.filter(row => !staleIds.includes(row.userId));
+}
+
+/**
+ * Son cevher de teslim edildikten sonra aynı channel'da yeni bir damar açar.
+ * Eski ekip otomatik olarak köylerine döner; yeni sahaya işçi göndermek bilinçli
+ * bir Kral kararıdır. Böylece tükenmiş sahada üretim sonsuza dek donmaz ve
+ * işçiler yerel üretimden haksız yere eksik kalmaz.
+ */
+async function renewDepletedMine(mine: typeof sharedMines.$inferSelect, crew: Array<typeof sharedMineWorkers.$inferSelect>, now: number) {
+  if (mine.oreRemaining > 0) return null;
+  const nextSite = mineSiteFor(mine.channelId, mine.vein + 1);
+  const [renewed] = await getDb().update(sharedMines)
+    .set({
+      name: nextSite.name,
+      vein: nextSite.vein,
+      positionX: nextSite.position.x,
+      positionZ: nextSite.position.z,
+      oreRemaining: SHARED_MINE_ORE_CAPACITY,
+      extractedOre: 0,
+      lastTickAt: now,
+      influenceOwnerId: null,
+      influenceGameHours: 0,
+    })
+    // İki sekme aynı son cevheri gördüğünde yalnız onu gerçekten tüketen istek
+    // sahayı yeniler. Diğer istek yeni damarı olduğu gibi okur.
+    .where(and(eq(sharedMines.id, mine.id), eq(sharedMines.vein, mine.vein), eq(sharedMines.oreRemaining, 0)))
+    .returning();
+  if (!renewed) return null;
+
+  await getDb().delete(sharedMineWorkers).where(eq(sharedMineWorkers.mineId, mine.id));
+  await getDb().delete(sharedMineInfluence).where(eq(sharedMineInfluence.mineId, mine.id));
+  const message = `${mine.name} tükendi; işçiler köylerine döndü. ${renewed.name} Diyar haritasında bulundu, yeniden işçi gönderebilirsiniz.`;
+  await Promise.all(crew.map(worker => setMineWorkers(worker.userId, 0, message, now)));
+  return { previousName: mine.name, nextName: renewed.name, message } satisfies MineTransition;
+}
+
+/**
  * Madeni `now` anına kadar ilerletir: payları hesaplar, damardan düşer ve
  * teslim edilebilen cevheri oyuncuların kayıtlarına yazar.
  *
@@ -71,16 +177,28 @@ async function deliverOre(userId: string, ore: number, mineName: string, now: nu
  * iki istek — iki sekme, iki oyuncunun yoklaması — aynı cevheri iki kez
  * dağıtamaz. Kaybeden istek üretim yapmadan madenin taze hâlini döner.
  */
-async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, options: { now: number; forceUserId?: string | null } = { now: Date.now() }) {
+async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, options: { now: number; forceUserId?: string | null } = { now: Date.now() }): Promise<MineTick> {
   const now = options.now;
-  const crew = await getDb().select().from(sharedMineWorkers).where(eq(sharedMineWorkers.mineId, mine.id));
+  const crew = await currentMineCrew(mine, now);
   const totalWorkers = crew.reduce((total, row) => total + row.workers, 0);
   // Panel 10 saniyede bir yokluyor; her yoklamada bütün ekibi yazmayız. Geçen
   // süre `lastTickAt` üzerinde bekler, hiçbir cevher kaybolmaz.
-  if (!options.forceUserId && now - mine.lastTickAt < MINE_TICK_MIN_MS) return { ...mine, totalWorkers };
+  // Tükenmiş damar, normal üretim penceresini beklemez: ilk gören Kral için
+  // aynı istekte yeni saha açılır. Dolu damarlar yazma fırtınasına karşı eşiği
+  // kullanmaya devam eder.
+  if (!options.forceUserId && mine.oreRemaining > 0 && now - mine.lastTickAt < MINE_TICK_MIN_MS) return { ...mine, totalWorkers };
+  const elapsedHours = Math.max(0, Math.min(MINE_ELAPSED_CAP_HOURS, (now - mine.lastTickAt) / 3_600_000));
+  const samples = await getDb().select().from(sharedMineInfluence).where(eq(sharedMineInfluence.mineId, mine.id));
+  const influence = advanceMineInfluence({
+    crew: crew.map(row => ({ userId: row.userId, workers: row.workers })),
+    samples: samples.map(row => ({ userId: row.userId, workerHours: row.workerHours })),
+    gameHours: mine.influenceGameHours,
+    elapsedGameHours: elapsedHours * speed,
+    ownerUserId: mine.influenceOwnerId,
+  });
   const settlement = settleMine(
     crew.map(row => ({ userId: row.userId, workers: row.workers, pendingOre: row.pendingOre, lastDeliveryAt: row.lastDeliveryAt })),
-    { speed, hours: (now - mine.lastTickAt) / 3_600_000, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null },
+    { speed, hours: elapsedHours, oreRemaining: mine.oreRemaining, now, forceUserId: options.forceUserId ?? null, influenceOwnerId: mine.influenceOwnerId },
   );
 
   const claimed = await getDb().update(sharedMines)
@@ -88,12 +206,23 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
       lastTickAt: now,
       oreRemaining: mine.oreRemaining - settlement.extracted,
       extractedOre: mine.extractedOre + settlement.extracted,
+      influenceOwnerId: influence.ownerUserId,
+      influenceGameHours: influence.gameHours,
     })
     .where(and(eq(sharedMines.id, mine.id), eq(sharedMines.lastTickAt, mine.lastTickAt)))
     .returning({ id: sharedMines.id });
   if (!claimed.length) {
     const [fresh] = await getDb().select().from(sharedMines).where(eq(sharedMines.id, mine.id)).limit(1);
     return { ...(fresh ?? mine), totalWorkers };
+  }
+
+  // Pencere defteri işçi satırlarından ayrıdır: işçisini geri çeken Kral,
+  // geçen saatlerdeki emeğini silerek liderlik yarışını değiştiremez.
+  await getDb().delete(sharedMineInfluence).where(eq(sharedMineInfluence.mineId, mine.id));
+  if (influence.samples.length) {
+    await getDb().insert(sharedMineInfluence).values(influence.samples.map(sample => ({
+      mineId: mine.id, userId: sample.userId, workerHours: sample.workerHours,
+    })));
   }
 
   let returned = 0;
@@ -119,11 +248,21 @@ async function tickMine(mine: typeof sharedMines.$inferSelect, speed: number, op
   }
 
   const extracted = settlement.extracted - returned;
+  const completed = { ...mine, lastTickAt: now, oreRemaining: mine.oreRemaining - extracted, extractedOre: mine.extractedOre + extracted, influenceOwnerId: influence.ownerUserId, influenceGameHours: influence.gameHours };
+  const renewal = await renewDepletedMine(completed, crew, now);
+  if (renewal) {
+    const [fresh] = await getDb().select().from(sharedMines).where(eq(sharedMines.id, mine.id)).limit(1);
+    return { ...(fresh ?? completed), totalWorkers: 0, renewal };
+  }
+  // Başka bir eşzamanlı istek damarı bu arada yenilediyse eski, boş sahayı
+  // döndürmeyiz. Kullanıcı tek kare dahi tükenmiş ikonu görmeden yeni konumu
+  // alır.
+  if (completed.oreRemaining === 0) {
+    const [fresh] = await getDb().select().from(sharedMines).where(eq(sharedMines.id, mine.id)).limit(1);
+    if (fresh && fresh.vein !== completed.vein) return { ...fresh, totalWorkers: 0 };
+  }
   return {
-    ...mine,
-    lastTickAt: now,
-    oreRemaining: mine.oreRemaining - extracted,
-    extractedOre: mine.extractedOre + extracted,
+    ...completed,
     totalWorkers,
   };
 }
@@ -150,7 +289,9 @@ export async function GET(request: Request) {
     channelSlots: CHANNEL_SLOTS,
     // İşçi başına saatlik cevher: panel bunu SABİT KODLAMASIN, kural motorda.
     orePerWorkerHour: oreRate(1, value.channel.speed),
-    mine: { id: mine.id, name: mine.name, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: -52, z: 8 } },
+    mine: { id: mine.id, name: mine.name, vein: mine.vein, oreRemaining: mine.oreRemaining, extractedOre: mine.extractedOre, totalWorkers: mine.totalWorkers, position: { x: mine.positionX, z: mine.positionZ } },
+    influence: { ownerId: mine.influenceOwnerId, ownerName: participants.find(participant => participant.id === mine.influenceOwnerId)?.name ?? null, gameHours: mine.influenceGameHours, windowHours: MINE_INFLUENCE_WINDOW_HOURS },
+    renewal: mine.renewal ?? null,
     participants,
   });
 }
@@ -164,10 +305,11 @@ export async function POST(request: Request) {
   if (!value) return response({ error: "Bu aktif channel'a katılmadınız." }, 403);
   // İşçilerini çeken oyuncuya küsuratı da ödenir: satır birazdan silinecek,
   // beklemeye bırakılan cevher onunla birlikte yok olurdu.
-  await tickMine(value.mine, value.channel.speed, { now: Date.now(), forceUserId: body.action === "leave" ? user.id : null });
+  const mine = await tickMine(value.mine, value.channel.speed, { now: Date.now(), forceUserId: body.action === "leave" ? user.id : null });
   if (body.action === "leave") {
-    await getDb().delete(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, value.mine.id), eq(sharedMineWorkers.userId, user.id)));
-    return response({ working: false, workers: 0 });
+    await getDb().delete(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, mine.id), eq(sharedMineWorkers.userId, user.id)));
+    await setMineWorkers(user.id, 0);
+    return response({ working: false, workers: 0, renewal: mine.renewal ?? null });
   }
   if (body.action !== "join") return response({ error: "Geçersiz maden emri." }, 400);
 
@@ -182,13 +324,14 @@ export async function POST(request: Request) {
   // Maden rakip bir kaynaktır: channel genelinde sınırlı yuva var, biri çok
   // alırsa diğerine az kalır. Kendi mevcut işçini hesaptan düş.
   const [taken] = await getDb().select({ total: sql<number>`coalesce(sum(${sharedMineWorkers.workers}), 0)` })
-    .from(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, value.mine.id), ne(sharedMineWorkers.userId, user.id)));
+    .from(sharedMineWorkers).where(and(eq(sharedMineWorkers.mineId, mine.id), ne(sharedMineWorkers.userId, user.id)));
   const othersUse = Number(taken?.total ?? 0);
   const free = Math.max(0, CHANNEL_SLOTS - othersUse);
   if (requested > free) {
-    return response({ error: `Madende yer kalmadı: ${CHANNEL_SLOTS} yuvanın ${othersUse}'i başka krallıklarca tutuluyor, size ${free} kaldı.`, free }, 409);
+    return response({ error: `Madende yalnız ${free} boş yuva var; ${requested} işçi istediniz. Diğer krallıklar ${othersUse}/${CHANNEL_SLOTS} yuvayı tutuyor.`, free }, 409);
   }
 
-  await getDb().insert(sharedMineWorkers).values({ mineId: value.mine.id, userId: user.id, workers: requested }).onConflictDoUpdate({ target: [sharedMineWorkers.mineId, sharedMineWorkers.userId], set: { workers: requested } });
-  return response({ working: true, workers: requested, cap, channelFree: free - requested, channelSlots: CHANNEL_SLOTS });
+  await getDb().insert(sharedMineWorkers).values({ mineId: mine.id, userId: user.id, workers: requested }).onConflictDoUpdate({ target: [sharedMineWorkers.mineId, sharedMineWorkers.userId], set: { workers: requested } });
+  await setMineWorkers(user.id, requested);
+  return response({ working: true, workers: requested, cap, channelFree: free - requested, channelSlots: CHANNEL_SLOTS, renewal: mine.renewal ?? null });
 }

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  FACTION_THRESHOLDS, advanceFaction, factionDrag, factionLeaderName,
-  factionNotice, factionPressureOf, factionState, factionTarget,
+  FACTION_THRESHOLDS, PROMISE_BREACH, advanceBrokenPromiseFaction, advanceFaction, brokenPromiseTarget, councilNeglectPressure, factionDemandOf, factionDrag, factionLeaderName,
+  factionNotice, factionPressureOf, factionSettlement, factionState, factionTarget,
 } from "../engine/faction";
 import { suppression } from "../engine/populace";
 import { tick } from "../engine/tick";
@@ -43,6 +43,23 @@ test("hedef rıza eşiğin altına indikçe büyür ve 100'de tavanlanır", () =
   assert.equal(factionTarget(20), 100, "tavan aşılmaz");
 });
 
+test("tutulmayan ferman rıza iyi kalsa bile muhalefet hedefini yükseltir", () => {
+  assert.equal(brokenPromiseTarget(70, 100, 100, 100, 100), 0, "tam dağıtım ek baskı üretmez");
+  assert.equal(brokenPromiseTarget(70, 100, 81, 100, 100), 0, "eşik altı fark gürültüdür");
+  const target = brokenPromiseTarget(70, 100, 70, 100, 100);
+  assert.ok(target >= PROMISE_BREACH.targetAtGap);
+  const ordinary = advanceFaction(0, 70, 6);
+  const betrayed = advanceBrokenPromiseFaction(0, 70, 100, 70, 100, 100, 6);
+  assert.ok(betrayed > ordinary, `ferman baskısı daha hızlı olmalı: ${betrayed} / ${ordinary}`);
+});
+
+test("tutulmayan fermanın baskısı da kapalı çözümle adım bağımsızdır", () => {
+  const single = advanceBrokenPromiseFaction(0, 70, 100, 40, 100, 100, 6);
+  let stepped = 0;
+  for (let i = 0; i < 6 * 60; i += 1) stepped = advanceBrokenPromiseFaction(stepped, 70, 100, 40, 100, 100, 1 / 60);
+  assert.ok(Math.abs(single - stepped) < 1e-9, `tek: ${single}, bölünmüş: ${stepped}`);
+});
+
 // --- Kabul kriteri: ölçülen zaman ölçeği -----------------------------------
 
 test("rıza 24 saat 30'un altında kalırsa baskı 0'dan 60'ın üstüne çıkar", () => {
@@ -81,6 +98,26 @@ test("baskı 0-100 aralığını hiç terk etmez", () => {
   assert.equal(factionPressureOf({ factionPressure: 500 }), 100);
   assert.equal(factionPressureOf({ factionPressure: -20 }), 0);
   assert.equal(factionPressureOf({}), 0);
+});
+
+test("örgütlü muhalefet önce vergiyi, sonra tam sofrayı masaya getirir", () => {
+  assert.equal(factionDemandOf({ factionPressure: 49, taxRate: 40, foodRation: 60 }), null);
+  assert.deepEqual(factionDemandOf({ factionPressure: 50, taxRate: 35, foodRation: 60 })?.policy, { key: "taxRate", value: 25 });
+  assert.deepEqual(factionDemandOf({ factionPressure: 70, taxRate: 10, foodRation: 70 })?.policy, { key: "foodRation", value: 100 });
+  assert.equal(factionDemandOf({ factionPressure: 70, taxRate: 10, foodRation: 100 }), null);
+});
+
+test("koalisyon kabulü baskıyı indirir, tekrarlanan ret daha sert yükseltir", () => {
+  assert.equal(factionSettlement(70, "accept").pressure, 38);
+  assert.equal(factionSettlement(70, "decline", 0).pressure, 76);
+  assert.equal(factionSettlement(70, "decline", 3).pressure, 82);
+  assert.equal(factionSettlement(99, "decline", 99).pressure, 100);
+});
+
+test("okunmayan Divan açık baskıyı hızlandırır ama rıza toparlanınca ters ceza yazmaz", () => {
+  assert.ok(councilNeglectPressure(10, 25, "watch") > 10);
+  assert.ok(councilNeglectPressure(10, 25, "urgent") > councilNeglectPressure(10, 25, "watch"));
+  assert.equal(councilNeglectPressure(40, 70, "urgent"), 40);
 });
 
 // --- Zapt gücünü zayıflatması ---------------------------------------------

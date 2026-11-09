@@ -175,9 +175,16 @@ bunu yöneten bir ekran.
   - Model/kişilik **değiştirilebilir ama nadiren** (ör. sezon başına) —
     tam sabit değil, admin dilediği anda değil.
   - Kimlik seviyesi **karışık**: admin channel'a bir varsayılan persona
-    atar; isterse belirli krallıklara özel farklı bir persona verebilir
-    (override). Başlangıçta düşük maliyet (channel varsayılanı yeter),
-    ihtiyaç halinde krallık bazlı detaylandırma imkanı açık kalır.
+  atar; isterse belirli krallıklara özel farklı bir persona verebilir
+  (override). Başlangıçta düşük maliyet (channel varsayılanı yeter),
+  ihtiyaç halinde krallık bazlı detaylandırma imkanı açık kalır.
+
+**Uygulama durumu (2026-11-07): Tamamlandı.** `populace_credentials`,
+adminin şifreli anahtarını channel varsayılanı veya kayıt-kimliği bazlı
+override olarak saklar; çözümleme yalnızca etkin üyelikte özel kaydın önce
+gelmesi kuralıyla yapılır. Yönetim Divanı'nda sağlayıcı, desteklenen model,
+persona ve (sağlayıcı destekliyorsa) temperature seçilir; anahtar sonradan
+hiçbir ekrana geri dönmez.
 
 ---
 
@@ -222,6 +229,12 @@ tek tek okunup özetlenir.
     gösterilmez) gerekip gerekmediği ayrıca değerlendirilmeli.
   - Kuruluş koruması süren krallıklar ortalamaya **girmez** (dış kese/göç
     ile aynı kural).
+
+**Uygulama durumu (2026-11-07): Tamamlandı.** `channelAverages`, Kralın
+kendi kaydını ve kuruluş korumasındaki rakipleri dışarıda bırakır; gizlilik
+için yeterli anonim örnek yoksa ortalama hiç üretmez. Diyar paneli rıza,
+istihkak, vergi ve muhalefet baskısını yalnızca anonim ortalamayla yan yana
+gösterir.
 
 ---
 
@@ -275,6 +288,12 @@ oyun dengesi hiç değişmez, yalnızca anlatım kalitesi değişir.
     (retry) ya da "son bilinen metni göster" gibi hafif bir güvenlik ağı
     düşünülebilir.
 
+**Uygulama durumu (2026-11-07): Tamamlandı.** Talebin açılıp kapanması ve
+oyun etkisi `engine/populace-voice.ts`te deterministik kalır; açık talebin
+metni ise Halk-AI kimliği bulunduğunda persona bağlamıyla üretilip kalıcı
+talep kaydına yazılır. Sağlayıcı yanıt veremezse aynı turda yeni bir söz
+uydurulmaz; sonraki senkron turunda yeniden denenir.
+
 ---
 
 ### 3. Asker olmadan savaşı ana anlatıya taşımak
@@ -314,6 +333,12 @@ eklemek.
   - **Efor güncellemesi:** kararlar nedeniyle bu madde artık "hızlı"
     değil **"orta"** — yeni sekme + zafer skoru formülü + formülün nasıl
     hesaplanacağı (hangi olaylar kaç puan) ayrı bir tasarım gerektiriyor.
+
+**Uygulama durumu (2026-11-07): Tamamlandı.** Dolaylı mücadele, Savaş
+bölümündeki ayrı İstihbarat sekmesine taşındı; siyasi ve istihbari araçlar
+ayrıldı. `engine/victory.ts`, dolaylı başarıları ve askerî katkıları ayrı
+sütunlarda toplayan sezon göstergesinin tek kaynağıdır; anonim sıra yalnız
+gizlilik eşiği sağlandığında gösterilir.
 
 ---
 
@@ -404,6 +429,12 @@ gözetlemesidir, tamamen farklı bir kanal.
     riskli/pahalı bir "derin gözetleme" görevi** olarak sunulur — daha
     düşük başarı ihtimali, daha yüksek bedel.
 
+**Uygulama durumu (2026-11-06):** `deep_observation` ayrı ajan görevidir.
+100 altın harcar, normal keşfin iki katı sürer, başarı ihtimali daha düşük ve
+fark edilme ihtimali daha yüksektir. Başarılı olursa normal rapora yalnızca
+Halkın ruh hâli etiketi eklenir; kesin rıza, ambar, maaş ve nöbet bilgisi
+hiçbir zaman rapora girmez.
+
 ---
 
 ### 6. Kritik kararlarda "halkın nabzı" göstergesi
@@ -442,6 +473,11 @@ Veto değil, güçlü bir sinyal.
     `severe` değil).
   - Gösterge **nitel bir etiket** olacak ("Halk bunu hoş karşılamaz" gibi),
     sayısal tahmin yok — min-maxing riski bilinçli olarak tercih edilmedi.
+
+**Uygulama durumu (2026-11-06):** Tamamlandı. Risk değerlendirmesi teyit
+bekleyen her orta ve ağır emir için nitel bir halk nabzı üretir; bu sinyal
+bekleyen kararla birlikte saklanır ve General ekranında karar onaylanmadan
+önce gösterilir. Sayısal rıza tahmini ya da ham halk verisi arayüze inmez.
 
 ---
 
@@ -483,6 +519,13 @@ fiyatı konuşuluyor" gibi). Kral'a doğrudan bir talep DEĞİL — yalnızca
     "tek tek alan yazma" disipliniyle dikkatli tasarlanmalı.
   - Üretim **saatte bir, cron'a biner** (yalnızca gerçekten bir şey varsa
     üretilir, gece vardiyası token disipliniyle tutarlı).
+
+**Uygulama durumu (2026-11-06):** Tamamlandı. `populace_feed` kalıcı
+günlüğü yalnız geçim, inşaat, garnizon, muhalefet, dünya olayı veya gizlilik
+eşiğini geçen anonim channel kıyası gibi anlamlı bağlamlarda yazılır. Üretim
+cron'dadır; aynı gündem altı saat dolmadan yeniden model çağırmaz. Satırlar
+Halk ekranındaki “Meydan Güncesi”nde gösterilir, General bağlamına veya oyun
+kurallarına girmez.
 
 ---
 
@@ -534,6 +577,14 @@ normal seyrine (mevcut kapalı-çözüm) devam eder.
   - Kral ısrarla reddederse **elebaşı sertleşir** (dil/baskı hızlanır),
     `engine/ledger.ts`'teki artan ağırlık deseniyle tutarlı.
 
+**Uygulama durumu (2026-11-06):** Tamamlandı. Örgütlü muhalefet önce vergi,
+sonra tam sofra talebini `engine/faction.ts`teki tek kuraldan seçer; Halk-AI
+yalnız bu talebin cümlesini yazar. Saatlik tur açık masayı üretir, Kral Halk
+ekranında kabul veya ret verir. Kabul gerçek politika fermanını yürürlüğe koyup
+baskıyı hızlı indirir; her ret baskıyı artırır ve bir sonraki Halk-AI sözünü
+sertleştirir. Kimlik yoksa yeni masa açılmaz, model hiçbir oyun etkisini
+doğrudan belirleyemez.
+
 ---
 
 ### 9. Referandum — Kral'ın halka soru sorması
@@ -573,7 +624,13 @@ bir gösterge).
     bilinçli bir istisnadır (yukarıdaki §2 güncellemesine bakın). Artık
     bu madde de Fikir 0'ın (Halk-AI kimlik altyapısı) bir uzantısı.
   - Kullanım sıklığı: **haftada 1** gibi bir tavan (günlük değil, ama
-    sezon başına birkaçtan daha sık).
+  sezon başına birkaçtan daha sık).
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. General yalnız Kral açıkça
+vergi veya istihkak için kamuoyu yoklaması istediğinde aracı çağırır. Destek
+yüzdesi `engine/referendum.ts`teki saf, deterministik toplumsal sinyalden
+gelir; Halk-AI yalnız kısa bir açıklama yazar. Sonuç haftalık bir kayda alınır,
+Halk ekranında görünür ve hiçbir politikayı kendiliğinden değiştirmez.
 
 ---
 
@@ -617,8 +674,16 @@ gömer.
     (gerçek 24 saat değil). Bu, `docs/plans/2026-08-22-acik-backlog-maddeleri.md`'deki
     "General'in günlük sayacı channel hızından bağımsız" maddesiyle AYNI
     kategoride bir düzeltme — ikisi birlikte, tutarlı bir "oyun-içi gün"
-    tanımıyla ele alınmalı (`server/night-shift.ts`'teki `DAY_MS` bu
-    tanımın TEK KAYNAĞI olmalı, ikinci bir yerde ayrı hesaplanmamalı).
+    tanımıyla ele alınmalı (`engine/game-time.ts` bu tanımın TEK KAYNAĞI
+    olmalı, ikinci bir yerde ayrı hesaplanmamalı).
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. Divan çevrimi 24 oyun
+saatidir ve channel hızına göre gerçek zamana çevrilir; gece vardiyasının gün
+penceresi de aynı `engine/game-time.ts` kaynağını kullanır. Kral açık Halk
+veya Garnizon gündemini çevrim boyunca kapatmazsa mevcut muhalefet baskısı
+yalnızca aynı sorunun yönünde birkaç oyun saati daha ilerler; sakin ya da
+rızası toparlanmış krallığa ters ceza yazılmaz. Sonraki Divan bu ihmali
+görünür bir defter satırıyla bildirir.
 
 ---
 
@@ -659,8 +724,18 @@ emrin KENDİSİ General'den gelir.
   - **General'in kendi doğrusunu aşan bir anı** olarak konuşur — üçüncü
     bir ses/persona GEREKMİYOR, mevcut General kimliğine oturur, yeni bir
     "kimin ödediği" sorusu açmaz.
-  - Tetikleyici eşikler **sezonda birkaç kez** görülecek kadar nadir
-    olmalı.
+- Tetikleyici eşikler **sezonda birkaç kez** görülecek kadar nadir
+  olmalı.
+
+#### Uygulama durumu (2026-11-07): TAMAM
+
+- `engine/fate.ts`, muhalefet, istihkak ve garnizon kırılmalarından yalnız en
+  ağır olanı seçen saf Kader eşiğini tanımlar.
+- Cron, `fate_events` içinde her channel/eşik için yalnız bir kalıcı ikilem
+  açar; model çağrısı ya da otomatik ferman üretmez.
+- Divan kartı Kralın ikilemi Generalle tartışmasına veya ertelemesine izin
+  verir. Tartışma seçeneği yalnızca General alanına soruyu taşır; karar yine
+  Kralındır.
 
 ---
 
@@ -739,11 +814,23 @@ daha rahat yaşıyor, biz neden böyleyiz" diye AÇIKÇA gelen bir talep.
   - "Kıyas" talebi **aynı `MAX_OPEN_DEMANDS` tavanını** diğer taleplerle
     paylaşır — ayrı bir kategori açılmadı.
   - Yenileme **saatlik cron turunda**, Fikir 1'in agregasyon sorgusuyla
-    aynı ritimde.
+  aynı ritimde.
+
+**Uygulama durumu (2026-11-07): Tamamlandı.** `populaceComparison`,
+Fikir 1'deki aynı anonim hesapla Halkın kendi durumunu karşılaştırır;
+`kiyas` talebi ancak birden çok ölçütte belirgin geri kalış yeterince uzun
+sürdüğünde açılır. Talep normal şiddettedir, diğer taleplerle aynı tavana
+girer ve hiçbir komşu adı ya da sayısı Kral'a sızmaz.
 
 ---
 
 ### 14. "General'in verdiği söz" ile Halk'ın gerçek yaşadığı arasındaki fark
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. Halkın sesi, ilan edilen
+yiyecek veya asker maaşı ile fiilen ulaştırılabilen pay arasındaki büyük
+makası ayrı bir talep olarak görünür kılar. Yiyecek farkında Halk, maaş
+farkında Garnizon söz alır; bu anlatım zaten çalışan açlık/firar etkisine
+ek bir ceza yazmaz. Ayrıntı: `updates/2026-11-07-halk-ferman-fiili-pay.md`.
 
 **Kaynak:** Claude'un önerisi (kullanıcıyla ayrı sohbette verilen senaryo).
 
@@ -792,6 +879,14 @@ var" diye buna açıkça itiraz edebilir.
 ---
 
 ### 15. Propaganda — enformasyon silahı olarak Halk-AI
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. Genel propaganda kesesi
+hedefe vardığında, yalnızca o hedefte Halk-AI tanımlıysa, hedef halkın
+kişiliğine uygun tek cümlelik ve belirsiz bir söylenti bildirimi üretir;
+aynı bildirim kayda geçtiği için yeniden model çağrısı yapılmaz. Sayısal etki
+LLM'e bırakılmaz: isyankâr halk baskıyı az daha fazla, bağlı halk az daha
+az hisseder; Halk-AI yoksa mevcut deterministik etki ve şablon bildirim
+aynen korunur.
 
 **Kaynak:** Claude'un önerisi (kullanıcıyla ayrı sohbette verilen senaryo).
 
@@ -877,6 +972,13 @@ BAĞIMSIZ, filtrelenmemiş bir cümle.
     başlamak yerine, ikisi birlikte güçlü bir versiyon olarak gelecek.
     Sıralama: **Fikir 0 → Fikir 2 → Fikir 16.**
 
+**Uygulama durumu (2026-11-07): Tamamlandı.** Acil halk veya garnizon
+talebi, General cevabından önce Meclis sohbetine kendi konuşma balonu olarak
+girer. Aynı açık talep yeniden konuşturulmaz; kapandıktan sonra yeniden
+açılırsa yeni bir söz hakkı doğar. Generalin gönderilen sohbet geçmişi bu
+balonları dışarıda bırakır; böylece Halkın sözü Generalin kendi cümlesi
+sanılmaz.
+
 ---
 
 ### 17. Göçün gerekçesi göreceli olabilir
@@ -925,6 +1027,13 @@ daha iyiyse göç eğilimi artar; komşular da kötüyse (herkes zorluk
 ---
 
 ### 18. Kral rakiplerini zayıflatmak için kendi halkını feda edebilir
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. Göç hedefi hâlâ Kralın
+seçemediği adaylar arasından belirlenir; yeni bir sürgün aracı eklenmedi.
+Ancak ilan edilen yiyecek veya asker maaşı fiilen ulaştırılamazsa, Halk
+Sesi bunu "tutulmayan ferman" olarak görür ve muhalefet baskısının hedefi
+normal düşük-rıza eğrisinin üstüne çıkar; baskı daha hızlı örgütlenir.
+Küçük, anlık farklar bu sonuç doğurmaz ve sistem niyet okumaz.
 
 **Kaynak:** Claude'un önerisi (kullanıcıyla ayrı sohbette verilen senaryo).
 
@@ -1083,6 +1192,12 @@ firar riskini daha hızlı taşır. Bugünkü `soldierUnrest` tek eksenli
     `units`'in temsilini değiştirmek demektir; `engine/actions.ts`,
     `engine/raids.ts`, save şeması ve UI'nin hepsi etkilenir.
 
+**Uygulama durumu (2026-11-07): Tamamlandı.** Birim bazlı
+`unitExperience` kaydı, başarılı nöbet/akın savunmasında kazanılır ve
+`defenseOf.power` hesabına girer. Yeni askerler deneyimi seyreltir, kayıplar
+hayatta kalan birliklerle birlikte deneyimi azaltır; Ordu ekranı genel ve tür
+bazlı saha deneyimini gösterir.
+
 ---
 
 ### 20. Channel-geneli paralı asker havuzu
@@ -1124,9 +1239,18 @@ fazlası olan) asker "kiralayabilir" — ekonomik gücü doğrudan askeri güce
     caydırıcılık değil.
   - Fiyat **serbest müzakereyle** belirlenir (müzakere sisteminin doğal
     bir uzantısı).
-  - Kayıp **kiralayan krallığa** ait sayılır (kendi vatandaşı öldü) —
+- Kayıp **kiralayan krallığa** ait sayılır (kendi vatandaşı öldü) —
     kiralamanın gerçek bir riski/bedeli olur, kiracı için bedelsiz bir
     "kalkan" olmaz.
+
+- **Uygulama durumu (2026-11-06):**
+  - `units.mercenary` katalogda ayrı, kışlada eğitilemeyen ama garnizon,
+    akın, abluka ve sefer hesaplarına katılan birlik türüdür.
+  - Müzakere şartı asker sayısı, peşin altın bedeli, kiralayan taraf ve
+    süreyi taşır; imza iki krallığın kaydını ve sözleşmeyi tek işlemde yazar.
+  - Sözleşme bitiminde hayatta kalanlar kiralayanın nüfusuna döner. Kiracı
+    aktif seferdeyse dönüş, saha kuvvetinin doğru çözülmesi için sefer sonuna
+    ertelenir. Aynı kiracıya ikinci aktif sözleşme açılamaz.
 
 ---
 
@@ -1174,9 +1298,16 @@ kazanma).
     cezası işletir** (`punishAgitator` deseniyle aynı).
   - Süre tavanı **yok** — Kral dilediği kadar sürdürebilir, üretim/
     savunma kaybı zaten doğal bir fren.
-  - **Fikir 19 (birlik deneyimi) ile bağlantılı**: uzun ablukada bekleyen
-    ordunun deneyimi/morali de etkilenir — bu iki fikir birlikte
-    tasarlanmalı, ayrı fazlara bölünmemeli.
+- **Fikir 19 (birlik deneyimi) ile bağlantılı**: uzun ablukada bekleyen
+  ordunun deneyimi/morali de etkilenir — bu iki fikir birlikte
+  tasarlanmalı, ayrı fazlara bölünmemeli.
+
+**Uygulama durumu (2026-11-06):** Sefer Masası'nda `Abluka` artık ayrı bir
+amaçtır. Ordu hedefe yürür, sınırda açıkça mevzi alır ve garnizondan ayrı
+kalır; on iki oyun saatte halk/garnizon baskısı, yirmi dört oyun saatte
+birlik deneyimi işler. Erzak bu safhada sürekli tüketilir, bittiğinde ordu
+geri dönüşe geçer. İmzalı saldırmazlık anlaşması varken kurulan abluka
+anlaşmayı bozar ve ihanet itibarı cezasını uygular.
 
 ---
 
@@ -1226,6 +1357,13 @@ Damarda en çok işçi bulunduran krallık "bölge sahibi" sayılıp küçük bi
   - Nüfus tavanı (**%20**) olduğu gibi kalır, bu rekabetle birlikte
     yeniden değerlendirilmez.
 
+**Uygulama durumu (2026-11-07): Tamamlandı.** `shared_mine_influence`
+defteri, işçi ayrılsa bile son 24 üretim oyun-saatindeki emeği saklar. Pencere
+kapanınca en yüksek emek sahibi bir sonraki pencerede nüfuz sahibi olur; etkin
+rakip üretiminin %10'u ona geçer, toplam cevher artmaz. Diyar paneli lideri ve
+pencere ilerlemesini açıkça gösterir; anlık işçi ekleyip çekerek sahiplik alma
+yarışı yoktur.
+
 ---
 
 ### 23. Maden tükenince ortaya çıkan yeni fırsat (define, yıkık kale)
@@ -1270,6 +1408,14 @@ alır — kısa, yoğun bir yarış anı.
     ikisi farklı anları temsil ediyor, tutarsızlık değil).
   - Fırsat kaçırılırsa **bekleyen kalır**, sonradan da alınabilir —
     aciliyet zayıflar ama affedici bir tasarım tercih edildi.
+
+**Uygulama durumu (2026-11-07): Kısmi / kullanıcı tarafından ertelendi.**
+Tükenen damar artık sessizce kapanmıyor: `app/api/mine/route.ts` aynı channel
+için tohumlu sıradaki maden sahasını açıyor, eski işçileri köylerine döndürüyor
+ve yeni konumu Diyar Haritasına yazıyor. Ancak burada tarif edilen define/yıkık
+kale gibi **tek-kazananlı ayrı fırsat** henüz yok; kullanıcı bu ikinci aşamayı
+"sonra yaparız" diyerek açıkça erteledi. Bu nedenle yeni damar mekanizması,
+Fikir 23'ün tamamı olarak sayılmamalıdır.
 
 ---
 
@@ -1320,6 +1466,12 @@ komşularının fiyatını da (küçük bir sızıntı/yayılma etkisiyle) etkil
     bir sistem kurulmaz.
   - Eşik **channel nüfusuna/hızına göre ölçeklenir** — sabit bir eşik
     yerine, farklı büyüklükteki channel'larda adil kalır.
+
+**Uygulama durumu (2026-11-07): Tamamlandı.** `channelPriceIndex`, aktif
+komşu pazar emirlerinin net akışını anonim channel ortalaması üzerinden
+hesaplar ve yerel fiyat çarpanına sınırları aşmadan girer. Hem alış hem satış
+fiyatına uygulanır; arayüz ve General eylemleri aynı sunucu-türevi endeksi
+kullanır.
 
 ---
 
@@ -1373,3 +1525,19 @@ kontrol edemez, yalnızca General buna karşı hazırlık önerebilir.
     "erken soyutlama yapma, üç benzer satır bir soyutlamadan iyidir"
     ilkesiyle tutarlı bir tercih — ortak altyapı gerçekten tekrar eden
     bir desen netleşirse SONRADAN çıkarılabilir, baştan zorlanmaz.
+
+#### Uygulama durumu (2026-11-06)
+
+- `engine/world-events.ts` channel kimliği ve mutlak oyun-saati penceresinden
+  **Bereketli Hasat**, **Ilıman Mevsim**, **Kuraklık** veya **Sert Kış**
+  türetir. Olumlu/olumsuz seçim aynı olasılıktadır; aynı channel aynı anda
+  aynı olayı görür, yeniden yüklemek sonucu değiştirmez.
+- Her 72 oyun saatlik çevrimin ilk 24 saati olayın aktif süresidir. Kalan
+  sürede yaklaşan olay General ve Diyar Haritasında erken uyarı olarak görünür.
+- Etki yalnız brüt üretime uygulanır: arazi türü, Ambar/Değirmen'in gıda
+  hazırlığı ve Depo'nun kış malzemesi hazırlığı sonucu değiştirir. `tick()`
+  olay sınırlarındaki üretim katkısını bölerek toplar; böylece olayın kaynak
+  etkisi sık istemci tick'i ile sunucunun tek büyük tick'inde ayrışmaz.
+- Başlayan olay Defter'e `DÜNYA` kaydı olarak düşer; General sohbeti, Divan
+  bağlamı ve gece vardiyası aynı olay özetini görür. Bu sistem ortak madenin
+  tükeniş/yenilenme altyapısıyla paylaşılmaz.

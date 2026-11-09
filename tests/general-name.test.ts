@@ -22,5 +22,10 @@ test("aynı ada sahip iki krallık kuruluş anıyla ayrışır", () => {
 
 test("ad bir unvanla başlar", () => {
   const name = generalNameFor("Akkale", 1_800_000_000_000);
-  assert.match(name, /^(General|Serdar|Kumandan|Beylerbeyi) /);
+  assert.match(name, /^(General|Marshal|Commander|Field Marshal) /);
+});
+
+test("General adı İngilizce tarihî komutan havuzundan atanır", () => {
+  const name = generalNameFor("Akkale", 1_800_000_000_000);
+  assert.match(name, /(Alexander|Hannibal|Scipio|Caesar|Belisarius|Khalid|Saladin|Subutai|Joan|Richard|William|Edward|Timur|Gustavus|Turenne|Marlborough|Frederick|Napoleon|Wellington|Grant|Sherman|Lee|Moltke|Zhukov|Montgomery|Eisenhower|Patton|Nimitz|MacArthur|Yi|Oda|Tokugawa|Boudica|Themistocles|Leonidas|Trajan|Aetius|Suleiman|Baybars|Skanderbeg|Gonzalo|Maurice|Suvorov|Nelson|Kutuzov|Jomini|Foch|Manstein)$/);
 });

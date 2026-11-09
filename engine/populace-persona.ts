@@ -65,3 +65,15 @@ export function isPopulacePersona(value: unknown): value is PopulacePersona {
 export function populacePersonaProfile(id: PopulacePersona) {
   return POPULACE_PERSONAS.find((persona) => persona.id === id);
 }
+
+/**
+ * Dışarıdan gelen genel propaganda, halkın mevcut kişiliğinde aynı kuvvette
+ * yankılanmaz. Bu bir başarı zarı değildir: operasyon zaten hedefe ulaşmıştır;
+ * yalnızca aynı söylentinin muhalefet baskısına çevrilen payıdır.
+ *
+ * Katsayı özellikle dar tutulur. Kese tek başına ayaklanma yaratmamalı ve
+ * Halk-AI anahtarı olmayan eski channel'ların dengesi hiç değişmemelidir.
+ */
+export function propagandaReception(persona: PopulacePersona) {
+  return persona === "isyankar" ? 1.15 : persona === "bagli_itaatkar" ? .85 : 1;
+}

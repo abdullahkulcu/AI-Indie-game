@@ -11,6 +11,8 @@
 import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, type CompareMetric } from "../engine/comparison";
 import { victoryScore, type VictoryPurse } from "../engine/victory";
 import { TRADED_KEYS, commonsReference, isTraded } from "../engine/market";
+import { armySize, moodState, suppression } from "../engine/populace";
+import { factionPressureOf } from "../engine/faction";
 import type { TradeKey } from "../engine/types";
 import { parseStoredSave } from "./save-validation";
 
@@ -71,7 +73,10 @@ export function projectPublicKingdom(userId: string, gameState: string, expected
  * RAPOR VERMEZ  : ambar, nöbet oranı, asker maaşı, halkın rızası, sadakat,
  *                 hazine, kalan koruma süresi, gece emirleri.
  */
-export type IntelReport = Omit<PublicKingdom, "id">;
+export type IntelReport = Omit<PublicKingdom, "id"> & {
+  /** Yalnız derin gözetlemenin getirdiği nitel halk ruh hâli; asla puan değil. */
+  populaceMood?: string;
+};
 
 export function intelReportOf(kingdom: PublicKingdom): IntelReport {
   // Alanlar TEK TEK yazılır: `...kingdom` yayılsaydı `PublicKingdom` ileride
@@ -86,6 +91,24 @@ export function intelReportOf(kingdom: PublicKingdom): IntelReport {
     buildingCount: kingdom.buildingCount,
     army: kingdom.army,
   };
+}
+
+/**
+ * Derin gözetleme, normal keşfin sınırını bilinçli ve dar biçimde genişletir.
+ *
+ * Rıza puanı, ambar, maaş ve nöbet hâlâ hiç sızmaz. Ajanın getirdiği tek ek
+ * bilgi, Kralın keseyi/teması hangi hedefte denemesi gerektiğini tartabilmesi
+ * için kaba bir ruh hâli etiketidir. Etiket mevcut anlık durumdan alınır ve
+ * raporla birlikte donar; gelecekteki değişimi vaat etmez.
+ */
+export function deepIntelReportOf(kingdom: PublicKingdom, gameState: string): IntelReport {
+  const report = intelReportOf(kingdom);
+  const game = parseStoredSave(gameState);
+  if (!game) return report;
+  const mood = moodState(game.popularity, suppression(
+    armySize(game.units), game.population, game.soldierUnrest ?? 0, factionPressureOf(game),
+  ));
+  return { ...report, populaceMood: mood.label };
 }
 
 /**

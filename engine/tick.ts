@@ -1,11 +1,14 @@
 export { materialScaleOf } from "./catalog";
 import { MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, catalog, keepSeconds, keepUpgradeCosts, materialScaleOf, millMultiplier, resourceLabels, terrainCatalog } from "./catalog";
 import { agitationEffect, feltUnrest } from "./agitation";
-import { advanceFaction, factionNotice, factionPressureOf } from "./faction";
+import { advanceBrokenPromiseFaction, factionNotice, factionPressureOf } from "./faction";
 import { advanceCommons, commonsFlow, commonsOf, commonsReference, livingCost, livingCostMood, orderPayout } from "./market";
 import { armySize, approachMood, heaviestGrievance, hourlyDemand, moodState, moodTarget, populationChange, rationsOf, satisfaction, soldierUnrestAfter, SOLDIER_THRESHOLDS, suppression } from "./populace";
+import { normalizeUnitExperience, recruitUnitExperience, rewardRaidExperience, survivorUnitExperience } from "./units";
 import { offWatchStrength, raidNotice, resolveRaids, watchRatioOf } from "./raids";
 import { applySpoilage, storageCaps } from "./storage";
+import { activeWorldEventAt, worldEventIntervals, worldEventMultiplier, worldEventNotice, worldEventsStartedBetween } from "./world-events";
+import { startWaitingConstruction } from "./construction";
 import type { Game, Key, Res } from "./types";
 
 /** Defteri gereksiz satırla doldurmamak için, hareket bu eşiği aşınca yazılır. */
@@ -119,11 +122,11 @@ export function laborFactor(g: Pick<Game, "population" | "mineWorkers">) {
   return g.population > 0 ? Math.max(0, (g.population - away) / g.population) : 1;
 }
 
-export function grossRates(g: Game): Res {
+export function grossRates(g: Game, at = g.lastTickAt): Res {
   const levels = Object.fromEntries(g.buildings.map(b => [b.type, b.level]));
   const terrain = terrainCatalog[g.terrain] ?? terrainCatalog.plain;
   const labor = laborFactor(g);
-  return {
+  const base: Res = {
     gold: g.population * g.taxRate / 100 * .22 * labor,
     // Değirmen yalnızca BUĞDAYI büyütür: tarlanın ürününü öğütür, kendi başına
     // tarla ekmez. Çarpan üretim hızına uygulandığı için hesap adımlara
@@ -134,14 +137,19 @@ export function grossRates(g: Game): Res {
     iron: (levels.mine ?? 0) * 7 * terrain.iron * labor,
     ale: (levels.brewery ?? 0) * 9 * labor,
   };
+  const world = worldEventMultiplier(g, activeWorldEventAt(g, at));
+  const warPenalty = g.warDisruption && g.warDisruption.until > at
+    ? Math.max(0, Math.min(.4, g.warDisruption.productionPenalty))
+    : 0;
+  return Object.fromEntries(resourceLabels.map(([key]) => [key, base[key] * world[key] * (1 - warPenalty)])) as Res;
 }
 
 /**
  * Net saatlik değişim: üretim × iş bırakma çarpanı − halkın istihkakı − asker maaşı.
  * Arayüzdeki "+x/sa" değerleri budur, yani istihkakı değiştirince etkisi hemen görünür.
  */
-export function rates(g: Game): Res {
-  const gross = grossRates(g);
+export function rates(g: Game, at = g.lastTickAt): Res {
+  const gross = grossRates(g, at);
   const demand = hourlyDemand(g);
   const army = armySize(g.units ?? {});
   // Nöbetteki asker halkı zapt etmeye daha az kalır; nöbetin üretim bedeli budur.
@@ -175,13 +183,47 @@ export function rates(g: Game): Res {
  * da aynı sayıyı okumak zorunda olduğu için dışarı verildi. Kural iki yerde
  * ayrı yazılsaydı panel bir eşik, motor başka bir eşik görürdü.
  */
-export function servedRations(g: Game, hours = 1) {
-  const gross = grossRates(g), demand = hourlyDemand(g), rations = rationsOf(g);
+export function servedRations(g: Game, hours = 1, gross = grossRates(g)) {
+  const demand = hourlyDemand(g), rations = rationsOf(g);
   return {
     food: rations.food * satisfaction(demand.food * hours, g.resources.food + gross.food * hours),
     ale: rations.ale * satisfaction(demand.ale * hours, g.resources.ale + gross.ale * hours),
     pay: rations.soldierPay * satisfaction(demand.gold * hours, g.resources.gold + gross.gold * hours),
   };
+}
+
+/** Dünya olayı sınırlarında üretimi bölerek toplar; küçük/tek büyük tick aynı sonucu verir. */
+function accumulatedRates(g: Game, from: number, to: number) {
+  const total: Res = { gold: 0, food: 0, stone: 0, wood: 0, iron: 0, ale: 0 };
+  for (const range of warDisruptionIntervals(g, from, to)) {
+    for (const interval of worldEventIntervals(g, range.from, range.to)) {
+      const hours = (interval.to - interval.from) / 3_600_000 * g.speed;
+      const rate = rates(g, interval.from);
+      resourceLabels.forEach(([key]) => { total[key] += rate[key] * hours; });
+    }
+  }
+  return total;
+}
+
+/** Aynı aralıkta fiilen üretilen brüt kaynak; istihkak hesabı bunu okumalıdır. */
+function accumulatedGross(g: Game, from: number, to: number) {
+  const total: Res = { gold: 0, food: 0, stone: 0, wood: 0, iron: 0, ale: 0 };
+  for (const range of warDisruptionIntervals(g, from, to)) {
+    for (const interval of worldEventIntervals(g, range.from, range.to)) {
+      const hours = (interval.to - interval.from) / 3_600_000 * g.speed;
+      const gross = grossRates(g, interval.from);
+      resourceLabels.forEach(([key]) => { total[key] += gross[key] * hours; });
+    }
+  }
+  return total;
+}
+
+/** Savaş hasarı biterken hesap aralığını böler; tek büyük tick kısa tick'lerle aynı kalır. */
+function warDisruptionIntervals(g: Game, from: number, to: number) {
+  const until = g.warDisruption?.until ?? 0;
+  return until > from && until < to
+    ? [{ from, to: until }, { from: until, to }]
+    : [{ from, to }];
 }
 
 /**
@@ -196,12 +238,47 @@ export function tick(g: Game, now: number): Game {
   const hours = Math.min(24, (now - g.lastTickAt) / 3_600_000 * g.speed);
   if (hours <= 0) return g;
 
+  // Çevrimdışı kazanç tavanı aşıldığında geri kalan süre kasıtlı olarak
+  // atılır; dünya olayları da kaynakla aynı zaman diliminde hesaplanır.
+  const effectiveEnd = g.lastTickAt + hours * 3_600_000 / g.speed;
   const army = armySize(g.units ?? {});
-  const rt = rates(g); let resources = { ...g.resources };
-  resourceLabels.forEach(([key]) => { resources[key] = Math.max(0, resources[key] + rt[key] * hours); });
+  const accumulated = accumulatedRates(g, g.lastTickAt, effectiveEnd);
+  const grossAccumulated = accumulatedGross(g, g.lastTickAt, effectiveEnd);
+  let resources = { ...g.resources };
+  resourceLabels.forEach(([key]) => { resources[key] = Math.max(0, resources[key] + accumulated[key]); });
 
-  let buildings = g.buildings, units = g.units, queue = g.queue, notices = g.notices;
-  if (queue && queue.completesAt <= now) {
+  let buildings = g.buildings, units = g.units, unitExperience = normalizeUnitExperience(g.unitExperience), queue = g.queue, constructionQueue = g.constructionQueue, trainingQueue = g.trainingQueue, notices = g.notices;
+  const eventStarts = worldEventsStartedBetween(g, g.lastTickAt, effectiveEnd);
+  if (eventStarts.length) notices = [...eventStarts.map(event => ({ kind: "DÜNYA", text: worldEventNotice(event), at: event.startsAt })).reverse(), ...notices].slice(0, 20);
+  if (constructionQueue !== undefined) {
+    let jobs = startWaitingConstruction(constructionQueue, g.lastTickAt, keep({ buildings }));
+    // Birden fazla şantiye aynı anda bitebilir. Her tamamlanıştan sonra boşalan
+    // yer derhal sıradaki işe verilir; büyük tek tick ile küçük tick'ler aynı
+    // zaman çizgisini izler.
+    while (true) {
+      const doneAt = jobs
+        .filter(job => job.completesAt !== null && job.completesAt <= now)
+        .sort((a, b) => (a.completesAt ?? 0) - (b.completesAt ?? 0))[0];
+      if (!doneAt) break;
+      const item = catalog.find(building => building.type === doneAt.type);
+      const existing = buildings.find(building => building.type === doneAt.type);
+      buildings = existing
+        ? buildings.map(building => building.type === doneAt.type ? { ...building, level: doneAt.targetLevel } : building)
+        : [...buildings, {
+          type: doneAt.type,
+          name: doneAt.name.replace(/ Sv\.\d+$/, "") || item?.name || doneAt.name,
+          category: item?.category ?? "Yönetim",
+          level: doneAt.targetLevel,
+        }];
+      notices = [{ kind: "TAMAMLANDI", text: `${doneAt.name} tamamlandı.`, at: doneAt.completesAt ?? now }, ...notices].slice(0, 20);
+      jobs = jobs.filter(job => job !== doneAt);
+      jobs = startWaitingConstruction(jobs, doneAt.completesAt ?? now, keep({ buildings }));
+    }
+    constructionQueue = jobs;
+    // Yeni sistemde `queue` inşaatın kaynağı değildir; eski birim kaydı varsa
+    // onun tamamlanabilmesi için yerinde kalır.
+    if (queue?.kind === "building") queue = null;
+  } else if (queue && queue.completesAt <= now) {
     const done = queue;
     if (done.kind === "building") {
       const existing = buildings.find(b => b.type === done.type);
@@ -215,10 +292,23 @@ export function tick(g: Game, now: number): Game {
             level: done.targetLevel ?? 1,
           }];
     } else {
+      const before = units;
       units = { ...units, [done.type]: (units[done.type] ?? 0) + (done.count ?? 0) };
+      unitExperience = recruitUnitExperience(before, unitExperience, { [done.type]: done.count ?? 0 });
     }
     notices = [{ kind: "TAMAMLANDI", text: `${done.name} tamamlandı.`, at: now }, ...notices].slice(0, 20);
     queue = null;
+  }
+
+  // Kışlanın eğitimi inşaat kuyruğundan bağımsız ilerler. Eski kayıtlardaki
+  // `queue.kind === "unit"` üstteki geriye dönük kol tarafından hâlâ tamamlanır;
+  // yeni emirler yalnız bu ayrı kuyruğu kullanır.
+  if (trainingQueue && trainingQueue.completesAt <= now) {
+    const before = units;
+    units = { ...units, [trainingQueue.type]: (units[trainingQueue.type] ?? 0) + trainingQueue.count };
+    unitExperience = recruitUnitExperience(before, unitExperience, { [trainingQueue.type]: trainingQueue.count });
+    notices = [{ kind: "EĞİTİM", text: `${trainingQueue.name} eğitimi tamamlandı; birlik garnizona katıldı.`, at: trainingQueue.completesAt }, ...notices].slice(0, 20);
+    trainingQueue = null;
   }
 
   // --- Dağ akınları -------------------------------------------------------
@@ -230,7 +320,11 @@ export function tick(g: Game, now: number): Game {
   if (raid.events.length) {
     resources.food = Math.max(0, resources.food - raid.foodStolen);
     resources.gold = Math.max(0, resources.gold - raid.goldStolen);
-    if (raid.soldiersLost > 0) units = shrinkArmy(units, raid.soldiersLost);
+    if (raid.soldiersLost > 0) {
+      units = shrinkArmy(units, raid.soldiersLost);
+      unitExperience = survivorUnitExperience(units, unitExperience);
+    }
+    if (raid.repelled > 0) unitExperience = rewardRaidExperience(units, unitExperience, watch, raid.repelled);
     notices = [...raid.events.map(event => ({ kind: "AKIN", text: raidNotice(event), at: event.at })).reverse(), ...notices].slice(0, 20);
   }
 
@@ -240,7 +334,8 @@ export function tick(g: Game, now: number): Game {
   // İstihkak fiilen ne kadar dağıtılabildi? Stok yetmezse kâğıt üstündeki oran
   // değil, dağıtılabilen oran mutluluğu belirler.
   const rations = rationsOf(g);
-  const served = servedRations(g, hours);
+  const averageGross = Object.fromEntries(resourceLabels.map(([key]) => [key, grossAccumulated[key] / hours])) as Res;
+  const served = servedRations(g, hours, averageGross);
 
   // --- Halkın defteri -----------------------------------------------------
   // Krallığın İKİNCİ defteri: halkın kendi stoğu. Fiyat buradan doğar ve
@@ -262,7 +357,14 @@ export function tick(g: Game, now: number): Game {
   const soldierUnrest = army > 0 ? soldierUnrestAfter(g.soldierUnrest ?? 0, served.pay, hours) : 0;
   // İç muhalefet: sürücü (rıza) tıpkı diğer kalemler gibi ADIM BAŞINDAN okunur,
   // böylece kapalı çözüm adımlara bölününce aynı sonucu verir.
-  const factionPressure = advanceFaction(factionPressureOf(g), g.popularity, hours);
+  // Tam pay ilan edilip fiilen ulaştırılamadığında halk bunu yalnız açlık ya
+  // da maaşsızlık olarak değil, tutulmayan bir ferman olarak da görür. Niyet
+  // okumuyoruz: yalnız ilan edilen ve dağıtılan pay arasındaki görünür fark
+  // hedefi yükseltir; hedefin kapalı çözümü yine adım-bölünmesinden bağımsızdır.
+  const factionPressure = advanceBrokenPromiseFaction(
+    factionPressureOf(g), g.popularity,
+    rations.food, served.food, rations.soldierPay, served.pay, hours,
+  );
   // Yabancı kesenin payı taşıyıcı alanların İÇİNDE kalır, `factionPressure` ve
   // `soldierUnrest` alanlarına yazılmaz; burada yalnızca hissedilen toplam
   // kullanılır. Aksi hâlde kese kalıcılaşır ve sönümü anlamını yitirir.
@@ -387,11 +489,15 @@ export function tick(g: Game, now: number): Game {
     lastRaidAt: raid.lastRaidAt ?? g.lastRaidAt,
     raidsRepelled: (g.raidsRepelled ?? 0) + raid.repelled,
     raidsSuffered: (g.raidsSuffered ?? 0) + raid.suffered,
+    warDisruption: g.warDisruption && g.warDisruption.until > now ? g.warDisruption : undefined,
     population: settled,
     capacity,
     buildings,
     units,
+    unitExperience,
     queue,
+    constructionQueue,
+    trainingQueue,
     notices,
     lastTickAt: now,
   };

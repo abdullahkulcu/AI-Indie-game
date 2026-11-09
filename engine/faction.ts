@@ -47,10 +47,75 @@ const FACTION = {
   suppressionBreak: 100,
 } as const;
 
+/**
+ * Kral tam istihkak/maaş ilan ettiği hâlde fiilen ulaştıramadığında halkın
+ * güveni yalnız düşük rızadan daha hızlı çözülür. Eşik, tek saatlik küçük
+ * ambar dalgalanmasını siyasi krize çevirmemek için Halk Sesi'nin `shortfall`
+ * eşiğiyle aynı tutulur.
+ */
+export const PROMISE_BREACH = {
+  gap: 20,
+  /** İhlal çok büyükse muhalefetin hedefi doğrudan tavana yaklaşır. */
+  targetAtGap: 20,
+  targetPerGap: 1.25,
+  /** Sözün tutulmadığı açıkça görünürken normalden hızlı örgütlenme. */
+  riseRate: .16,
+} as const;
+
 export const FACTION_LIMITS = { min: 0, max: 100 } as const;
 
 /** Baskının eşikleri; panel, bildirim ve prompt aynı listeden okur. */
 export const FACTION_THRESHOLDS = { stirring: 20, organized: 50, defiant: 80 } as const;
+
+/** Divan gündemi görmezden gelinince açık şikâyetin baskıya eklediği oyun saati. */
+export const COUNCIL_NEGLECT_HOURS = { watch: 3, urgent: 6 } as const;
+
+/**
+ * ÖRGÜTLÜ MUHALEFETİN KOALİSYON TALEBİ.
+ *
+ * Talebin CÜMLESİ Halk-AI tarafından üretilir; fakat neyin istenebileceği ve
+ * kabul edildiğinde hangi politikanın değişeceği motorun tek, denetlenebilir
+ * kuralıdır. Böylece bir model "hazineyi bana ver" yazsa bile oyun kuralı
+ * değişmez. Bu liste özellikle General'in dış krallık müzakeresinden ayrıdır.
+ */
+export const FACTION_DEMAND_KINDS = ["tax_relief", "food_relief"] as const;
+export type FactionDemandKind = typeof FACTION_DEMAND_KINDS[number];
+export type FactionDemand = {
+  kind: FactionDemandKind;
+  policy: { key: "taxRate" | "foodRation"; value: number };
+  /** Anlatıcıya giden, sayısal olmayan kısa konu. */
+  subject: string;
+};
+
+/** Yalnız örgütlü muhalefet masa kurabilir; öncelik önce ağır vergi, sonra sofradır. */
+export function factionDemandOf(game: { factionPressure?: number; taxRate: number; foodRation?: number }): FactionDemand | null {
+  if (factionPressureOf(game) < FACTION_THRESHOLDS.organized) return null;
+  const tax = Math.max(0, Math.min(50, Math.round(Number(game.taxRate) || 0)));
+  if (tax > 10) return {
+    kind: "tax_relief",
+    policy: { key: "taxRate", value: Math.max(10, tax - 10) },
+    subject: "Meydanın sözcüsü ağır verginin hafifletilmesini istiyor.",
+  };
+  const food = Math.max(0, Math.min(200, Math.round(Number(game.foodRation) || 100)));
+  if (food < 100) return {
+    kind: "food_relief",
+    policy: { key: "foodRation", value: 100 },
+    subject: "Meydanın sözcüsü sofraların yeniden tam kurulmasını istiyor.",
+  };
+  return null;
+}
+
+/**
+ * Masa sonucunun sayısal etkisi. Kabul, normal rıza iyileşmesinden daha hızlı
+ * bir güven onarımıdır; ret ise baskıyı yükseltir fakat hiçbir zaman 100'ü
+ * geçmez. Metnin sertliği `refusalCount` ile anlatıcıya taşınır.
+ */
+export function factionSettlement(pressure: number, decision: "accept" | "decline", refusalCount = 0) {
+  const current = factionPressureOf({ factionPressure: pressure });
+  if (decision === "accept") return { pressure: Math.max(0, current - 32), tone: "conciliatory" as const };
+  const escalation = 6 + Math.min(12, Math.max(0, Math.floor(refusalCount)) * 2);
+  return { pressure: Math.min(100, current + escalation), tone: "hardened" as const };
+}
 
 export const factionPressureOf = (game: { factionPressure?: number }) =>
   Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(game.factionPressure) || 0));
@@ -66,6 +131,36 @@ export function factionTarget(popularity: number) {
 }
 
 /**
+ * Ferman ile fiili dağıtım arasındaki farkın işaret ettiği hedef baskı.
+ *
+ * Bu fonksiyon "Kral bunu bilerek yaptı" diye niyet okuyamaz; yalnızca
+ * halkın herkesçe görünen bir sözü ile yaşanan sonucu karşılaştırır. Aynı
+ * nedenle rıza hedefini asla düşürmez, yalnız tutulmayan bir söz varsa onun
+ * üstüne çıkar.
+ */
+export function brokenPromiseTarget(
+  popularity: number,
+  declaredFood: number,
+  servedFood: number,
+  declaredPay: number,
+  servedPay: number,
+) {
+  const normal = factionTarget(popularity);
+  const gap = Math.max(0, (Number(declaredFood) || 0) - (Number(servedFood) || 0), (Number(declaredPay) || 0) - (Number(servedPay) || 0));
+  if (gap < PROMISE_BREACH.gap) return normal;
+  const breach = PROMISE_BREACH.targetAtGap + (gap - PROMISE_BREACH.gap) * PROMISE_BREACH.targetPerGap;
+  return Math.max(normal, Math.min(FACTION_LIMITS.max, breach));
+}
+
+function advanceFactionToTarget(current: number, target: number, hours: number, riseRate: number) {
+  const start = Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(current) || 0));
+  if (!(hours > 0)) return start;
+  const rate = start < target ? riseRate : FACTION.easeRate;
+  const next = target + (start - target) * Math.exp(-rate * hours);
+  return Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, next));
+}
+
+/**
  * Baskıyı `hours` kadar ilerletir. `boost` dış müdahalenin (yabancı kesenin)
  * o pencerede eklediği puandır; hedefe değil doğrudan baskıya eklenir, çünkü
  * kese rızayı değiştirmez — yalnızca var olan hoşnutsuzluğu örgütler.
@@ -73,11 +168,36 @@ export function factionTarget(popularity: number) {
 export function advanceFaction(current: number, popularity: number, hours: number, boost = 0) {
   const start = Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, Number(current) || 0))
     + Math.max(0, Number(boost) || 0);
-  if (!(hours > 0)) return Math.min(FACTION_LIMITS.max, start);
-  const target = factionTarget(popularity);
-  const rate = start < target ? FACTION.riseRate : FACTION.easeRate;
-  const next = target + (start - target) * Math.exp(-rate * hours);
-  return Math.max(FACTION_LIMITS.min, Math.min(FACTION_LIMITS.max, next));
+  return advanceFactionToTarget(start, factionTarget(popularity), hours, FACTION.riseRate);
+}
+
+/** Tutulmayan ferman, var olan rıza hedefinin üstünde daha hızlı baskı üretir. */
+export function advanceBrokenPromiseFaction(
+  current: number,
+  popularity: number,
+  declaredFood: number,
+  servedFood: number,
+  declaredPay: number,
+  servedPay: number,
+  hours: number,
+) {
+  const target = brokenPromiseTarget(popularity, declaredFood, servedFood, declaredPay, servedPay);
+  const gap = Math.max(0, declaredFood - servedFood, declaredPay - servedPay);
+  const rate = gap >= PROMISE_BREACH.gap ? PROMISE_BREACH.riseRate : FACTION.riseRate;
+  return advanceFactionToTarget(current, target, hours, rate);
+}
+
+/**
+ * Açık bir Divan gündemini bir oyun günü boyunca kapatmamak, mevcut halk
+ * baskısının aynı sorun altında biraz daha hızlı büyümesine yol açar. Bu bir
+ * kaynak cezası değildir: yalnız zaten rızanın işaret ettiği hedefe doğru
+ * yürüyüşü birkaç oyun saati öne çeker. Rıza toparlanmışsa ceza tersine
+ * çalışıp baskıyı azaltmaz.
+ */
+export function councilNeglectPressure(current: number, popularity: number, priority: "watch" | "urgent") {
+  const pressure = factionPressureOf({ factionPressure: current });
+  if (factionTarget(popularity) <= pressure) return pressure;
+  return advanceFaction(pressure, popularity, COUNCIL_NEGLECT_HOURS[priority]);
 }
 
 /**

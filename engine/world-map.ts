@@ -85,9 +85,9 @@ export function layoutChannel(channelId: string, members: MemberInput[]): Map<st
   return result;
 }
 
-/** Ortak maden, dört biyomun kesiştiği merkeze yakın nötr bir noktada durur. */
+/** İlk ortak damarın konumu; sonraki damarların gerçek konumu DB'den okunur. */
 export function sharedMinePosition(): { x: number; z: number } {
-  return { x: -17, z: -17 };
+  return { x: -52, z: 8 };
 }
 
 /**

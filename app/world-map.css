@@ -74,3 +74,36 @@
 .map-region .produce span{font-size:7px;opacity:.85}
 .map-region.unknown .produce{opacity:.62}
 @media (max-width:720px){.map-region .produce span{display:none}}
+
+/* Seçilen sancağı bir sayı listesinden stratejik karar özetine dönüştürür. */
+.intel-summary{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:0 0 12px}
+.intel-summary>div{padding:9px;background:#2c2119;color:#eedcb7;border-top:2px solid #aa7d3c}
+.intel-summary span,.known-weaknesses>span{display:block;margin-bottom:4px;font:700 6px JetBrains Mono;letter-spacing:.11em;color:#c79745}
+.intel-summary b{font:700 8px/1.35 JetBrains Mono}
+.known-weaknesses{margin:0 0 12px;padding:11px;background:#d6c39b;border-left:3px solid #7b2b30}
+.known-weaknesses ul{margin:6px 0 0;padding-left:17px;font:9px/1.55 Spectral}
+.known-weaknesses p{margin:5px 0 0!important;font:9px/1.45 Spectral!important;color:#604a34!important}
+.inspector-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;position:sticky;bottom:0;padding-top:8px;background:linear-gradient(transparent,#d2bd93 30%)}
+.inspector-action.secondary{background:transparent;color:#64252a;border-color:#7b2b30}
+.report-age{font:7px/1.45 JetBrains Mono!important;color:#725b3e!important}
+@media(max-width:800px){.intel-summary{grid-template-columns:1fr 1fr}.inspector-actions{position:static}}
+
+/* Krallık sahnesindeki Diyar sayfası modal değil, sayfanın kendi çalışma
+   alanıdır. Harita ve bilgi paneli bu kapsayıcı içinde kalır; sahne etiketleri
+   ya da alt menü üzerine taşmaz. */
+.channel-map-overlay.embedded{
+  position:relative;
+  inset:auto;
+  z-index:1;
+  width:100%;
+  height:100%;
+  min-height:0;
+}
+.channel-map-overlay.embedded .channel-map-header{height:62px;min-height:62px}
+.world-event-banner{display:grid;grid-template-columns:auto auto 1fr auto;gap:10px;align-items:center;padding:8px 28px;border-bottom:1px solid #a77d3b;background:#2b2118;color:#eadbb8}.world-event-banner span{font:600 7px JetBrains Mono;letter-spacing:.12em;color:#d1ad62}.world-event-banner b{font:600 11px Cinzel}.world-event-banner p{margin:0;font:9px/1.35 Spectral;color:#dbcda9}.world-event-banner small{font:7px JetBrains Mono;color:#c6b184;white-space:nowrap}.world-event-banner.favorable{border-bottom-color:#6d9464;background:#20301f}.world-event-banner.favorable b{color:#cbe0aa}.world-event-banner.adverse{border-bottom-color:#9d5150;background:#35201e}.world-event-banner.adverse b{color:#f0c0af}.channel-map-overlay.embedded .world-event-banner{padding:6px 20px}.channel-map-overlay.embedded .channel-map-layout{min-height:0}@media(max-width:800px){.world-event-banner{grid-template-columns:1fr auto;padding:8px 14px;gap:4px}.world-event-banner p{grid-column:1/-1}.world-event-banner small{grid-column:2;grid-row:1}.world-event-banner span{grid-column:1;grid-row:1}.world-event-banner b{grid-column:1;grid-row:2}}
+.channel-map-overlay.embedded .map-area{min-height:0}
+.channel-map-overlay.embedded .map-inspector{height:100%;overflow:auto}
+@media(max-width:800px){
+  .channel-map-overlay.embedded{min-height:720px;height:auto}
+  .channel-map-overlay.embedded .map-body{min-height:650px}
+}

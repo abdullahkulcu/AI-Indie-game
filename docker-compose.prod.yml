@@ -46,6 +46,11 @@ services:
     restart: unless-stopped
 
   postgres:
+    # Geliştirme yığını hosttaki drizzle komutları için 5433'ü yayınlar.
+    # Canlıda veritabanı yalnız compose ağı üzerinden app/cron tarafından
+    # erişilebilir olmalı; Docker'ın yayınlanan portları UFW kurallarını
+    # atlayabildiği için bunu yalnız güvenlik duvarına bırakmıyoruz.
+    ports: !reset []
     restart: unless-stopped
 
   cron:

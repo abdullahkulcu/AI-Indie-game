@@ -16,7 +16,8 @@
 #
 # Üretim örtüsü üç şeyi değiştirir: `npm run build` + `npm start`,
 # NODE_ENV=production ve şemanın `drizzle-kit migrate` ile uygulanması.
-# `cron` yalnızca saatte bir /api/cron'u çağırır; asıl karar sunucuda verilir.
+# Zamanlayıcı beş dakikada bir /api/cron'u çağırır; model çağrısı yalnız
+# gerçekten anlamlı değişim veya Divan zamanı oluştuğunda sunucuda yapılır.
 services:
   postgres:
     image: postgres:17
@@ -55,6 +56,11 @@ services:
     # hostta da görmek isterseniz aşağıdaki satırı açın (yerel hata ayıklama).
     # ports: ["${APP_PORT:-3000}:3000"]
     expose: ["3000"]
+    # Genel, oturum ve şifreleme sırları Worker tarafından ortam değişkeni
+    # olarak okunur. Compose yalnız `.env` dosyasını kendiliğinden yükler;
+    # projenin kasıtlı olarak gitignore'daki `.dev.vars` dosyasını ayrıca
+    # vermeden üretimde BYOK/cron/admin kapıları boş kalırdı.
+    env_file: [.dev.vars]
     volumes:
       - .:/app
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
@@ -104,7 +110,10 @@ services:
     env_file: [.dev.vars]
     environment:
       CRON_TARGET: ${CRON_TARGET:-http://app:3000/api/cron}
-      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-3600}
+      # Hızlı Taç'ta bir oyun günü bir gerçek saat olduğundan, saatlik kontrol
+      # Divan çağrısını görünür biçimde geciktirirdi. Beş dakikalık ritim
+      # yalnızca saf oyun kontrolünü sıklaştırır; tek başına AI çağrısı açmaz.
+      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-300}
     command:
       - sh
       - -c

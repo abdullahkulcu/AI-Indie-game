@@ -1,5 +1,6 @@
 import { factionDrag } from "./faction";
 import type { Game } from "./types";
+import { armySize as catalogArmySize, armyUpkeep } from "./units";
 
 /**
  * Halk sistemi: istihkak → mutluluk → üretim ve nüfus.
@@ -40,17 +41,20 @@ export function rationsOf(game: Partial<Game>): Rations {
 export const clampRation = (value: number) =>
   Math.max(RATION_LIMITS.min, Math.min(RATION_LIMITS.max, Math.round(Number(value) || 0)));
 
-export const armySize = (units: Record<string, number>) =>
-  Object.values(units).reduce((total, amount) => total + Math.max(0, amount), 0);
+/** @deprecated Birlik hesabının kaynağı `engine/units.ts`; eski çağrılar için dışa aktarılır. */
+export const armySize = catalogArmySize;
 
 /** Bir saatlik talep. Karşılanıp karşılanmadığı ayrı hesaplanır. */
 export function hourlyDemand(game: Pick<Game, "population" | "units" | "foodRation" | "aleRation" | "soldierPay">) {
   const rations = rationsOf(game);
-  const army = armySize(game.units ?? {});
+  const upkeep = armyUpkeep(game.units ?? {});
   return {
-    food: game.population * NEED.food * (rations.food / 100),
+    // Sivil nüfus, askere alınan insan gücünü zaten içermez. Birliklerin kendi
+    // erzağı bu nedenle katalogdan ayrıca gelir; yeni süvari ve kuşatma ekibi
+    // kâğıt üstünde bedava beslenemez.
+    food: game.population * NEED.food * (rations.food / 100) + upkeep.food,
     ale: game.population * NEED.ale * (rations.ale / 100),
-    gold: army * NEED.soldierGold * (rations.soldierPay / 100),
+    gold: upkeep.gold * (rations.soldierPay / 100),
   };
 }
 
@@ -260,12 +264,17 @@ export function growthMultiplier(buildings: Array<{ type: string; level: number 
 }
 
 /**
- * Bir saatteki nüfus değişimi.
+ * Verilen süre boyunca nüfus değişimi.
  *
  * Büyüme lojistiktir: boş konut kaldıkça hızlıdır, kapasite dolarken durur.
  * Kayıp boş konuta bakmaz — insanlar yer olduğu için kalmaz, huzur olduğu
  * için kalır. Kaybın orantılı olması iki şeyi düzeltir: küçük bir krallık
  * dibe vurup orada donmaz, büyük bir krallık da isyanı ucuza atlatamaz.
+ *
+ * Bu bir Euler adımı değildir. İstemci saniyelik, sunucu ise tek büyük
+ * `tick()` çalıştırdığı için çözümün zaman aralığı bölününce aynı sonucu
+ * vermesi gerekir. Pozitif yönde lojistik denklemin, negatif yönde üstel
+ * azalmanın kapalı çözümleri kullanılır.
  */
 export function populationChange(
   state: MoodState,
@@ -275,7 +284,12 @@ export function populationChange(
   hours: number,
 ) {
   if (population <= 0 || hours <= 0) return 0;
-  if (state.populationRate < 0) return population * state.populationRate * hours;
-  const room = capacity > 0 ? Math.max(0, 1 - population / capacity) : 0;
-  return population * state.populationRate * growthMultiplier(buildings) * room * hours;
+  if (state.populationRate < 0) {
+    return population * (Math.exp(state.populationRate * hours) - 1);
+  }
+  if (state.populationRate === 0 || capacity <= population) return 0;
+  const rate = state.populationRate * growthMultiplier(buildings);
+  const ratio = (capacity - population) / population;
+  const next = capacity / (1 + ratio * Math.exp(-rate * hours));
+  return Math.max(0, Math.min(capacity, next) - population);
 }

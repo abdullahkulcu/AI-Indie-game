@@ -15,7 +15,9 @@ import type { Commons, Game, Key, MarketOrder, TradeKey } from "./types";
  *   · Kral alırsa  → halkın stoğu azalır → fiyat yükselir,
  *   · istihkakı açarsa (kaleden halka aktarım) → ekmek ucuzlar,
  *   · istihkakı kısarsa → ekmek pahalanır.
- * Kıtlık artık bir dünya olayı değil, Kralın verebileceği bir karardır.
+ * Yerel pazar kıtlığı Kralın kararları ve halkın stoğundan doğar. Channel
+ * çapındaki Kuraklık/Sert Kış ise ayrı bir dünya olayıdır; üretim etkisi
+ * `engine/world-events.ts` tarafından uygulanır.
  *
  * Halk bu pazarda bir muhatap değildir: sözleşme yapmaz, pazarlık etmez,
  * emir almaz. Yalnızca elindekine göre fiyat verir. Kralın halkla konuşması

@@ -24,6 +24,11 @@ taşımıyor, kısaca işaretleniyor.
 
 ## 1. Faz 6 düzeltmesi — göçün orantılı dağılımı (KARARA BAĞLANDI)
 
+**Uygulama durumu (2026-11-07):** Tamamlandı. Göçmenler tek hedefe
+yığılmak yerine uygun krallıklara kapasiteleri oranında dağıtılıyor; yer
+bulamayan pay kaynak krallığa dönüyor. Ayrıntı ve testler:
+`updates/2026-11-07-gocmenleri-orantili-dagitim.md`.
+
 **Kaynak:** kullanıcının eski backlog listesi + bu oturumda doğrulandı ve
 kullanıcı kendisi düzeltme yönüne karar verdi.
 
@@ -73,6 +78,11 @@ hâlâ açık:
 
 ## 2. Müzakere arayüzü — Kral kendi eliyle cevap yazamıyor
 
+**Uygulama durumu (2026-11-07):** Tamamlandı. Açık masa, Kralın kendi adına
+serbest metinle cevap vermesine izin veriyor; General yanıtından ayrı bir
+konuşmacı olarak kalıcı kayda yazılıyor. Ayrıntı:
+`updates/2026-11-07-kralin-elcilik-cevabi.md`.
+
 **Kaynak:** kullanıcının eski backlog listesi, bu oturumda doğrulandı.
 
 `app/api/negotiate/route.ts` satır 156-160, `action==="reply"` işleyicisi
@@ -99,6 +109,12 @@ masada düz metinle cevap verecek bir input/buton yok.
 ---
 
 ## 3. Gece vardiyası / kalıcı emir — iki ayrı eksik
+
+**Uygulama durumu (2026-11-07):** Tamamlandı. `max_actions_per_wake` artık
+Kralın belirlediği 1–3 arası plan sınırı olarak çalışıyor; günlük tavan
+kalan eylem sayısını daraltıyor. Başarıyla yazılan gece hamleleri,
+General'in kalıcı defterine de aynı kural setiyle işleniyor. Ayrıntı:
+`updates/2026-11-07-gece-vardiyasi-general-defteri.md`.
 
 **Kaynak:** kullanıcının eski backlog listesi, bu oturumda doğrulandı.
 
@@ -154,6 +170,10 @@ aynı anda yalnızca bir inşaat sürdürebiliyor.
 
 ## 5. Ölü alanlar
 
+**Uygulama durumu (2026-11-07):** 5a tamamlandı. Cron, süresi geçen açık
+veya Kralı bekleyen masaları kalıcı olarak `expired` durumuna geçiriyor;
+ayrıntı: `updates/2026-11-07-suresi-dolan-muzakere.md`.
+
 **5a. `"expired"` durumu hiç yazılmıyor.** `engine/negotiation.ts` →
 `NegotiationStatus` (satır 56-61) ve `db/schema.ts:299` bu değeri
 tanımlıyor, `tests/negotiation.test.ts` (satır 379-381) `canDecline`
@@ -203,7 +223,11 @@ yani bu dört alt madde kod tarafından da açıkça "yok" diye işaretlenmiş
 durumda.
 
 - **7a. Savaş sistemi.** Kral açıkça "BAŞLATMA" dedi — kullanıcı isteğiyle
-  duraklatıldı. Efor/açık soru üretilmiyor.
+  duraklatılmıştı. **Uygulama durumu (2026-11-07): Tamamlandı.** Sefer
+  Masası, birlik/erzak/geri çekilme eşiği seçimi; yürüyüş, haberci, savaş
+  safhaları, destek, ateşkes ve sonuç raporlarıyla birlikte artık ayrı
+  savaş sistemidir. Ayrıntılı kararlar:
+  `docs/plans/2026-08-25-asker-ve-birebir-savas-sistemi.md`.
 - **7b. Kervan pazarı (oyuncular arası doğrudan ticaret).** Bugün yalnızca
   müzakere/haraç üzerinden dolaylı kaynak transferi var
   (`engine/negotiation.ts`'in `tributeAmount`/`tributeRate` şartları),
@@ -349,6 +373,9 @@ kayda dokunmuyor.
    hesabından ayırıyor (%8-20). Kayıt reddedilmiyor ama iki taraf aynı
    pazarı aynı görmüyor.
 
-Ölçüm betikleri geçici olarak yazıldı ve silindi; yukarıdaki kurulum
-birebir tekrar üretilebilir. Kalıcı bir regresyon testi hâlâ YOK — açık
-soru bu yüzden hâlâ açık.
+**Uygulama durumu (2026-11-07): Tamamlandı.** `populationChange`, pozitif
+durumda lojistik, negatif durumda üstel kapalı çözüm kullanır; aynı zaman
+aralığının tek adımda ya da saatlik adımlarla işlenmesi artık aynı sonucu
+verir. `tests/populace.test.ts` bu iki yolu doğrudan karşılaştıran kalıcı
+regresyon testini taşır. Önceki ölçüm, o tarihteki Euler yaklaşımının tarihsel
+kaydı olarak yukarıda bırakılmıştır; güncel davranışı temsil etmez.

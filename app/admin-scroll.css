@@ -1,0 +1,23 @@
+.admin-shell {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.admin-shell::-webkit-scrollbar {
+  width: 10px;
+}
+
+.admin-shell::-webkit-scrollbar-track {
+  background: #17130f;
+}
+
+.admin-shell::-webkit-scrollbar-thumb {
+  border: 2px solid #17130f;
+  border-radius: 6px;
+  background: #795c32;
+}

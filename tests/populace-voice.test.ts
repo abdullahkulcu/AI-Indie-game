@@ -98,6 +98,14 @@ test("maaş talebinin sesi garnizondur, halk değil", () => {
   assert.equal(demand?.voice, "garrison");
 });
 
+test("fermandaki pay fiilen ulaşmıyorsa halk verilen sözü hatırlatır", () => {
+  const demands = derivePopulaceDemands(good({ foodRation: 100, servedFood: 45 }));
+  const demand = demands.find(item => item.kind === "shortfall");
+  assert.equal(demand?.voice, "commons");
+  assert.equal(demand?.severity, "urgent");
+  assert.match(demand?.text ?? "", /sözün tutulmasını/);
+});
+
 // --- Sessiz kıyaslama (Fikir 13) -------------------------------------------
 
 /**

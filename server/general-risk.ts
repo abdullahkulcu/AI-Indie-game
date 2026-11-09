@@ -1,4 +1,5 @@
 import { isConfirmationReply } from "./general-intent";
+import { unitOf } from "../engine/units";
 /**
  * General'in itiraz kararı burada, kodda verilir; modelin insafına bırakılmaz.
  * Amaç: Kral riskli bir emir verdiğinde General'in gerçekten karşı çıkabilmesi,
@@ -23,6 +24,8 @@ export type ProposedAction = { name: string; arguments: Record<string, unknown> 
 export type RiskAssessment = {
   level: RiskLevel;
   reasons: string[];
+  /** Riskli karar öncesinde Kral'a gösterilen nitel halk tepkisi; sayı değildir. */
+  peoplePulse: { label: string; note: string } | null;
   /** Emrin tükettiği en yüksek kaynak oranı (0-1+). */
   spendRatio: number;
   /** Yiyeceğin biteceği tahmini saat; sonsuz ise açlık riski yok. */
@@ -113,9 +116,10 @@ export function assessAction(action: ProposedAction, state: KingdomSnapshot, cos
   // 4) Asker eğitimi nüfusu boşaltıyor mu
   if (action.name === "train_unit") {
     const count = Math.floor(Number(action.arguments.count)) || 0;
-    if (count > state.population * 0.25) {
+    const manpower = count * (unitOf(String(action.arguments.unit_type ?? ""))?.manpower ?? 1);
+    if (manpower > state.population * 0.25) {
       level = highest(level, "severe");
-      reasons.push(`${count} kişi nüfusun dörtte birinden fazlası; tarlalar boş kalır.`);
+      reasons.push(`${manpower} kişi nüfusun dörtte birinden fazlası; tarlalar boş kalır.`);
     }
   }
 
@@ -131,7 +135,27 @@ export function assessAction(action: ProposedAction, state: KingdomSnapshot, cos
     reasons.push("Kendi nöbetimiz kurulu değilken ajan yollamak misilleme davet eder.");
   }
 
-  return { level, reasons, spendRatio, foodHoursLeft: hours };
+  const peoplePulse = level === "low" ? null : publicPulse(action, state, level, hours);
+  return { level, reasons, peoplePulse, spendRatio, foodHoursLeft: hours };
+}
+
+/**
+ * Kesin rıza değişimini tahmin etmiyoruz: oyuncunun bunu matematiksel olarak
+ * optimize etmesi yerine, kararın halkta yaratacağı yönü açıkça gösteriyoruz.
+ */
+function publicPulse(action: ProposedAction, state: KingdomSnapshot, level: Exclude<RiskLevel, "low">, foodHours: number) {
+  if (Number.isFinite(foodHours) && foodHours <= FOOD_ELEVATED_HOURS) {
+    return { label: "Sofrada kaygı", note: "Halk önce yiyeceğin güvenceye alınmasını bekler; bu yük hoş karşılanmaz." };
+  }
+  if (action.name === "set_tax_rate") {
+    return { label: "Vergi baskısı", note: "Halk bu kararı geçim payına yeni bir yük olarak görür." };
+  }
+  if (action.name === "train_unit") {
+    return { label: "Evlerde tedirginlik", note: "Tarlalardan çok sayıda kişinin çekilmesi, ailelerde kaygı yaratır." };
+  }
+  return level === "severe"
+    ? { label: "Açık hoşnutsuzluk", note: "Halk bu kararı mevcut düzeni daha da zorlayan bir tercih sayar." }
+    : { label: "Temkinli kabul", note: state.popularity < 45 ? "Rıza zaten kırılgan; halk bu karara mesafeli yaklaşır." : "Halk bedeli fark eder; sonucu görmek için bekler." };
 }
 
 /** Maliyette en ağır basan kaynağın adı; mesajı somutlaştırmak için. */
@@ -184,7 +208,7 @@ export type ReviewOutcome = {
   /** Krala gösterilecek itiraz/uyarı/ret metinleri. */
   notes: string[];
   /** Teyit beklemek üzere saklanacak emir; yoksa null. */
-  toStore: { action: ProposedAction; reasons: string[]; riskLevel: "elevated" | "severe" } | null;
+  toStore: { action: ProposedAction; reasons: string[]; riskLevel: "elevated" | "severe"; peoplePulse: NonNullable<RiskAssessment["peoplePulse"]> } | null;
   /** Onaylanıp uygulanan bekleyen emir varsa kaydı silinmeli. */
   clearPending: boolean;
 };
@@ -221,9 +245,9 @@ export function reviewProposedActions(
       continue;
     }
     if (!toStore && assessment.level !== "low") {
-      toStore = { action, reasons: assessment.reasons, riskLevel: assessment.level };
+      toStore = { action, reasons: assessment.reasons, riskLevel: assessment.level, peoplePulse: assessment.peoplePulse! };
     }
-    notes.push(`⏸ ${assessment.reasons.join(" ")} Onayınızı bekliyorum — gerekçenizi de söylerseniz derhal uygularım.`);
+    notes.push(`⏸ ${assessment.reasons.join(" ")} Halkın nabzı: ${assessment.peoplePulse!.label} — ${assessment.peoplePulse!.note} Onayınızı bekliyorum — gerekçenizi de söylerseniz derhal uygularım.`);
   }
   return { approved, notes, toStore, clearPending };
 }

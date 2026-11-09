@@ -1,5 +1,5 @@
 import { BASE_PRICE, TRADED_KEYS } from "./market";
-import type { Game, TradeKey } from "./types";
+import type { Game, Key, TradeKey } from "./types";
 
 /**
  * DIŞ KESE — komşu krallığın halkına ya da askerine gönderilen para.
@@ -27,7 +27,7 @@ import type { Game, TradeKey } from "./types";
  * yerini tutmaz.
  */
 
-export type AgitationKind = "gold_commons" | "gold_garrison" | "goods_glut" | "raid_lure";
+export type AgitationKind = "gold_commons" | "support_movement" | "gold_garrison" | "goods_glut" | "raid_lure";
 
 export const AGITATION = {
   /** Sabit fiyat. Serbest miktar yok: 600, doğrulayıcının 250 altınlık
@@ -59,6 +59,33 @@ export const AGITATION = {
   perTargetPerDay: 3,
   pairWaitHours: 6,
 } as const;
+
+/**
+ * HALK HAREKETİNE DESTEK.
+ *
+ * Propaganda mevcut hoşnutsuzluğu genişçe besler; bu hat ise ancak zaten
+ * kıpırdanan bir muhalefetin yanına kaynak bırakır. Bu nedenle daha pahalıdır,
+ * hedefte asgari bir iç baskı ister ve aynı taşıyıcıda az daha güçlü iz bırakır.
+ * Ayrı bir "isyan yarat" düğmesi değildir.
+ */
+export const MOVEMENT_SUPPORT = {
+  cost: 900,
+  /** `agitationPressure`a yazılan payın çarpanı; tavan yine değişmez. */
+  pressureMultiplier: 1.1,
+  /** `faction.ts → FACTION_THRESHOLDS.stirring` ile aynı seviye. */
+  minPressure: 20,
+} as const;
+
+/** Hareket desteği, yalnız mevcut yerel kıpırdanmanın üstüne kurulabilir. */
+export const canSupportMovement = (factionPressure: number | undefined) =>
+  Math.max(0, Number(factionPressure) || 0) >= MOVEMENT_SUPPORT.minPressure;
+
+/** Her dolaylı hattın tek fiyat kaynağı; sunucu yalnız burada yazanı tahsil eder. */
+export function agitationCost(kind: AgitationKind, resource: TradeKey): { key: Key; amount: number } {
+  return kind === "goods_glut"
+    ? { key: resource, amount: glutCost(resource) }
+    : { key: "gold", amount: kind === "support_movement" ? MOVEMENT_SUPPORT.cost : AGITATION.cost };
+}
 
 /**
  * MAL KESESİ (pazar bozma). Kral kendi ambarından mal çıkarıp hedefin halkına
@@ -168,11 +195,14 @@ export function applyAgitation(
   game: AgitationCarrier,
   kind: AgitationKind,
   at: number,
+  /** Halk-AI kişiliğinden gelen dar, sunucu-türevi katsayı. */
+  commonsReception = 1,
 ): { agitationPressure: number; agitationBribe: number; agitationAt: number } {
   const decayed = agitationEffect(game, at);
   const share = decayed.shielded ? AGITATION.shieldedShare : 1;
-  const pressure = kind === "gold_commons"
-    ? Math.min(AGITATION.commons.cap, decayed.pressure + AGITATION.commons.perPurse * share)
+  const movementShare = kind === "support_movement" ? MOVEMENT_SUPPORT.pressureMultiplier : 1;
+  const pressure = kind === "gold_commons" || kind === "support_movement"
+    ? Math.min(AGITATION.commons.cap, decayed.pressure + AGITATION.commons.perPurse * movementShare * share * Math.max(.85, Math.min(1.15, commonsReception)))
     : decayed.pressure;
   const bribe = kind === "gold_garrison"
     ? Math.min(AGITATION.garrison.cap, decayed.bribe + AGITATION.garrison.perPurse * share)
@@ -289,6 +319,7 @@ export function applyLure(game: LureCarrier, at: number): { raidLure: number; ra
  */
 export const AGITATION_NOTICE: Record<AgitationKind, string> = {
   gold_commons: "Halkın arasında yabancı bir el sezildi; kim olduğu belli değil. Kahvelerde dağıtılan paranın izi bulunamadı.",
+  support_movement: "Meydan çevresinde yabancı kaynakla büyüyen bir hareket sezildi; bu desteğin kimden geldiği anlaşılmadı.",
   gold_garrison: "Kışlada yabancı bir kese dolaştığı duyuldu; kimin gönderdiği belli değil.",
   goods_glut: "Pazarda tuhaf bir bolluk var: kimsenin bilmediği kervanlar tezgâhları doldurdu, satış fiyatları düştü. Malın nereden geldiği anlaşılamadı.",
   raid_lure: "Dağ yollarında tuhaf bir hareket var: eşkıya sanki kaleye doğru çekilmiş. Kimin çektiği belli değil.",
@@ -296,6 +327,7 @@ export const AGITATION_NOTICE: Record<AgitationKind, string> = {
 
 const WHERE: Record<AgitationKind, string> = {
   gold_commons: "halkımızın arasına para dağıtıyordu",
+  support_movement: "meydandaki muhalefeti besliyordu",
   gold_garrison: "kışlamıza para sokuyordu",
   goods_glut: "pazarımızı bozmak için kervanla mal yığıyordu",
   raid_lure: "dağ eşkıyasını kalemize doğru çekiyordu",
@@ -306,6 +338,7 @@ export const agitationExposedNotice = (kingdom: string, kind: AgitationKind) =>
 
 const SENT_TO: Record<AgitationKind, string> = {
   gold_commons: "halkının arasına",
+  support_movement: "meydandaki hareketin yanına",
   gold_garrison: "kışlasına",
   goods_glut: "pazarına",
   raid_lure: "yollarına",
