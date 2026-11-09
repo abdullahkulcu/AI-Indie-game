@@ -12,12 +12,13 @@
 #     göçler sırayla, kaydedilerek işlenir. `push` şemayı diff'leyip YIKICI
 #     değişikliği onay sormadan uygular ve hangi adımın uygulandığını hiçbir
 #     yere yazmaz; üretimde geri dönüşü olmayan veri kaybı demektir.
-#  3. Kaynak ağacı SALT-OKUNUR bağlanır: çalışan konteyner kendi kaynağını
-#     değiştiremez.
+#  3. Kaynak ağacı salt-okunur bağlı kalır; derleme kapsayıcı içindeki geçici
+#     çalışma alanında yapılır.
 #
 # TLS için ayrıca -f docker-compose.tls.yml ekleyin (bkz. deploy/TLS.md).
 services:
   app:
+    working_dir: /runtime
     environment:
       NODE_ENV: production
       # Üretimde otomatik `push` KAPALIDIR; şemayı aşağıdaki `migrate` uygular.
@@ -30,20 +31,19 @@ services:
     # kalkan bir sunucu "relation ... does not exist" ile 500 döner ve hatayı
     # oyuncular bulur.
     command: >
-      sh -c "npm ci --include=dev --no-audit --no-fund &&
+      sh -c "tar -C /app
+      --exclude=node_modules --exclude=dist --exclude=.next --exclude=.vinext
+      --exclude=.wrangler --exclude=.git --exclude=.dev.vars -cf - . |
+      tar -C /runtime -xf - &&
+      npm ci --include=dev --no-audit --no-fund &&
       npx drizzle-kit migrate &&
       npm run build &&
       npm start"
     volumes:
       - .:/app:ro
-      - node_modules:/app/node_modules
-      - vinext_cache:/app/.vinext
-    # Kaynak ağacı salt-okunur iken `vinext build` önce `/app/dist` klasörünü
-    # temizler. İç içe named volume bazı Docker kurulumlarında üstteki ro bind
-    # mount tarafından gölgelenip EROFS veriyordu; çıktı yalnız aynı kapsayıcı
-    # yaşamı boyunca gerektiğinden güvenli bir tmpfs yeterlidir.
+    # Vinext derlemesi ve bağımlılıklar yalnız geçici çalışma alanına yazılır.
     tmpfs:
-      - /app/dist
+      - /runtime
     healthcheck:
       # Derleme ilk açılışta uzun sürer; dev sunucusundan geç hazır olur.
       start_period: 300s

@@ -10,7 +10,8 @@ uygulama kodu, veritabanı göçleri, testler, yapay zekâ rehberleri ve temel
 mimari/yayın belgeleri korunmuştur. Yayın denetiminde eksik olan son iki Divan
 göç kaydı da sıralı göç defterine eklendi.
 Üretim başlatmasında derleme çıktısının salt-okunur kaynak ağacına yazılamadığı
-görüldü; çıktı alanı kapsayıcı içi geçici belleğe alındı.
+görüldü. Kaynak ağacı yazılabilir yapılmadan, kapsayıcı başlangıcında geçici bir
+çalışma alanına kopyalanıp derleme yalnız orada yapıldı.
 
 ## Neden
 
