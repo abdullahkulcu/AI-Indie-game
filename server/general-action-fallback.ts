@@ -23,9 +23,28 @@ function inferWorldAction(direct: string): FallbackAction | null {
   return null;
 }
 
+/** Sağlayıcı yedeğinde de halk oylaması niyetini yalnız açık emirden çıkarır. */
+function inferReferendumAction(direct: string): FallbackAction | null {
+  if (!/(referandum|halkın görüşünü|halka sor)/.test(direct)) return null;
+  if (/(sorsak|soralım mı|yapsak|ne olur|sence|mantıklı mı|doğru mu)/.test(direct)) return null;
+  if (!/(sor|sorgula|oylama yap|referandum yap|başlat)/.test(direct)) return null;
+  if (/(vergi|verginin)/.test(direct)) {
+    if (/(artır|artir|yükselt|yukselt)/.test(direct)) return { name: "hold_referendum", arguments: { topic: "tax_increase" } };
+    if (/(indir|azalt|hafiflet|düşür|dusur)/.test(direct)) return { name: "hold_referendum", arguments: { topic: "tax_relief" } };
+  }
+  if (/(yiyecek|istihkak|erzak|sofra)/.test(direct)) {
+    if (/(artır|artir|yükselt|yukselt|tam)/.test(direct)) return { name: "hold_referendum", arguments: { topic: "food_relief" } };
+    if (/(indir|azalt|kes|kıs|kis|düşür|dusur)/.test(direct)) return { name: "hold_referendum", arguments: { topic: "food_cut" } };
+  }
+  // Konu yoksa oylama yerine General'in açıklama istemesi gerekir.
+  return null;
+}
+
 export function inferFallbackAction(message: string, history: Array<{ text: string }> = []): FallbackAction | null {
   const direct = message.toLocaleLowerCase("tr-TR");
-  if (/(yükseltsek|yukseltsek|kursak|ne olur|sence|mantıklı mı|doğru mu|dersem|desem|olsaydı|göndersek|gondersek|yollasak)/.test(direct)) return null;
+  const referendum = inferReferendumAction(direct);
+  if (referendum) return referendum;
+  if (/(yükseltsek|yukseltsek|kursak|yapsak|sorsak|ne olur|sence|mantıklı mı|doğru mu|dersem|desem|olsaydı|göndersek|gondersek|yollasak)/.test(direct)) return null;
   if (!/(başlat|baslat|kur|yükselt|yukselt|seviyeye çıkar|seviyeye cikar|uygula|devam et|gönder|gonder|yolla|görevlendir|gorevlendir|geri çek|geri cek|geri çağır|geri cagir)/.test(direct)) return null;
   const worldAction = inferWorldAction(direct);
   if (worldAction) return worldAction;

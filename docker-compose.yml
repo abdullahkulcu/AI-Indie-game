@@ -16,7 +16,8 @@
 #
 # Üretim örtüsü üç şeyi değiştirir: `npm run build` + `npm start`,
 # NODE_ENV=production ve şemanın `drizzle-kit migrate` ile uygulanması.
-# `cron` yalnızca saatte bir /api/cron'u çağırır; asıl karar sunucuda verilir.
+# Zamanlayıcı beş dakikada bir /api/cron'u çağırır; model çağrısı yalnız
+# gerçekten anlamlı değişim veya Divan zamanı oluştuğunda sunucuda yapılır.
 services:
   postgres:
     image: postgres:17
@@ -55,11 +56,30 @@ services:
     # hostta da görmek isterseniz aşağıdaki satırı açın (yerel hata ayıklama).
     # ports: ["${APP_PORT:-3000}:3000"]
     expose: ["3000"]
+    # Genel, oturum ve şifreleme sırları Worker tarafından ortam değişkeni
+    # olarak okunur. Compose yalnız `.env` dosyasını kendiliğinden yükler;
+    # projenin kasıtlı olarak gitignore'daki `.dev.vars` dosyasını ayrıca
+    # vermeden üretimde BYOK/cron/admin kapıları boş kalırdı.
+    env_file: [.dev.vars]
     volumes:
       - .:/app
       # Host ile konteyner farklı platformlar; bağımlılık ve derleme önbelleği ayrılmalı.
       - node_modules:/app/node_modules
       - vinext_cache:/app/.vinext
+    # workerd, kullanılmayan D1 binding'i (env.DB — kodda hiçbir yerde
+    # okunmuyor) için bile .wrangler altına SQLite dosyası yazıyor. SQLite'ın
+    # ihtiyaç duyduğu fcntl/mmap kilitlemesi bazı Docker depolama arka
+    # uçlarında (fuse-overlayfs, ağ/VM tabanlı hacimler) normal dosya
+    # yazımı çalışsa bile desteklenmiyor ve "disk I/O error: SQLITE_IOERR"
+    # ile çöküyor; .next/types altına route tiplerini yazarken de aynı katman
+    # "Unknown system error -35" veriyor. Adi bir named volume bunu düzeltmedi
+    # (node_modules'te sorun yok ama disk kilitlemesi hâlâ arızalı), o yüzden
+    # ikisini de RAM tabanlı tmpfs'e alıyoruz: gerçek POSIX kilitleme her
+    # zaman çalışır. İçerikleri zaten gitignore'da ve geliştirmede tek
+    # kullanımlık; oyun verisi burada DEĞİL, Postgres'te (postgres_data).
+    tmpfs:
+      - /app/.wrangler
+      - /app/.next
     depends_on:
       postgres: {condition: service_healthy}
     environment:
@@ -90,7 +110,10 @@ services:
     env_file: [.dev.vars]
     environment:
       CRON_TARGET: ${CRON_TARGET:-http://app:3000/api/cron}
-      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-3600}
+      # Hızlı Taç'ta bir oyun günü bir gerçek saat olduğundan, saatlik kontrol
+      # Divan çağrısını görünür biçimde geciktirirdi. Beş dakikalık ritim
+      # yalnızca saf oyun kontrolünü sıklaştırır; tek başına AI çağrısı açmaz.
+      CRON_INTERVAL_SECONDS: ${CRON_INTERVAL_SECONDS:-300}
     command:
       - sh
       - -c

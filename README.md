@@ -37,12 +37,15 @@ bağlantıda `Secure` bayrağıyla yazılır ve bunu `X-Forwarded-Proto` belirle
 düz HTTP'de bayrak yazılmaz (yoksa tarayıcı çerezi hiç saklamaz ve kimse giriş
 yapamaz), ama düz HTTP'de oturum çerezi ağda açık gider — yayına TLS ile çıkın.
 
+Yeni bir Linux sunucusunda sıfırdan kurulum, sır üretimi, güvenlik duvarı,
+TLS, yedek, geri yükleme ve güvenli yükseltme adımları için
+[`deploy/LINUX.md`](deploy/LINUX.md) belgesini izleyin.
+
 Ters vekilin arkasında istemci IP'sini hangi başlığın taşıdığını
 `CLIENT_IP_HEADER` belirler (varsayılan `x-real-ip`; Cloudflare kenarının
 arkasında `cf-connecting-ip`). Hız sınırı kimliği buradan doğar.
 
-Web: `http://localhost` — 80 portunda nginx dinler ve uygulamaya (konteyner içi 3000) yönlendirir. VM'de sunucunun IP adresiyle aynı adres çalışır; güvenlik duvarında 80 açık olmalı. İlk çalıştırmada `.dev.vars` (Worker sırları) ve
-`.env` (cron sidecar) otomatik üretilir; `CRON_SECRET` ikisinde senkron tutulur.
+Web: `http://localhost` — 80 portunda nginx dinler ve uygulamaya (konteyner içi 3000) yönlendirir. VM'de sunucunun IP adresiyle aynı adres çalışır; güvenlik duvarında 80 açık olmalı. İlk çalıştırmada `.dev.vars` oluşturulur; uygulama ve cron aynı dosyayı okuduğu için `CRON_SECRET` tek kaynaktan gelir.
 
 Bütün komutlar için `./run.sh help`. Sık kullanılanlar:
 

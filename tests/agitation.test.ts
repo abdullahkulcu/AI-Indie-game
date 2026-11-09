@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyActions, marketState } from "../engine/actions";
 import {
-  AGITATION, GLUT, LURE, agitationDayStart, agitationEffect, agitationPairWindow,
+  AGITATION, GLUT, LURE, MOVEMENT_SUPPORT, agitationCost, agitationDayStart, agitationEffect, agitationPairWindow, canSupportMovement,
   agitationTravelMs, applyAgitation, applyGlut, applyLure, feltUnrest, glutCost,
   glutShare, lureAt,
 } from "../engine/agitation";
@@ -14,6 +14,7 @@ import { factionPressureOf } from "../engine/faction";
 import { tick } from "../engine/tick";
 import type { Game } from "../engine/types";
 import { reputationChange } from "../engine/diplomacy";
+import { propagandaReception } from "../engine/populace-persona";
 import { validateGameSave } from "../server/save-validation";
 
 const T0 = 1_800_000_000_000;
@@ -63,6 +64,25 @@ test("tek kese eşikleri tam olarak beklenen kadar oynatır", () => {
   const garrison = applyAgitation(target, "gold_garrison", T0);
   assert.equal(garrison.agitationBribe, AGITATION.garrison.perPurse);
   assert.equal(garrison.agitationPressure, 0);
+});
+
+test("halk kişiliği propagandayı dar bir aralıkta farklı duyar", () => {
+  const target = newGame();
+  const rebel = applyAgitation(target, "gold_commons", T0, propagandaReception("isyankar"));
+  const loyal = applyAgitation(target, "gold_commons", T0, propagandaReception("bagli_itaatkar"));
+  assert.ok(rebel.agitationPressure > AGITATION.commons.perPurse);
+  assert.ok(loyal.agitationPressure < AGITATION.commons.perPurse);
+  assert.ok(rebel.agitationPressure <= AGITATION.commons.cap);
+});
+
+test("halk hareketine destek daha pahalı, ayrı kayda uygun ve daha güçlüdür", () => {
+  assert.deepEqual(agitationCost("support_movement", "food"), { key: "gold", amount: MOVEMENT_SUPPORT.cost });
+  assert.equal(canSupportMovement(MOVEMENT_SUPPORT.minPressure - .1), false);
+  assert.equal(canSupportMovement(MOVEMENT_SUPPORT.minPressure), true);
+  const propaganda = applyAgitation(newGame(), "gold_commons", T0);
+  const movement = applyAgitation(newGame(), "support_movement", T0);
+  assert.ok(movement.agitationPressure > propaganda.agitationPressure);
+  assert.ok(movement.agitationPressure <= AGITATION.commons.cap);
 });
 
 test("art arda kese tavanı aşamaz", () => {
@@ -132,10 +152,10 @@ test("kese hedefin hiçbir kaynak alanına dokunmaz", () => {
 
 // --- Kanallar --------------------------------------------------------------
 
-test("kese hizip baskısını büyütür ama alanın içine yazılmaz", () => {
+test("kese muhalefet baskısını büyütür ama alanın içine yazılmaz", () => {
   const target = newGame({ popularity: 60, agitationPressure: 9.6, agitationAt: T0 });
   const after = tick(target, T0 + HOUR);
-  // Rıza yüksek: hizbin kendi baskısı sıfır kalır, kesenin payı ayrı taşınır.
+  // Rıza yüksek: muhalefetin kendi baskısı sıfır kalır, kesenin payı ayrı taşınır.
   assert.equal(factionPressureOf(after), 0);
   assert.ok((after.agitationPressure ?? 0) > 0, "taşıyıcı alan silinmez");
 });
@@ -191,6 +211,14 @@ test("tavanlar tek dosyada ve plandaki değerlerde", () => {
   assert.equal(AGITATION.perSenderPerDay, 4);
   assert.equal(AGITATION.perTargetPerDay, 3);
   assert.equal(AGITATION.pairWaitHours, 6);
+});
+
+test("gelen dolaylı faaliyetler üyelik tercihiyle kapatılamaz", () => {
+  const desk = readFileSync(new URL("../server/agitation-desk.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/world/route.ts", import.meta.url), "utf8");
+  assert.ok(!desk.includes("acceptsAgitation"), "hedef üyeliği propaganda kesesini reddetmemeli");
+  assert.ok(!route.includes("set_agitation_opt"), "kapatma API eylemi geri gelmemeli");
+  assert.ok(!route.includes("acceptsAgitation"), "dış dünya yanıtı kapatma tercihi taşımamalı");
 });
 
 // --- İtibar cezası ---------------------------------------------------------
@@ -307,7 +335,7 @@ test("yığın hedefin rızasını YÜKSELTMEZ", () => {
   assert.equal(marketState(glutted, T0).livingCost, marketState(clean, T0).livingCost);
 });
 
-test("mal kesesi hizip baskısı üretmez", () => {
+test("mal kesesi muhalefet baskısı üretmez", () => {
   const patch = applyGlut(trader(), "food", T0);
   assert.deepEqual(Object.keys(patch).sort(), ["commonsGlut", "commonsGlutAt"]);
 });

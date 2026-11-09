@@ -7,14 +7,17 @@
  * farklı krallıkların Generalleri farklı olur.
  */
 
+/** Tarihte öne çıkan komutanlar; İngilizce yazımları oyuncuya gösterilir. */
 const NAMES = [
-  "Aldric", "Bertan", "Cezmi", "Doruk", "Ediz", "Ferhat", "Gökhan", "Haluk",
-  "İlhan", "Kerem", "Levent", "Murat", "Necdet", "Orhan", "Pertev", "Rüştü",
-  "Sencer", "Tarkan", "Ulvi", "Volkan", "Yaman", "Zeki", "Bahadır", "Cengiz",
-  "Demirhan", "Erdem", "Fikret", "Gürkan", "Hakan", "Kaya", "Mert", "Nizam",
+  "Alexander", "Hannibal", "Scipio", "Caesar", "Belisarius", "Khalid", "Saladin", "Subutai",
+  "Joan", "Richard", "William", "Edward", "Timur", "Gustavus", "Turenne", "Marlborough",
+  "Frederick", "Napoleon", "Wellington", "Grant", "Sherman", "Lee", "Moltke", "Zhukov",
+  "Montgomery", "Eisenhower", "Patton", "Nimitz", "MacArthur", "Yi", "Oda", "Tokugawa",
+  "Boudica", "Themistocles", "Leonidas", "Trajan", "Aetius", "Suleiman", "Baybars", "Skanderbeg",
+  "Gonzalo", "Maurice", "Suvorov", "Nelson", "Kutuzov", "Jomini", "Foch", "Manstein",
 ] as const;
 
-const TITLES = ["General", "Serdar", "Kumandan", "Beylerbeyi"] as const;
+const TITLES = ["General", "Marshal", "Commander", "Field Marshal"] as const;
 
 /** FNV-1a: motorun başka yerlerinde kullanılan aynı karma. */
 function hash(text: string) {

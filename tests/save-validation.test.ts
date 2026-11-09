@@ -55,6 +55,30 @@ test("geçerli kuruluş kaydı kabul edilir", () => {
   assert.equal(result.ok, true);
 });
 
+test("istemci birlik deneyimini uyduramaz; sunucunun tick sonucu korunur", () => {
+  const previous = startingSave({ units: { spearman: 10 }, unitExperience: {} });
+  const honest = tick(previous as never, NOW + 60_000);
+  const forged = { ...honest, unitExperience: { spearman: 100 } };
+  const result = validateGameSave(forged, {
+    previous: previous as never, previousUpdatedAt: NOW, channelSpeed: 1,
+    channelName: "Standart Sezon I", now: NOW + 60_000,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.game.unitExperience, honest.unitExperience);
+});
+
+test("istemci savaş hasarını silemez; sunucunun tick sonucu korunur", () => {
+  const previous = startingSave({ warDisruption: { until: NOW + 3_600_000, productionPenalty: .2 } });
+  const honest = tick(previous as never, NOW + 60_000);
+  const forged = { ...honest, warDisruption: undefined };
+  const result = validateGameSave(forged, {
+    previous: previous as never, previousUpdatedAt: NOW, channelSpeed: 1,
+    channelName: "Standart Sezon I", now: NOW + 60_000,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.game.warDisruption, honest.warDisruption);
+});
+
 test("kota alanlarını taşıyan eski kayıt hâlâ kabul edilir", () => {
   // Kota kaldırıldı ama şema `.strict()`; alanlar `.optional()` yapılmasaydı
   // bütün eski kayıtlar reddedilirdi.
@@ -69,6 +93,18 @@ test("kota alanları hiç yokken de kayıt kabul edilir", () => {
   delete save.quotaAt;
   const result = validateGameSave(save, firstSave);
   assert.equal(result.ok, true);
+});
+
+test("eşzamanlı inşaat kuyruğu yeni ve eski kayıtlarla birlikte okunur", () => {
+  const save = startingSave({
+    constructionQueue: [{
+      type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1,
+      reserved: { wood: 100, gold: 60 }, queuedAt: NOW,
+      startedAt: NOW, completesAt: NOW + 5_400_000, durationMs: 5_400_000,
+    }],
+  });
+  assert.ok(parseStoredSave(JSON.stringify(save)), "modern inşaat kuyruğu şemadan geçmeli");
+  assert.equal(validateGameSave(save, firstSave).ok, true);
 });
 
 test("şişirilmiş kota artık kaydı reddettirmez", () => {

@@ -32,6 +32,23 @@ export type Queue = {
 };
 
 /**
+ * Kışlanın kendi eğitim kuyruğu. İnşaat kuyruğundan bilerek ayrıdır: bir
+ * duvar yükselirken kışla da asker yetiştirebilir. Eski kayıtların `queue`
+ * içindeki `kind: "unit"` işleri okunmaya devam eder; yeni emirler buraya
+ * yazılır.
+ */
+export type TrainingQueue = {
+  type: string;
+  name: string;
+  count: number;
+  manpower: number;
+  startedAt: number;
+  completesAt: number;
+};
+
+export type ConstructionJob = import("./construction").ConstructionJob;
+
+/**
  * Pazara verilen açık teklif. Mal ambardan (ya da altın hazineden) emir
  * verilince çıkar, karşılığı ancak teklif kapandığında gelir. Yüklü teklif
  * daha uzun sürer; pazar anlık bir takas masası değildir.
@@ -48,6 +65,9 @@ export type MarketOrder = {
 };
 
 export type Notice = { kind: string; text: string; at: number };
+
+/** Savaşın şehir üretiminde bıraktığı, zamanı gelince kendiliğinden sönen hasar. */
+export type WarDisruption = { until: number; productionPenalty: number };
 
 export type Game = {
   version: 2;
@@ -82,7 +102,21 @@ export type Game = {
   quotaAt: number;
   buildings: Building[];
   units: Record<string, number>;
+  /**
+   * Birlik türü başına ortalama saha deneyimi (0-100).
+   *
+   * Yeni askerler sıfır deneyimle katılır; kayıp verildiğinde deneyim yalnız
+   * hayatta kalan birliklerle kalır. Değer istemcinin yazdığı bir ödül değil,
+   * `tick()` tarafından akın savunmasından türetilen bir durumdur.
+   */
+  unitExperience?: Record<string, number>;
   queue: Queue | null;
+  /**
+   * Yeni inşaat sistemi. Eski `queue` yalnızca eski kayıtları okuyabilmek
+   * için taşınır; bu liste varsa inşaatın tek doğru kaynağı budur.
+   */
+  constructionQueue?: ConstructionJob[];
+  trainingQueue?: TrainingQueue | null;
   notices: Notice[];
   provider: string | null;
   model: string | null;
@@ -95,6 +129,8 @@ export type Game = {
   soldierPay?: number;
   /** Maaşı eksik ödenen askerlerin biriken huzursuzluğu (0-100). */
   soldierUnrest?: number;
+  /** Savaş sonucunda sunucunun yazdığı geçici üretim kesintisi. */
+  warDisruption?: WarDisruption;
   /** Ortak madene gönderilen işçi. Bunlar halkın içinden çıkar: tarlada değil
    *  madende çalışırlar, yani yerel üretime katkı vermezler ama yemek yerler. */
   mineWorkers?: number;
@@ -118,7 +154,7 @@ export type Game = {
   /** Son depo taşması bildirimi; defteri saniyede bir uyarıyla doldurmamak için. */
   lastSpoilNoticeAt?: number;
   /**
-   * İç hizip baskısı (0-100). Rıza uzun süre düşük kalınca birikir, düzelince
+   * İç muhalefet baskısı (0-100). Rıza uzun süre düşük kalınca birikir, düzelince
    * erir; askerin zapt gücünü zayıflatır (bkz. engine/faction.ts).
    *
    * SUNUCU-TÜREVİDİR: istemcinin bildirdiği değer yok sayılır, sunucunun kendi

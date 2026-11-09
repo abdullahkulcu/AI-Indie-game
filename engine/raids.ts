@@ -1,6 +1,6 @@
 import { LURE, lureAt } from "./agitation";
 import { terrainCatalog } from "./catalog";
-import { armySize } from "./populace";
+import { armySize, garrisonDefense } from "./units";
 import type { Game, TerrainId } from "./types";
 
 /**
@@ -58,8 +58,8 @@ export const RAID_WINDOW_HOURS = 4;
 /** Tek tick'te çözülecek azami pencere; `tick` de üretimi 24 oyun saatiyle sınırlar. */
 const MAX_WINDOWS_PER_TICK = 24 / RAID_WINDOW_HOURS;
 
-/** Nöbetteki asker başına savunma gücü. */
-const GUARD_PER_SOLDIER = 1.4;
+/** Mızrakçının önceki nöbet gücüne (1,4) kalibrasyon; katalog savunması 16'dır. */
+const GUARD_POWER_SCALE = 1.4 / 16;
 
 /** Sur seviyesi başına savunma: hem sabit bir taban hem çarpan verir. */
 const WALL_FLAT = 4;
@@ -118,14 +118,15 @@ const keepLevel = (game: Pick<Game, "buildings">) =>
  * `reliability` fikri burada da geçerlidir, sadece eşiği biraz daha yüksektir
  * (huzursuz asker halkı zapt etmez ama canı pahasına yine de dövüşür).
  */
-export function defenseOf(game: Pick<Game, "buildings" | "units" | "terrain" | "watchRatio" | "soldierUnrest">) {
+export function defenseOf(game: Pick<Game, "buildings" | "units" | "terrain" | "watchRatio" | "soldierUnrest" | "unitExperience">) {
   const army = armySize(game.units ?? {});
   const watch = watchRatioOf(game);
   const watchers = Math.floor(army * watch / 100);
   const reliability = Math.max(0, 1 - (game.soldierUnrest ?? 0) / 70);
   const wall = wallLevel(game);
   const terrain = terrainCatalog[game.terrain] ?? terrainCatalog.plain;
-  const power = (watchers * GUARD_PER_SOLDIER * reliability + wall * WALL_FLAT)
+  const watchPower = garrisonDefense(game.units ?? {}, game.unitExperience) * GUARD_POWER_SCALE * watch / 100;
+  const power = (watchPower * reliability + wall * WALL_FLAT)
     * (1 + wall * WALL_MULTIPLIER)
     * terrain.defense;
   return { army, watch, watchers, reliability, wall, power };

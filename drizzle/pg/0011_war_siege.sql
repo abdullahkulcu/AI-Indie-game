@@ -1,0 +1,4 @@
+ALTER TABLE "wars" ADD COLUMN IF NOT EXISTS "siege_ends_at" bigint;
+ALTER TABLE "wars" ADD COLUMN IF NOT EXISTS "war_points" integer DEFAULT 0 NOT NULL;
+ALTER TABLE "wars" ADD COLUMN IF NOT EXISTS "outcome" text;
+ALTER TABLE "wars" ADD COLUMN IF NOT EXISTS "loot" text DEFAULT '{}' NOT NULL;

@@ -43,15 +43,27 @@ EOF
 
 read_dev_var(){ grep -E "^$1=" "$DEV_VARS" 2>/dev/null | head -1 | cut -d= -f2-; }
 
+# SERVİS adı bekler, konteyner adı DEĞİL. Konteyner adı compose proje adından
+# türer, proje adı da dizin adından: repo `demirkale/` diye klonlanmışsa
+# konteyner `demirkale-postgres-1` olur. Adı sabit yazmak, dizin adı değişir
+# değişmez `docker inspect`i "missing" döndürüp servis sapasağlam ayaktayken
+# "zamanında hazır olmadı" diye düşmemize yol açıyordu (yaşandı). Kimliği
+# compose'un kendisinden sorarız; COMPOSE_PROJECT_NAME/WEB_PORT ile yan yana
+# çalışan kopyalarda da doğru konteyneri bulur.
 wait_healthy(){
-  local name="$1" limit="${2:-60}" i=0 state
+  local service="$1" limit="${2:-60}" i=0 state cid
   while [ "$i" -lt "$limit" ]; do
-    state=$(docker inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo missing)
-    [ "$state" = "healthy" ] && return 0
-    [ "$state" = "unhealthy" ] && die "$name sağlıksız. ./run.sh logs ile bakın."
+    cid=$(docker compose ps -q "$service" 2>/dev/null | head -1)
+    if [ -n "$cid" ]; then
+      # Healthcheck'i olmayan servis için .State.Health boştur; onu "none" sayıp
+      # beklemeye devam ederiz, boş dizgeyi durum sanmayız.
+      state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo missing)
+      [ "$state" = "healthy" ] && return 0
+      [ "$state" = "unhealthy" ] && die "$service sağlıksız. ./run.sh logs $service ile bakın."
+    fi
     sleep 5; i=$((i+1))
   done
-  die "$name zamanında hazır olmadı. ./run.sh logs ile bakın."
+  die "$service zamanında hazır olmadı. ./run.sh logs $service ile bakın."
 }
 
 # Üretim örtüsü. Taban dosya GELİŞTİRME yığınıdır (dev sunucusu + drizzle push);
@@ -66,9 +78,9 @@ cmd_up(){
   warn "bu yığın dev sunucusu çalıştırır ve şemayı 'drizzle-kit push --force' ile uygular."
   warn "canlı bir VM için: ./run.sh prod   (TLS ile: DOMAIN=... ./run.sh prod:tls)"
   docker compose up -d
-  wait_healthy ai-indie-game-postgres-1 24
+  wait_healthy postgres 24
   info "postgres hazır"
-  wait_healthy ai-indie-game-app-1 60
+  wait_healthy app 60
   info "uygulama hazır → $APP_URL"
   docker compose ps --format 'table {{.Service}}\t{{.Status}}'
   echo

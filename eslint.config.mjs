@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Alt ajanların git worktree kopyaları; .gitignore'da zaten dışarıda.
     ".claude/**",
+    // Yerel analizlerde oluşabilen izlenmeyen tam proje kopyası.
+    "demirkale/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

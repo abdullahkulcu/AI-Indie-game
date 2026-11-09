@@ -8,6 +8,7 @@ import { RATION_LIMITS, clampRation } from "../engine/populace";
 import { WATCH_LIMITS, clampWatch, resolveRaids } from "../engine/raids";
 import { capacityFor, tick } from "../engine/tick";
 import type { Game, Key } from "../engine/types";
+import { UNIT_TYPES } from "../engine/units";
 
 /**
  * Oyun durumu hâlâ istemcide hesaplanıyor (bkz. components/KingdomGame.tsx).
@@ -155,6 +156,27 @@ const queueSchema = z.object({
   hastened: z.boolean().optional(),
 }).strict();
 
+const trainingQueueSchema = z.object({
+  type: z.string().refine(value => UNIT_TYPES.includes(value as typeof UNIT_TYPES[number]), { message: "Bilinmeyen birlik türü." }),
+  name: z.string().min(1).max(60),
+  count: z.number().int().min(1).max(CAPS.unitCount),
+  manpower: z.number().int().min(1).max(CAPS.unitCount),
+  startedAt: timestamp,
+  completesAt: timestamp,
+}).strict();
+
+const constructionJobSchema = z.object({
+  type: z.string().min(1).max(40).refine(value => BUILDING_TYPES.includes(value) || value === "keep", { message: "Bilinmeyen inşaat türü." }),
+  name: z.string().min(1).max(60),
+  targetLevel: z.number().int().min(1).max(CAPS.buildingLevel),
+  reserved: resourcesSchema.partial(),
+  queuedAt: timestamp,
+  startedAt: timestamp.nullable(),
+  completesAt: timestamp.nullable(),
+  durationMs: z.number().int().min(1).max(7 * 86_400_000),
+  hastened: z.boolean().optional(),
+}).strict();
+
 const noticeSchema = z.object({
   kind: z.string().min(1).max(40),
   text: z.string().min(1).max(400),
@@ -185,11 +207,14 @@ export const gameSaveSchema = z.object({
   quota: finite(CAPS.quota).optional(),
   quotaAt: timestamp.optional(),
   buildings: z.array(buildingSchema).min(1).max(CAPS.buildings),
-  units: z.record(z.string().regex(/^[a-z_]{2,24}$/), finite(CAPS.unitCount)).refine(
-    value => Object.keys(value).length <= CAPS.unitKinds,
-    { message: "Birlik türü sayısı sınırı aşıldı." },
-  ),
+  units: z.record(z.string().regex(/^[a-z_]{2,24}$/), finite(CAPS.unitCount))
+    .refine(value => Object.keys(value).length <= CAPS.unitKinds, { message: "Birlik türü sayısı sınırı aşıldı." })
+    .refine(value => Object.keys(value).every(key => UNIT_TYPES.includes(key as typeof UNIT_TYPES[number])), { message: "Bilinmeyen birlik türü." }),
+  unitExperience: z.record(z.string().regex(/^[a-z_]{2,24}$/), finite(100))
+    .refine(value => Object.keys(value).every(key => UNIT_TYPES.includes(key as typeof UNIT_TYPES[number])), { message: "Bilinmeyen birlik deneyimi." }).optional(),
   queue: queueSchema.nullable(),
+  constructionQueue: z.array(constructionJobSchema).max(CAPS.buildings).optional(),
+  trainingQueue: trainingQueueSchema.nullable().optional(),
   notices: z.array(noticeSchema).max(CAPS.notices),
   provider: z.string().max(40).nullable(),
   model: z.string().max(80).nullable(),
@@ -202,6 +227,7 @@ export const gameSaveSchema = z.object({
   aleRation: finite(CAPS.ration).optional(),
   soldierPay: finite(CAPS.ration).optional(),
   soldierUnrest: finite(100).optional(),
+  warDisruption: z.object({ until: timestamp, productionPenalty: finite(.4) }).strict().optional(),
   mineWorkers: finite(CAPS.population).optional(),
   /**
    * Göç defteri. Buradaki üst sınır yalnızca tip taşmasına karşıdır; asıl
@@ -247,7 +273,7 @@ export const gameSaveSchema = z.object({
   ).strict().optional(),
   lastSpoilNoticeAt: z.number().finite().optional(),
   /**
-   * İç hizip baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
+   * İç muhalefet baskısı. `.optional()`: eski kayıtlarda yok ve reddedilmiyor.
    * Değeri istemciden HİÇ kabul edilmez (bkz. SERVER_DERIVED); şemada yer alması
    * yalnızca `.strict()` kaydın sunucunun kendi yazdığı alanı reddetmemesi için.
    */
@@ -610,7 +636,7 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
   };
   // SUNUCU-TÜREVİ ALANLAR — 2. sınıf (akıllı halk taşıyıcıları). Bu alanlarda
   // istemcinin bildirdiği değer TAMAMEN YOK SAYILIR; yerine sunucunun kendi
-  // `tick(previous)` sonucundaki değer yazılır. Sebep: hizip baskısı, kese ve
+  // `tick(previous)` sonucundaki değer yazılır. Sebep: muhalefet baskısı, kese ve
   // haydut yönlendirmesi birer CEZA/durum taşıyıcısıdır — istemci kendi
   // lehine yazabilirse mekaniğin tamamı anlamını yitirir. Tavan denetimi
   // (`checkGrowth`/`checkAgainstSimulation`) burada yetmez: bunlar kaynak
@@ -627,6 +653,16 @@ function serverDerived(game: GameSave, previous: GameSave | null, simulated: Gam
 }
 
 export const SERVER_DERIVED = [
+  // Ortak maden işçi sayısı, kaynağı da üretim cezasını da değiştirdiği için
+  // yalnız maden emri rotası tarafından yazılır. İstemci bunu sıfırlayarak
+  // tarlada olmayan işçilerin üretimini geri getiremez.
+  "mineWorkers",
+  // Akın savunmasından doğan saha deneyimi istemcinin ödül yazabileceği bir
+  // alan değildir; her kayıtta sunucunun kendi tick'iyle yeniden türetilir.
+  "unitExperience",
+  // Savaş sonucu istemcinin silebileceği bir üretim cezası olamaz; süre sonunu
+  // motor kendi tick'iyle kapatır.
+  "warDisruption",
   "factionPressure",
   // Dış kese: yazan tek yer cron. `tick` bunlara dokunmadığı için `simulated`
   // değeri `previous`takiyle aynıdır — yani istemcinin yazdığı her şey silinir.

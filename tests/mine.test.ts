@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MINE_ELAPSED_CAP_HOURS, ORE_DELIVERY_INTERVAL_MS, ORE_PER_WORKER_HOUR, oreRate, settleMine, type MineCrew } from "../engine/mine";
+import { MINE_ELAPSED_CAP_HOURS, MINE_INFLUENCE_TAKE_RATE, MINE_INFLUENCE_WINDOW_HOURS, ORE_DELIVERY_INTERVAL_MS, ORE_PER_WORKER_HOUR, SHARED_MINE_ORE_CAPACITY, advanceMineInfluence, mineSiteFor, oreRate, settleMine, type MineCrew } from "../engine/mine";
 import { tick } from "../engine/tick";
 import { validateGameSave } from "../server/save-validation";
 import type { Game } from "../engine/types";
@@ -29,6 +29,15 @@ test("bir saat çalışan ekip işçi başına ORE_PER_WORKER_HOUR cevher alır"
 test("hızlı channel'da verim hızla çarpılır", () => {
   const fast = settleMine([crew({ workers: 5 })], { speed: 24, hours: 1, oreRemaining: 100_000, now: NOW });
   assert.equal(fast.extracted, 20 * 24);
+});
+
+test("tükenen damar için yeni saha deterministiktir ve ilk sahadan ayrılır", () => {
+  const first = mineSiteFor("hizli-tac", 0);
+  const next = mineSiteFor("hizli-tac", 1);
+  assert.equal(first.name, "Ortak Demir Damarı");
+  assert.notDeepEqual(next.position, first.position);
+  assert.deepEqual(mineSiteFor("hizli-tac", 1), next);
+  assert.equal(SHARED_MINE_ORE_CAPACITY, 100_000);
 });
 
 // --- küsurat kaybolmaz ------------------------------------------------------
@@ -96,6 +105,36 @@ test("aynı girdi aynı çıktıyı verir; sıra istikrarlıdır", () => {
   assert.deepEqual(first.shares, second.shares);
 });
 
+test("maden nüfuzu son 24 üretim oyun-saatinin emeğinden doğar ve eşitlikte kimlik sırası sabittir", () => {
+  const result = advanceMineInfluence({
+    crew: [{ userId: "b", workers: 4 }, { userId: "a", workers: 4 }], samples: [],
+    gameHours: 0, elapsedGameHours: MINE_INFLUENCE_WINDOW_HOURS, ownerUserId: null,
+  });
+  assert.equal(result.ownerUserId, "a");
+  assert.equal(result.gameHours, 0);
+  assert.deepEqual(result.samples, []);
+});
+
+test("nüfuz penceresi kısa hesaplara bölününce de aynı sahibi seçer", () => {
+  const crewRows = [{ userId: "a", workers: 7 }, { userId: "b", workers: 3 }];
+  const single = advanceMineInfluence({ crew: crewRows, samples: [], gameHours: 0, elapsedGameHours: 24, ownerUserId: null });
+  let split = advanceMineInfluence({ crew: crewRows, samples: [], gameHours: 0, elapsedGameHours: 6, ownerUserId: null });
+  for (let step = 0; step < 3; step += 1) split = advanceMineInfluence({ crew: crewRows, samples: split.samples, gameHours: split.gameHours, elapsedGameHours: 6, ownerUserId: split.ownerUserId });
+  assert.deepEqual(split, single);
+});
+
+test("nüfuz sahibi aktif rakip üretiminin küçük payını alır; toplam cevher değişmez", () => {
+  const normal = settleMine([crew({ userId: "a", workers: 5 }), crew({ userId: "b", workers: 5 })], {
+    speed: 1, hours: 1, oreRemaining: 100_000, now: NOW,
+  });
+  const influenced = settleMine([crew({ userId: "a", workers: 5 }), crew({ userId: "b", workers: 5 })], {
+    speed: 1, hours: 1, oreRemaining: 100_000, now: NOW, influenceOwnerId: "a",
+  });
+  assert.equal(influenced.extracted, normal.extracted);
+  assert.equal(influenced.shares.find(row => row.userId === "a")!.delivered, 20 + 20 * MINE_INFLUENCE_TAKE_RATE);
+  assert.equal(influenced.shares.find(row => row.userId === "b")!.delivered, 20 * (1 - MINE_INFLUENCE_TAKE_RATE));
+});
+
 // --- hile koruması ----------------------------------------------------------
 // Cevheri SUNUCU kayda yazar (sürüm korumalı). Bu yüzden cevher, istemcinin bir
 // sonraki kaydı denetlenirken zaten `previous`ın içindedir ve tavan kendiliğinden
@@ -151,4 +190,13 @@ test("madene işçi göndermiş eski kayıt (mineWorkers dolu) hâlâ kabul edil
   const reported = tick(previous as unknown as Game, later);
   const result = validateGameSave({ ...reported, notices: [] }, options(previous, later));
   assert.equal(result.ok, true, result.ok ? "" : result.error);
+});
+
+test("istemci maden işçisini sıfırlayıp yerel üretimi hileyle geri alamaz", () => {
+  const previous = saveOf({ mineWorkers: 5 });
+  const later = NOW + 600_000;
+  const reported = { ...tick(previous as unknown as Game, later), mineWorkers: 0, notices: [] };
+  const result = validateGameSave(reported, options(previous, later));
+  assert.equal(result.ok, true, result.ok ? "" : result.error);
+  if (result.ok) assert.equal(result.game.mineWorkers, 5);
 });

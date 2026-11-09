@@ -2,9 +2,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { populaceDemands } from "../db/schema";
 import {
-  DEMAND_NOTICE_HOURS, type DemandCandidate, type DemandKind,
-  derivePopulaceDemands, openDemands, renderDemands, type VoiceSignals,
+  DEMAND_NOTICE_HOURS, type DemandCandidate, type DemandKind, type DemandTone,
+  derivePopulaceDemands, openDemands, type VoiceSignals,
 } from "../engine/populace-voice";
+import type { OpenDemand } from "./populace-brief";
+import { type DemandNarrator, narrateDemands } from "./populace-narrator";
 
 /**
  * Halkın sesinin kalıcılığı. Karar mantığı `engine/populace-voice.ts` içinde saf
@@ -13,16 +15,14 @@ import {
  * `server/general-ledger.ts`'in birebir aynı deseni; iki modül ayrı çünkü
  * Generalin talepleri ile halkın talepleri farklı tablolarda ve farklı süre
  * kurallarıyla yaşıyor.
+ *
+ * SAĞLAYICI ÇAĞRISI BU DOSYADA YOK ve olmayacak (bir test bunu doğruluyor).
+ * Halk-AI'nın cümlesini `server/populace-narrator.ts` üretir; buradan ona
+ * yalnızca bir fonksiyon (`narrate`) olarak geçilir. Sebep: kalıcılık modülü
+ * veritabanının, anlatım modülü sağlayıcının sorumluluğu; ikisi tek dosyada
+ * olsaydı "kimlik bilgisi yoksa şablona düşülür" kuralının veritabanısız tek
+ * bir testi olmazdı.
  */
-
-export type OpenDemand = {
-  kind: DemandKind;
-  voice: "commons" | "garrison";
-  text: string;
-  severity: "normal" | "urgent";
-  /** Talebin fiilen açıldığı an (epoch ms). */
-  since: number;
-};
 
 /** Halkın sesi için gereken durum özeti; kaynağı istemcinin bağlamıdır. */
 export type VoiceContext = VoiceSignals & { channelSpeed: number };
@@ -33,11 +33,18 @@ export type VoiceContext = VoiceSignals & { channelSpeed: number };
  * Süre şartı OYUN saati cinsindendir: geçen gerçek süre channel hızıyla
  * çarpılır, yani ×24 channel'da halk 4 oyun saatini 10 gerçek dakikada
  * doldurur. Aksi hâlde hızlı channel'da halkın sesi hiç duyulmazdı.
+ *
+ * `narrate` verilmişse (channel'ın Halk-AI kimlik bilgisi var) AÇIK taleplerin
+ * cümlesi modelden gelir; verilmemişse motorun şablon cümlesi kullanılır. Model
+ * yalnızca AÇIK talepler için çağrılır: süre şartını henüz geçmemiş bir aday
+ * Kral'a gösterilmiyor, onun için token yakmak boşa masraf olurdu ("değirmen
+ * dersi"nin maliyet tarafı).
  */
 export async function syncPopulaceDemands(
   userId: string,
   context: VoiceContext,
   now: number,
+  narrate: DemandNarrator | null = null,
 ): Promise<{ open: OpenDemand[]; closed: DemandKind[] }> {
   const db = getDb();
   const speed = Math.max(1, Number(context.channelSpeed) || 1);
@@ -61,19 +68,33 @@ export async function syncPopulaceDemands(
     held[candidate.kind] = Math.max(0, (now - seenAt) / 3_600_000 * speed);
     if (existing) {
       await db.update(populaceDemands)
-        .set({ text: candidate.text, severity: candidate.severity, voice: candidate.voice })
+        // METİN BURADA EZİLMEZ (Halk-AI varken): satırdaki cümle modelin ürettiği
+        // cümle olabilir ve her senkronda şablonla üzerine yazmak, kademe
+        // değişmediği hâlde modeli her istekte yeniden çağırmaya (ve Kral'ın
+        // gözünde cümlenin sürekli değişmesine) yol açardı. Halk-AI yoksa tersi
+        // doğru: şablon geri yazılır ve `tone` temizlenir, yani channel
+        // anahtarını kaybederse halkın sesi sessizce deterministiğe döner.
+        .set({
+          severity: candidate.severity, voice: candidate.voice,
+          ...(narrate ? {} : { text: candidate.text, tone: null }),
+        })
         .where(and(eq(populaceDemands.userId, userId), eq(populaceDemands.kind, candidate.kind)));
       continue;
     }
     await db.insert(populaceDemands).values({
       userId, kind: candidate.kind, voice: candidate.voice,
+      // Yeni satır şablon metinle açılır: sütun NOT NULL ve talep henüz
+      // açılmamış olabilir. `tone` NULL kaldığı için Halk-AI varsa bu metin
+      // Kral'a HİÇ gösterilmez — açıldığı anda modelden gerçek cümle gelir.
       text: candidate.text, severity: candidate.severity, seenAt: now,
     }).onConflictDoNothing();
   }
 
   const opened = openDemands(candidates, held);
   // `openedAt` yalnızca ilk açılışta yazılır; süregelen talebin yaşı korunur ki
-  // halk "üç gündür ekmek istiyoruz" diyebilsin.
+  // halk "üç gündür ekmek istiyoruz" diyebilsin. Bu döngü ANLATIMDAN ÖNCE ve
+  // ondan bağımsız işler: sağlayıcı hatası bir talebin defterdeki yaşını
+  // sıfırlamaz, yalnızca o turda sesini keser.
   for (const demand of opened) {
     const existing = byKind.get(demand.kind);
     if (existing?.openedAt) continue;
@@ -81,8 +102,24 @@ export async function syncPopulaceDemands(
       .where(and(eq(populaceDemands.userId, userId), eq(populaceDemands.kind, demand.kind)));
   }
 
+  // Cümleler: Halk-AI varsa modelden, yoksa motorun şablonundan. Karar
+  // `narrateDemands` içinde TEK yerde yaşıyor.
+  const narrated = await narrateDemands({
+    open: opened,
+    stored: rows.map(row => ({ kind: row.kind as DemandKind, text: row.text, tone: row.tone as DemandTone | null })),
+    heldGameHours: held,
+    narrate,
+  });
+  for (const demand of narrated) {
+    // Şablon yolunda metin yukarıdaki döngüde zaten yazıldı; burada yalnızca
+    // Halk-AI'nın yeni ürettiği cümle kalıcılaşır.
+    if (!demand.store || !demand.tone) continue;
+    await db.update(populaceDemands).set({ text: demand.text, tone: demand.tone })
+      .where(and(eq(populaceDemands.userId, userId), eq(populaceDemands.kind, demand.kind)));
+  }
+
   return {
-    open: opened.map(demand => ({
+    open: narrated.map(demand => ({
       kind: demand.kind, voice: demand.voice, text: demand.text, severity: demand.severity,
       since: byKind.get(demand.kind)?.openedAt ?? now,
     })),
@@ -111,26 +148,6 @@ export async function claimDemandNotices(
       .where(and(eq(populaceDemands.userId, userId), inArray(populaceDemands.kind, due)));
   }
   return due;
-}
-
-/**
- * Halkın sesini modelin sistem promptuna girecek bloğa çevirir.
- *
- * SIFIR EK MODEL ÇAĞRISI: bu blok Kralın zaten başlattığı turun promptuna
- * biner. Kral konuşmazsa blok hiç yazılmaz ve harcanan token 0'dır.
- */
-export function renderPopulaceVoice(open: OpenDemand[], now: number): string[] {
-  if (!open.length) return [];
-  return [
-    "HALKIN SESİ — halkın ve kışlanın Kral'dan istedikleri. Bunlar senin taleplerin DEĞİL; sen yalnızca aktarıcısın. Uygun düştüğünde birini gündeme getir, hepsini sıralama. Halka emir verilmez: bir dilekçe süreci, ceza ya da bastırma aracı YOKTUR; talep ancak yönetimle kapanır.",
-    renderDemands(open.map(demand => ({ text: withAge(demand, now), severity: demand.severity, voice: demand.voice }))),
-  ];
-}
-
-function withAge(demand: OpenDemand, now: number) {
-  const hours = Math.floor((now - demand.since) / 3_600_000);
-  if (hours < 24) return demand.text;
-  return `${demand.text} (${Math.floor(hours / 24)} gündür bekliyorlar)`;
 }
 
 export type { DemandCandidate };

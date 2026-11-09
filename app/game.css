@@ -62,6 +62,41 @@
 .tabs.six{grid-template-columns:repeat(6,1fr)}
 .tabs.six button{padding-left:4px;padding-right:4px;font-size:.62rem;letter-spacing:.08em}
 
+/* Yedi sekme tek satıra sığsın (İSTİHBARAT eklendi). `minmax(0,1fr)` şart:
+   uzun etiket olmasa bile grid dilimlerinin içerikle büyümesini engeller.
+   "İSTİHBARAT" on harfle diğerlerinin iki katı uzunlukta olduğu için o
+   düğmeye ayrıca daha küçük bir punto verilir — sekme kimliği düğmenin
+   sınıfından gelir (bkz. components/KingdomGame.tsx sekme şeridi). */
+.tabs.seven{grid-template-columns:repeat(7,minmax(0,1fr))}
+.tabs.seven button{padding-left:2px;padding-right:2px;font-size:.58rem;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+.tabs.seven button.istihbarat{font-size:.48rem;letter-spacing:0}
+
+/* ---- Zafer skoru (İstihbarat sekmesi) ----
+   Sezon ölçütü: askersiz üstünlük ile askeri katkı AYRI sütunda. Renk dili
+   ayrımı taşır — sessiz sütun parşömenin yeşiline, askeri sütun kızıl-kahveye
+   çalar; toplam mürekkep rengindedir. Formül ve etiketler engine/victory.ts. */
+.victory-score{background:#f2e7cb;border:1px solid #cbb488}
+.victory-columns{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid #dccba2}
+.victory-columns>div{padding:9px 10px;border-right:1px solid #dccba2;text-align:center}
+.victory-columns>div:last-child{border-right:0}
+.victory-columns span{display:block;font-size:.54rem;letter-spacing:.1em;color:#7a6540}
+.victory-columns b{display:block;margin-top:4px;font:600 1.25rem Cinzel}
+.victory-columns .quiet b{color:#3f6b22}
+.victory-columns .martial b{color:#8f3512}
+.victory-columns .total b{color:#3a2f1d}
+.victory-doctrine{margin:0;padding:8px 11px;border-bottom:1px solid #dccba2;font-size:.7rem;line-height:1.5;color:#5c4a2c}
+.victory-lines{padding:2px 11px 6px}
+.victory-lines article{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #e0cfa6}
+.victory-lines article:first-child{border-top:0}
+.victory-lines b{display:block;font:600 .78rem Cinzel;color:#3a2f1d}
+.victory-lines small{display:block;margin-top:2px;font-size:.62rem;color:#7a6540;line-height:1.45}
+.victory-lines article.martial b{color:#6d3325}
+.victory-lines strong{font-size:.9rem;color:#7a6540}
+.victory-lines strong.gain{color:#3f6b22}
+.victory-lines strong.loss{color:#8f3512}
+.victory-rank,.victory-note{display:block;padding:0 11px 8px;font-size:.6rem;line-height:1.5;color:#7a6540}
+.victory-rank{padding-top:2px;color:#6d3325}
+
 /* ---- Nöbet ve akın (Ordu sekmesi) ---- */
 .watch-block{background:#f2e7cb;border:1px solid #cbb488;padding:10px 12px;margin-top:10px}
 .watch-head{display:flex;justify-content:space-between;align-items:baseline}
@@ -77,8 +112,6 @@
 .raid-tally b.bad{color:#8f3512}
 .raid-log p{margin:3px 0;font-size:.7rem;color:#5c4a2c;line-height:1.5}
 .raid-log p.quiet{color:#8a7854;font-style:italic}
-/* Yabancı bir Kral eşkıyayı bu tarafa çekmişse akınlar sıklaşır; kimin çektiği belli değildir. */
-.raid-log p.raid-lure{margin:6px 0;padding:6px 8px;border-left:2px solid #b26a1f;background:#f6e6c4;color:#8a5a1c;font-style:normal}
 
 /* ---- Halkın Sesi (Halk sekmesi) ----
    Halkın ve kışlanın Kraldan açık talepleri. Görsel dil parşömen + kızıl-kahve;
@@ -94,7 +127,7 @@
 .voice-row em{font-style:normal;font-size:.58rem;letter-spacing:.12em;color:#8f3512}
 .mood-explain-note{margin:8px 0 0;font-size:.66rem;line-height:1.5;color:#7a6540}
 
-/* ---- İç hizip (Halk sekmesi) ---- */
+/* ---- İç muhalefet (Halk sekmesi) ---- */
 .faction-block{background:#f2e7cb;border:1px solid #cbb488;border-left:3px solid #b08b2c;padding:10px 12px}
 .faction-block.organized{border-left-color:#b26a1f;background:#f6e6c4}
 .faction-block.defiant{border-left-color:#7d2018;background:#f6dfd3}
@@ -133,6 +166,24 @@
 .general-requests .request button:hover:not(:disabled){background:#6d3325;color:#f2e7cb}
 .general-requests .request button:disabled{opacity:.4;cursor:not-allowed}
 
+/* ---- Meclis: halkın araya giren sesi (plan belgesi Fikir 16) ----
+   Halk, General'i ATLAYIP doğrudan Kral'a seslendiğinde bu balon çıkar. Görsel
+   dil bilinçli olarak parşömenin DIŞINA çıkar: General'in balonu sıcak
+   parşömen (#f1e6c8), Kral'ın balonu şarap kırmızısı; halkın sesi ikisinin de
+   olmadığı SOĞUK bir taş-mavisi. Amaç dekor değil okunabilirlik — Kral bir
+   balonun kimin ağzı olduğunu okumadan, rengiyle bilmeli. Vurgu (ACİL) yine
+   kızıl (#8f3512), çünkü aciliyetin rengi bu kod tabanında zaten o.
+   `.message` ile aynı kutuyu paylaşır, farkları burada yazılıdır. */
+.message.populace{max-width:100%;background:#dfe4e8;border:1px solid #93a2ad;border-left:4px solid #3f5a6b}
+.message.populace b{color:#2f4655;letter-spacing:.12em}
+.message.populace p{font:11px/1.45 Spectral;color:#26333c}
+.message.populace em{float:right;font-style:normal;font:600 7px JetBrains Mono,monospace;letter-spacing:.14em;color:#8f3512}
+.message.populace small{display:block;margin-top:7px;font:7px/1.5 JetBrains Mono,monospace;color:#5b6b76}
+/* Kışlanın sesi halkınkinden ayrı bir ağız: Halk sekmesindeki `.voice-row.garrison`
+   ile AYNI koyu kahveyi kullanır ki iki ekranda aynı taraf aynı renk olsun. */
+.message.populace.garrison{background:#e8e0dc;border-color:#b09a91;border-left-color:#6d3325}
+.message.populace.garrison b{color:#6d3325}
+
 /* ---- Meclis: kompakt rozetler + bilgi popup'ı ---- */
 .council-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
 .council-chips button{padding:5px 10px;font-size:.64rem;letter-spacing:.1em;border:1px solid #cbb488;background:#f2e7cb;color:#6d3325;cursor:pointer}
@@ -164,3 +215,23 @@
 /* HALK gövdesi kaydırılabilir olmalı: .panel-content overflow:hidden olduğu
    için yükseklik ve kaydırma verilmeyince nüfus defteri ve büyütme
    seçenekleri panelin altında erişilemez kalıyordu. ORDU zaten kaydırıyordu. */
+
+/* ---- Channel kıyası (Diyar sekmesi) ----
+   Anonim ortalama: kimin hangi değere sahip olduğu hiç gelmez. Yön ölçütten
+   ölçüte değişir (yüksek vergi KÖTÜ), o yüzden renk kararı motordan gelen
+   `compareVerdict` sınıfıyla verilir — burada yalnızca boyanır. Rakamlar
+   tabular-nums ile hizalanır ki iki kolon göz kaydırmadan okunsun. */
+.channel-compare{background:#f2e7cb;border:1px solid #cbb488;border-left:3px solid #a9834a;padding:10px 12px}
+.compare-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.compare-head span{font:600 7px JetBrains Mono;letter-spacing:.14em;color:#8c302f}
+.compare-head b{font:600 8px JetBrains Mono;letter-spacing:.1em;color:#7a6540;font-variant-numeric:tabular-nums}
+.compare-grid{display:grid;grid-template-columns:1fr auto auto;gap:5px 12px;align-items:baseline;margin-top:9px}
+.compare-grid i{font-style:normal;font-size:.58rem;letter-spacing:.12em;color:#7a6540}
+.compare-grid i:not(:first-of-type){text-align:right}
+.compare-grid span{font-size:.72rem;color:#4a3a20}
+.compare-grid b,.compare-grid em{text-align:right;font-variant-numeric:tabular-nums}
+.compare-grid b{font-size:.92rem;font-weight:700;color:#3a2f1d}
+.compare-grid b.better{color:#3f6b22}
+.compare-grid b.worse{color:#8f3512}
+.compare-grid em{font-style:normal;font-size:.82rem;color:#7a6540}
+.compare-note{display:block;margin-top:8px;font-size:.66rem;line-height:1.5;color:#7a6540}

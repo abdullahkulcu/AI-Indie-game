@@ -1,3 +1,4 @@
+import { COMPARE_BETTER, COMPARE_METRICS, type CompareMetric } from "./comparison";
 import { SOLDIER_THRESHOLDS } from "./populace";
 
 /**
@@ -22,7 +23,7 @@ import { SOLDIER_THRESHOLDS } from "./populace";
  * (bkz. server/populace-voice.ts).
  */
 
-export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage";
+export type DemandKind = "bread" | "price" | "tax" | "roof" | "joy" | "wage" | "shortfall" | "kiyas";
 
 export type DemandSeverity = "normal" | "urgent";
 
@@ -58,6 +59,43 @@ export const VOICE_THRESHOLDS = {
   roof: { occupancy: .95, urgent: 1, hours: 2 },
   joy: { mood: 38, ration: 90, urgent: 25, hours: 2 },
   wage: { unrest: SOLDIER_THRESHOLDS.demand, urgent: SOLDIER_THRESHOLDS.desertion, hours: 2 },
+  /** Ferman ile fiilî dağıtım arasındaki makas; halk boş vaat sayar. */
+  shortfall: { gap: 20, urgent: 45, hours: 4 },
+  /**
+   * SESSİZ KIYASLAMA (plan belgesindeki Fikir 13). Diğer kalemler krallığın
+   * MUTLAK hâline bakar; bu kalem tek istisnadır: halk kendini komşuların
+   * anonim ortalamasıyla kıyaslar.
+   *
+   * `margin` — bir ölçütte "belirgin geride" saymak için ortalamayla aramızdaki
+   * en küçük fark. Ölçekler ortak değil (rıza ve istihkak 0-100, vergi 0-50,
+   * muhalefet baskısı 0-100) ve eşikleri tek bir sayıya indirmek yanlış
+   * sonuç verirdi, bu yüzden ölçüt başına ayrı yazılır. Değerler her ölçütün
+   * kendi ölçülmüş bandından türer:
+   *  - rıza 10  → normal krallık 42-46, iyi krallık 62-67'de oturuyor; 20
+   *    puanlık bu bandın yarısı, "ölçüm gürültüsü değil, gerçekten geride".
+   *  - istihkak 10 → `bread` talebinin eşiğiyle (100 → 85) aynı mertebe.
+   *  - vergi 6  → 0-50 bandının yaklaşık sekizde biri; halkın kesesinde
+   *    fiilen hissettiği en küçük fark.
+   *  - muhalefet 15 → `FACTION_THRESHOLDS.stirring` (20) bir tık altı; iyi
+   *    yönetilen krallıkta baskı 0 olduğu için bu fark ancak bizde gerçekten
+   *    örgütlenme varken doğar.
+   * `metrics` — talebin açılması için kaç ölçütte birden geride olmamız
+   * gerektiği. 2 seçildi: TEK ölçütte geride olmak meşru bir tercih olabilir
+   * (Kral bilinçli olarak yüksek vergiyle inşaat yapıyordur); iki ölçütte
+   * birden geride olmak ise halkın hayatının gerçekten daha zor olması demek.
+   * `hours` — 8 oyun saati, listenin en uzunu (`bread`in iki katı). Kıyas bir
+   * ACİLİYET değil arka plan sinyali; ayrıca ortalama komşular oynadıkça
+   * kayar, kısa bir süre şartı komşunun tek hamlesini bizim halkımızın
+   * talebine çevirirdi.
+   *
+   * `urgent` YOK ve bu KASITLI: kıyas talebi hiçbir zaman acil olmaz, bkz.
+   * `comparisonDemand`.
+   */
+  kiyas: {
+    margin: { popularity: 10, foodRation: 10, taxRate: 6, factionPressure: 15 } as Record<CompareMetric, number>,
+    metrics: 2,
+    hours: 8,
+  },
 } as const;
 
 /** Aynı anda açık kalabilecek en fazla talep. Kralı yormamanın asıl freni bu. */
@@ -72,6 +110,10 @@ const MAX_LEVEL = 6;
 export type VoiceSignals = {
   /** Fiilen dağıtılabilen yiyecek istihkakı (%), kâğıt üstündeki oran değil. */
   servedFood: number;
+  /** Fermanla ilan edilen oranlar ve fiilen ulaşan karşılıkları. */
+  foodRation?: number;
+  servedPay?: number;
+  soldierPay?: number;
   /** `engine/market.ts → livingCost` geçim endeksi. 1 = normal. */
   livingCost: number;
   taxRate: number;
@@ -81,6 +123,23 @@ export type VoiceSignals = {
   soldierUnrest: number;
   army: number;
   buildings: Array<{ type?: string; level?: number }>;
+  /**
+   * SESSİZ KIYASLAMA girdisi — DIŞARIDAN gelir, motor veritabanı okumaz
+   * (bkz. `server/world-projection.ts` → `populaceComparison`).
+   *
+   * `mine` ve `averages` AYNI okuyucudan (`engine/comparison.ts` →
+   * `compareValuesOf`) doğmak zorundadır; iki taraf ayrı okunsaydı "istihkak
+   * kayıtta yoksa varsayılanı kaç" sorusu iki yerde ayrı cevaplanır ve kıyas
+   * ölçeğini kaybederdi. Bu yüzden tek bir alan olarak, çift hâlinde taşınır.
+   *
+   * Alan opsiyoneldir: kıyas girdisi olmayan çağıran (test, eski kayıt, kıyas
+   * hesabı yapılamayan istek) için talep hiç açılmaz.
+   */
+  comparison?: {
+    mine: Record<CompareMetric, number>;
+    /** Gizlilik alt sınırının altındaysa `null` — o durumda talep AÇILMAZ. */
+    averages: Record<CompareMetric, number> | null;
+  } | null;
 };
 
 const levelOf = (signals: VoiceSignals, type: string) =>
@@ -100,6 +159,8 @@ const levelOf = (signals: VoiceSignals, type: string) =>
 export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] {
   const demands: DemandCandidate[] = [];
   const food = Number(signals.servedFood) || 0;
+  const foodGap = Math.max(0, (Number(signals.foodRation) || 0) - food);
+  const payGap = Math.max(0, (Number(signals.soldierPay) || 0) - (Number(signals.servedPay) || 0));
   const index = Number.isFinite(signals.livingCost) ? signals.livingCost : 1;
   const mood = Number(signals.popularity) || 0;
   const unrest = Number(signals.soldierUnrest) || 0;
@@ -129,6 +190,22 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
         ? `Kışlada firar başladı; huzursuzluk ${Math.round(unrest)} puan. Adamlar maaş defterinin açılmasını istiyor.`
         : `Garnizon maaşını istiyor; huzursuzluk ${Math.round(unrest)} puana çıktı.`,
       satisfiedBy: { actions: ["set_soldier_pay"] },
+    });
+  }
+
+  // Kral fermanı gerçekten vermiş olabilir; fakat ambar/maaş yetmediğinde halk
+  // sonucu ayrı bir hesap sorma olarak görür. Bu, ek ceza değil mevcut açlık
+  // ve huzursuzluğun doğrudan görünür dilidir.
+  const shortfall = Math.max(foodGap, payGap);
+  if (shortfall >= VOICE_THRESHOLDS.shortfall.gap) {
+    const urgent = shortfall >= VOICE_THRESHOLDS.shortfall.urgent;
+    demands.push({
+      kind: "shortfall", voice: payGap > foodGap ? "garrison" : "commons",
+      severity: urgent ? "urgent" : "normal", minGameHours: VOICE_THRESHOLDS.shortfall.hours,
+      text: payGap > foodGap
+        ? `Maaş fermanı tam yazılı ama kışlaya eksik ulaşıyor; askerler sözün tutulmasını istiyor.`
+        : `Ferman tam istihkak diyor ama sofraya eksik pay geliyor; halk sözün tutulmasını istiyor.`,
+      satisfiedBy: { actions: payGap > foodGap ? ["set_soldier_pay"] : ["set_food_ration", "trade_resource"] },
     });
   }
 
@@ -176,7 +253,78 @@ export function derivePopulaceDemands(signals: VoiceSignals): DemandCandidate[] 
     });
   }
 
+  // Kıyas EN SONDA: plan belgesinin kendi açık sorusu ("kıyas talebi diğer daha
+  // somut taleplerin önüne geçip yer kaplayabilir") burada iki tedbirle
+  // cevaplanıyor — sırada en arkada durur ve asla `urgent` olmaz.
+  const comparison = comparisonDemand(signals);
+  if (comparison) demands.push(comparison);
+
   return demands;
+}
+
+/** Geride olduğumuz ölçütün halkın dilindeki NİTEL karşılığı — sayı YOK. */
+const COMPARE_COMPLAINT: Record<CompareMetric, string> = {
+  popularity: "orada halkın yüzü daha gülüyormuş",
+  foodRation: "oradaki sofralar bizimkinden dolu",
+  taxRate: "oradaki vergi yükü bizimki kadar ağır değil",
+  factionPressure: "orada muhalefetin sesi bizdeki kadar yüksek değil",
+};
+
+/**
+ * Bir ölçütteki geriliği kapatabilecek emirler. Talep yalnızca GERÇEKTEN geride
+ * olduğumuz ölçütlerin emirleriyle kapanır: "değirmen dersi"nin bu talepteki
+ * karşılığı, Kralı ilgisiz bir masrafa çağırmamaktır.
+ */
+const COMPARE_REMEDY: Record<CompareMetric, string[]> = {
+  popularity: ["host_festival", "set_ale_ration"],
+  foodRation: ["set_food_ration"],
+  taxRate: ["set_tax_rate"],
+  // Muhalefet baskısı yalnızca rıza yükselince erir (bkz. engine/faction.ts:
+  // bastırma emri YOK), o yüzden çare rızayı yükselten emirlerdir.
+  factionPressure: ["host_festival", "set_ale_ration", "set_tax_rate"],
+};
+
+/**
+ * SESSİZ KIYASLAMA (plan belgesindeki Fikir 13) — halk kendi mutlak hâline
+ * değil, komşu sancakların ANONİM ortalamasına da bakar.
+ *
+ * BİLGİ AKIŞI TEK YÖNLÜ. Halk kıyaslar, sonuç Krala BASKI olarak gelir; Kral bu
+ * yolla komşunun verisine ASLA erişmez. Bu yüzden metnin iki kesin sınırı var
+ * ve `tests/populace-voice.test.ts` ikisini de doğruluyor:
+ *  1) hiçbir krallık adı/kimliği geçmez — ortalama isimsizdir, cümle de
+ *     isimsiz kalır ("komşu sancaklarda");
+ *  2) HİÇ SAYI geçmez — "komşu sancakta vergi %12" cümlesi Krala komşunun
+ *     verisini birebir verirdi. Yalnızca NİTEL bir kıyas kurulur.
+ * Diğer taleplerin metni sayı taşır (istihkak %70, huzursuzluk 90 puan) çünkü
+ * o sayılar Kralın KENDİ krallığına ait; burada sayı karşı tarafa ait olurdu.
+ *
+ * "DEĞİRMEN DERSİ" burada da geçerli ve en sert hâliyle: ortalama YOKSA
+ * (`averages: null`, yani gizlilik alt sınırının altındaki channel) talep
+ * KESİNLİKLE açılmaz. Dayanağı olmayan bir kıyas Kralı ölçüsüz bir işe çağırır;
+ * üstelik sayı üretilmediği için halkın kıyaslayacağı bir şey de yoktur.
+ */
+function comparisonDemand(signals: VoiceSignals): DemandCandidate | null {
+  const comparison = signals.comparison;
+  if (!comparison || !comparison.averages) return null;
+  const averages = comparison.averages;
+  const rule = VOICE_THRESHOLDS.kiyas;
+  // Hangi ölçütte "iyi" hangi yöndedir sorusu MOTORDA TEK YERDE duruyor
+  // (`COMPARE_BETTER`); burada yeniden yazılsaydı yeni bir ölçüt eklendiğinde
+  // halk yüksek vergiyi iyi sayabilirdi.
+  const behind = COMPARE_METRICS.filter(metric => {
+    const gap = averages[metric] - (Number(comparison.mine[metric]) || 0);
+    return (COMPARE_BETTER[metric] === "high" ? gap : -gap) >= rule.margin[metric];
+  });
+  if (behind.length < rule.metrics) return null;
+  return {
+    kind: "kiyas", voice: "commons",
+    // ASLA `urgent` olmaz: açlık ya da firar gibi bir acil talep varken kıyas
+    // tavandaki yeri ondan almasın (bkz. `openDemands` sıralaması).
+    severity: "normal",
+    minGameHours: rule.hours,
+    text: `Halk komşu sancaklarla kendini kıyaslıyor: ${behind.map(metric => COMPARE_COMPLAINT[metric]).join(", ")} diyorlar. Aynı düzeni kendi kapılarında istiyorlar.`,
+    satisfiedBy: { actions: [...new Set(behind.flatMap(metric => COMPARE_REMEDY[metric]))] },
+  };
 }
 
 /**
@@ -211,13 +359,97 @@ export function demandsSatisfiedBy(
     .map(demand => demand.kind);
 }
 
-/** Talepleri modele ve panele verilecek kısa metne çevirir. */
-export function renderDemands(demands: Array<{ text: string; severity: DemandSeverity; voice: DemandCandidate["voice"] }>): string {
-  if (!demands.length) return "";
-  return demands
-    .map(demand => `- ${demand.severity === "urgent" ? "[ACİL] " : ""}${demand.voice === "garrison" ? "Garnizon" : "Halk"}: ${demand.text}`)
-    .join("\n");
+/*
+ * `renderDemands` BURADAN KALDIRILDI (plan belgesi Fikir 2).
+ *
+ * Talepleri "- [ACİL] Halk: ..." satırlarına çeviren bu yardımcı, cümleyi
+ * doğrudan sistem promptuna basan tek yoldu. Fikir 2'den sonra cümle MODEL
+ * ÜRETİMİ olabildiği için gösterim iki kanala ayrıldı (yapısal özet sisteme,
+ * sözler `user` rolünde işaretli bloğa) ve tek gösterim yeri
+ * `server/populace-brief.ts` oldu. İkinci bir gösterici bırakmak, sınırı
+ * atlayan bir yolu açık tutmak olurdu.
+ */
+
+// --- DİLİN SERTLİK KADEMESİ ------------------------------------------------
+
+/**
+ * Talebin dili ne kadar sert? (plan belgesi Fikir 2 → "Karar (2026-08-22)")
+ *
+ * `engine/ledger.ts`'in `phraseFor` deseninin birebir karşılığı: orada ağırlık
+ * (kaç kez oldu) arttıkça cümle gözlemden karakter tespitine geçer, burada
+ * SÜRE uzadıkça rica sitemden öfkeye geçer. Kademe MOTORDA, saf bir kuralla
+ * hesaplanır; Halk-AI yalnızca verilen kademede KONUŞUR, kademeyi kendisi
+ * seçmez. Sebebi kısıt #1'in ötesinde pratik: kademeyi modele bıraksaydık aynı
+ * talep her istekte rastgele sertlikte görünür ve Kral halkın gidişatını
+ * okuyamazdı.
+ *
+ * ÜÇ kademe var, çünkü ikisi "rica / öfke" ikiliğinden fazlasını taşımıyor ve
+ * dördü metinde ayırt edilemeyecek kadar yakın kalıyordu:
+ *  - `ilk`   → halk ilk kez söylüyor: dilek/rica.
+ *  - `israr` → söylenmiş ama karşılanmamış: sitem, hatırlatma.
+ *  - `ofke`  → uzun süredir bekliyor: açık kızgınlık, muhalefetin dili.
+ */
+/**
+ * Kademe kimlikleri — veritabanı sütununun enum'u da bu diziden türer
+ * (`db/schema.ts` → `populace_demands.tone`), tip de. Sıra ANLAMLIDIR: en
+ * yumuşaktan en serte, `demandTone` bu sıraya göre kaydırır.
+ */
+export const DEMAND_TONES = ["ilk", "israr", "ofke"] as const;
+
+export type DemandTone = typeof DEMAND_TONES[number];
+
+/**
+ * Kademe sınırları OYUN saati cinsindendir (channel hızı çağıran tarafta
+ * çarpılır, bkz. `server/populace-voice.ts`).
+ *
+ * 12 → en uzun süre şartının (`kiyas`, 8 saat) bir tık üstü: her talep en az
+ * bir kademe "ilk" olarak görünür, yani halk daha ilk cümlesinde bağırmaz.
+ * 36 → bir buçuk oyun günü. Bir gün boyunca cevapsız kalmak ihmal sayılmaz
+ * (Kral uyuyor olabilir, bkz. gece vardiyası); bir buçuk gün sayılır.
+ */
+export const DEMAND_TONE_HOURS = { israr: 12, ofke: 36 } as const;
+
+/**
+ * Kademe SÜREDEN ve ŞİDDETTEN türer.
+ *
+ * Süre taban kademeyi verir; `urgent` şiddeti onu BİR kademe yukarı taşır.
+ * Şiddeti ayrı bir eksen yapmak yerine aynı ekseni kaydırmak bilinçli: aç
+ * kalmış halkın "ilk" cümlesi de zaten sitemlidir, ama süre geçtikçe hâlâ
+ * sertleşebilmesi gerekir. Tavan `ofke`dir; ötesi yok, çünkü halkın üzerinde
+ * emir süreci olmadığı gibi (bkz. dosya başı) öfkenin de bir üst basamağı
+ * mekanikte karşılıksız kalırdı.
+ */
+export function demandTone(severity: DemandSeverity, heldGameHours: number): DemandTone {
+  const held = Math.max(0, Number(heldGameHours) || 0);
+  const base = held >= DEMAND_TONE_HOURS.ofke ? 2 : held >= DEMAND_TONE_HOURS.israr ? 1 : 0;
+  const bumped = base + (severity === "urgent" ? 1 : 0);
+  return DEMAND_TONES[Math.min(DEMAND_TONES.length - 1, bumped)];
 }
+
+/**
+ * Talebin SAYISIZ ve İSİMSİZ konusu — Halk-AI'ya prompt kurulurken kullanılır.
+ *
+ * Neden sayısız: Halk-AI kimlik bilgisi oyun kurucusunun (channel'ın)
+ * anahtarıdır, Kralın kendi anahtarı DEĞİL. Krallığın iç rakamlarını (ambar,
+ * istihkak yüzdesi, huzursuzluk puanı, vergi oranı) o anahtara göndermek, plan
+ * belgesinin §2'deki bilgi asimetrisi sınırını halkın sesi üzerinden aşmak
+ * olurdu. Halk zaten kendi hayatını yaşıyor; ne istediğini söylemek için
+ * Kralın defterindeki sayıya ihtiyacı yok.
+ *
+ * Rakamlar KAYBOLMUYOR: General'in sistem promptuna talebin yapısal özeti
+ * (tür, şiddet, kaç gündür açık) JSON olarak gider; sayısal durumu General
+ * `KRALLIK_DURUMU`dan zaten okur. Halk-AI'nın ürettiği tek şey TON'dur.
+ */
+export const DEMAND_SUBJECT: Record<DemandKind, string> = {
+  bread: "sofradaki ekmeğin azalması; tam istihkak istiyorlar",
+  price: "pazarda fiyatların yükselmesi; kalenin ambarını açmasını istiyorlar",
+  tax: "vergi yükünün ağırlığı; verginin indirilmesini istiyorlar",
+  roof: "konutların dolması; başlarına damaltı istiyorlar",
+  joy: "hayatın tatsızlaşması; bir şenlik ya da meydan eğlencesi istiyorlar",
+  wage: "kışlada maaşın ödenmemesi; maaş defterinin açılmasını istiyorlar",
+  shortfall: "fermanla vaat edilen payın halka fiilen ulaşmaması; verilen sözün tutulmasını istiyorlar",
+  kiyas: "komşu sancaklarda hayatın daha kolay görünmesi; aynı düzeni kendi kapılarında istiyorlar",
+};
 
 // --- GARNİZON VETOSU -------------------------------------------------------
 
@@ -277,5 +509,5 @@ export function garrisonMood(unrest: number, army: number): GarrisonMood {
   if (level >= SOLDIER_THRESHOLDS.demand) {
     return { id: "demanding", label: "Maaş istiyor", note: "Adamlar maaşını istiyor: yeni asker eğitimi geri çevrilir." };
   }
-  return { id: "steady", label: "Sakin", note: "Kışla sakin; bütün emirler yürür." };
+  return { id: "steady", label: "Sakin", note: "Kışla sakin; tüm emirler uygulanabilir." };
 }

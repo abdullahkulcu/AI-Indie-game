@@ -46,6 +46,15 @@ test("yüksek vergi risk seviyesini yükseltir", () => {
   assert.equal(assessAction({ name: "set_tax_rate", arguments: { rate_percent: 48 } }, healthy).level, "severe");
 });
 
+test("teyit bekleyen kararda halk nabzı nitel bir sinyal verir", () => {
+  const assessment = assessAction({ name: "set_tax_rate", arguments: { rate_percent: 35 } }, healthy);
+  assert.deepEqual(assessment.peoplePulse, {
+    label: "Vergi baskısı",
+    note: "Halk bu kararı geçim payına yeni bir yük olarak görür.",
+  });
+  assert.doesNotMatch(JSON.stringify(assessment.peoplePulse), /%|puan|\\d/, "nabız puan ya da yüzde tahmini olmamalı");
+});
+
 test("nüfusun dörtte birinden fazlasını askere almak ağır risktir", () => {
   assert.equal(assessAction({ name: "train_unit", arguments: { unit_type: "spearman", count: 150 } }, healthy).level, "severe");
 });

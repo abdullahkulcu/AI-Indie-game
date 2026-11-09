@@ -21,7 +21,7 @@
  * konuyu önerir, uç "Geçersiz müzakere konusu" der ve Kral sebebini göremez.
  * Tip de bu diziden TÜRETİLİR ki liste ile tip hiçbir zaman ayrışamasın.
  */
-export const NEGOTIATION_TOPICS = ["tribute", "non_aggression", "alliance", "passage", "ultimatum"] as const;
+export const NEGOTIATION_TOPICS = ["tribute", "non_aggression", "alliance", "passage", "ultimatum", "mercenary"] as const;
 
 export type NegotiationTopic = typeof NEGOTIATION_TOPICS[number];
 
@@ -82,6 +82,11 @@ export type Terms = {
   hours?: number;
   /** Ödeme aralığı (saat). */
   everyHours?: number;
+  /** Kiralık birlik sözleşmesinin kişi sayısı ve peşin altın bedeli. */
+  mercenaryCount?: number;
+  mercenaryFee?: number;
+  /** İnsanları hangi taraf kiraya veriyor? Kiracı bedeli peşin öder. */
+  lessorSide?: Side;
 };
 
 export type Negotiation = {
@@ -135,6 +140,10 @@ export const MAX_TRIBUTE_AMOUNT = 5000;
 /** Anlaşmanın ve ödeme aralığının saat tavanı. */
 export const MAX_HOURS = 72;
 
+/** Bir anlaşmada kiralanabilecek kişi ve peşin altın bedeli için sert tavanlar. */
+export const MAX_MERCENARY_COUNT = 100;
+export const MAX_MERCENARY_FEE = 10_000;
+
 /** Masaya yazılan bir mesajın azami uzunluğu. */
 export const MAX_MESSAGE_LENGTH = 600;
 
@@ -174,6 +183,9 @@ export function clampTerms(terms: Terms): Terms {
     payerSide: terms.payerSide,
     tributeRate: Math.max(0, Math.min(MAX_TRIBUTE_RATE, Number(terms.tributeRate) || 0)),
     tributeAmount: Math.max(0, Math.min(MAX_TRIBUTE_AMOUNT, Math.floor(Number(terms.tributeAmount) || 0))),
+    mercenaryCount: Math.max(0, Math.min(MAX_MERCENARY_COUNT, Math.floor(Number(terms.mercenaryCount) || 0))),
+    mercenaryFee: Math.max(0, Math.min(MAX_MERCENARY_FEE, Math.floor(Number(terms.mercenaryFee) || 0))),
+    lessorSide: terms.lessorSide,
     hours,
     everyHours,
   };
@@ -185,7 +197,16 @@ export function validateTerms(terms: Terms): { ok: true; terms: Terms } | { ok: 
   // Hangi konunun haraç taşıdığı TRIBUTE_TOPICS'te yazar; cron da vadeleri o
   // listeye göre tahsil eder. İki dal birbirinin tamamlayıcısıdır: liste
   // değişirse ikisi birlikte değişir.
-  if (carriesTribute(next.topic)) {
+  if (next.topic === "mercenary") {
+    if (!next.mercenaryCount || !next.mercenaryFee) {
+      return { ok: false, reason: "Kiralık birlik şartında asker sayısı ve peşin bedel belirtilmeli." };
+    }
+    if (next.lessorSide !== "initiator" && next.lessorSide !== "target") {
+      return { ok: false, reason: "Birlikleri hangi tarafın kiraya verdiği belirtilmeli." };
+    }
+    next.tributeRate = 0;
+    next.tributeAmount = 0;
+  } else if (carriesTribute(next.topic)) {
     if (!next.tributeRate && !next.tributeAmount) {
       return { ok: false, reason: "Haraç şartında ya sabit miktar ya da oran belirtilmeli." };
     }

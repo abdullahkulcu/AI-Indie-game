@@ -1,15 +1,17 @@
 import { feltUnrest, glutStock } from "./agitation";
 import { catalog, keepSeconds, MAX_BUILDING_LEVEL, MAX_KEEP_LEVEL, resourceLabels } from "./catalog";
-import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, orderCost, SPREAD, TRADED_KEYS } from "./market";
+import { commonsOf, commonsReference, coverageOf, fillOrder, isTraded, livingCost, marketPrices, maxPurchase, NEUTRAL_INDEX, orderCost, SPREAD, TRADED_KEYS } from "./market";
 import { armySize, clampRation } from "./populace";
 import { garrisonRefusal } from "./populace-voice";
 import { POLICY_LIMITS } from "./policy";
 import { clampWatch, watchRatioOf } from "./raids";
 import { affordable, costFor, debit, keep, keepCostFor, materialScaleOf, rates, tick } from "./tick";
-import type { Game, GameAction, Key, Res } from "./types";
+import type { Game, GameAction, Key, Res, TradeKey } from "./types";
+import { isTrainableUnit, trainingDurationMs, unitCostFor, unitOf } from "./units";
+import { refundReserved, startWaitingConstruction, type ConstructionJob } from "./construction";
 
 /** Sunucu uçlarına devredilen eylemler; oyun durumunu doğrudan değiştirmezler. */
-export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms", "send_purse"];
+export const REMOTE_ACTIONS = ["send_miners", "recall_miners", "send_scout", "raise_counter_intelligence", "open_negotiation", "reply_negotiation", "propose_terms", "send_purse", "propose_campaign", "set_defense_doctrine", "respond_to_war", "hold_referendum"];
 
 export type ApplyResult = {
   game: Game;
@@ -91,6 +93,39 @@ export function marketDuration(amount: number, speed: number) {
 
 const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? key;
 
+/** Eski tek-kuyruk kayıtları ilk yeni emirlerinde yeni iş listesine taşınır. */
+function legacyConstructionJob(game: Game): ConstructionJob[] {
+  if (game.constructionQueue !== undefined) return game.constructionQueue;
+  const legacy = game.queue;
+  if (!legacy || legacy.kind !== "building") return [];
+  const current = legacy.type === "keep"
+    ? keep(game)
+    : game.buildings.find(building => building.type === legacy.type)?.level ?? 0;
+  const item = catalog.find(entry => entry.type === legacy.type);
+  const reserved = legacy.type === "keep"
+    ? keepCostFor(current, materialScaleOf(game.speed))
+    : item ? costFor(item.cost, current, materialScaleOf(game.speed)) : {};
+  const startedAt = legacy.startedAt ?? game.lastTickAt;
+  return [{
+    type: legacy.type,
+    name: legacy.name,
+    targetLevel: legacy.targetLevel ?? current + 1,
+    reserved,
+    queuedAt: startedAt,
+    startedAt,
+    completesAt: legacy.completesAt,
+    durationMs: Math.max(1, legacy.completesAt - startedAt),
+    hastened: legacy.hastened,
+  }];
+}
+
+function plannedLevel(game: Game, jobs: readonly ConstructionJob[], type: string) {
+  const actual = type === "keep"
+    ? keep(game)
+    : game.buildings.find(building => building.type === type)?.level ?? 0;
+  return Math.max(actual, ...jobs.filter(job => job.type === type).map(job => job.targetLevel));
+}
+
 /**
  * Pazarın o andaki hâli. `price` artık sabit tablo değil, halkın defterinden
  * okunan CANLI fiyattır; alanın biçimi (kaynak → birim fiyat) aynı kaldığı için
@@ -98,8 +133,16 @@ const labelOf = (key: Key) => resourceLabels.find(([id]) => id === key)?.[1] ?? 
  *
  * `commons`, `reference` ve `coverage` arayüzün halkın durumunu gösterebilmesi
  * için dışarı verilir: Kral neye baktığını görmeden fiyatı yönetemez.
+ *
+ * `index` CHANNEL PAZAR ENDEKSİDİR (Fikir 24) ve tek bir yerden gelir:
+ * sunucunun `GET /api/world` yanıtı. Kaydın İÇİNDE DEĞİLDİR ve istemcinin
+ * bildirdiği hiçbir alandan okunmaz — bu bilinçli, `commons` istismarının
+ * dersi (bkz. server/save-validation.ts, "HALKIN DEFTERİ SUNUCUNUN").
+ * Verilmediğinde nötrdür, yani bu fonksiyon bugünkü sonucu birebir verir;
+ * gece vardiyası (`app/api/cron`) endeksi hiç vermez ve vermesi de gerekmez,
+ * çünkü General'in gece araçları arasında pazar emri yoktur.
  */
-export function marketState(game: Game, now: number) {
+export function marketState(game: Game, now: number, index?: Partial<Record<TradeKey, number>>) {
   const level = game.buildings.find(building => building.type === "market")?.level ?? 0;
   const open = game.marketOrders ?? [];
   const fresh = now - (game.marketDayAt ?? 0) >= 86_400_000;
@@ -114,11 +157,15 @@ export function marketState(game: Game, now: number) {
     level, used, limit,
     left: Math.max(0, limit - used),
     dayAt: fresh ? now : game.marketDayAt ?? now,
-    price: marketPrices(commons, reference, glut),
+    price: marketPrices(commons, reference, glut, index),
     spread: SPREAD,
     open, slots: level,
     freeSlots: Math.max(0, level - open.length),
     commons, reference, glut,
+    /** Channel endeksinin bu andaki çarpanları; arayüz sızıntıyı böyle gösterir. */
+    index: index ?? NEUTRAL_INDEX,
+    /** Endeks fiyatı gerçekten oynatıyor mu? Kral sebebini görmeden yönetemez. */
+    indexed: TRADED_KEYS.some(key => Math.abs((index?.[key] ?? 1) - 1) > 1e-9),
     /** Pazar bozulmuş mu? Kral az altın aldığını görmeden yönetemez. */
     glutted: TRADED_KEYS.some(key => glut[key] > 0),
     coverage: Object.fromEntries(TRADED_KEYS.map(key => [key, coverageOf(commons[key], reference[key])])) as Record<string, number>,
@@ -126,7 +173,12 @@ export function marketState(game: Game, now: number) {
   };
 }
 
-export function applyActions(base: Game, actions: GameAction[], now: number): ApplyResult {
+/**
+ * `channelIndex` — Fikir 24'ün pazar endeksi. Yalnızca pazar emrinin fiyatına
+ * girer; verilmezse (gece vardiyası, testler, eski çağrılar) endeks nötrdür ve
+ * sonuç bugünküyle birebir aynıdır.
+ */
+export function applyActions(base: Game, actions: GameAction[], now: number, channelIndex?: Partial<Record<TradeKey, number>>): ApplyResult {
   let next = tick(base, now);
   const results: string[] = [], remote: GameAction[] = [];
   // Kral, General'in itirazını ezerek emri uygulattıysa sadakat düşer.
@@ -152,24 +204,28 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       garrisonRefusal(order, feltUnrest(next, now), armySize(next.units ?? {}));
 
     if (action.name === "build_structure") {
-      if (next.queue) { blocked(`İnşa emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
       const type = String(action.arguments.building_type ?? "");
       const target = Math.floor(Number(action.arguments.target_level));
       const level = keep(next);
+      const queued = legacyConstructionJob(next);
 
       if (type === "keep") {
-        if (target !== level + 1 || level >= MAX_KEEP_LEVEL) { blocked(`Kale yalnızca Sv.${level + 1} seviyesine yükseltilebilir.`); continue; }
-        const cost = keepCostFor(level, materialScaleOf(next.speed));
+        const planned = plannedLevel(next, queued, type);
+        if (target !== planned + 1 || planned >= MAX_KEEP_LEVEL) { blocked(`Kale yalnızca planlanan Sv.${planned + 1} seviyesine yükseltilebilir.`); continue; }
+        const cost = keepCostFor(planned, materialScaleOf(next.speed));
         if (!affordable(next.resources, cost)) { blocked("Kale yükseltmesi kaynak yetersizliği nedeniyle engellendi."); continue; }
         if (majorSpend(cost) && !confirmed) { blocked("Kale yükseltmesi hazinenin kritik bölümünü tüketeceği için açık teyit bekliyor."); continue; }
-        next = { ...next, resources: debit(next.resources, cost), queue: { kind: "building", type: "keep", name: `Kale Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + keepSeconds[level] / next.speed * 1000 } };
-        success(`Kale Sv.${target} yükseltmesi başlatıldı.`);
+        const job: ConstructionJob = { type: "keep", name: `Kale Sv.${target}`, targetLevel: target, reserved: cost, queuedAt: now, startedAt: null, completesAt: null, durationMs: keepSeconds[planned] / next.speed * 1000 };
+        const jobs = startWaitingConstruction([...queued, job], now, level);
+        const plannedJob = jobs[jobs.length - 1];
+        next = { ...next, resources: debit(next.resources, cost), queue: next.queue?.kind === "unit" ? next.queue : null, constructionQueue: jobs };
+        success(`Kale Sv.${target} yükseltmesi ${plannedJob.startedAt === null ? "bekleme sırasına alındı; kaynaklar ayrıldı." : "başlatıldı."}`);
         continue;
       }
 
       const item = catalog.find(entry => entry.type === type);
       if (!item) { blocked("Bilinmeyen bina emri reddedildi."); continue; }
-      const current = next.buildings.find(b => b.type === type)?.level ?? 0;
+      const current = plannedLevel(next, queued, type);
       // Seviye tavanı. Olmadığında Sv.7 emri kabul ediliyor, sonra kayıt şeması
       // (`level` ≤ MAX_BUILDING_LEVEL) kaydın TAMAMINI reddediyor ve Kralın
       // ilerlemesi sessizce kayboluyordu.
@@ -182,17 +238,58 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
         blocked(`${item.name} emri yiyecek krizi çözülene kadar ertelendi.`); continue;
       }
       if (majorSpend(cost) && !confirmed) { blocked(`${item.name} hazinenin kritik bölümünü tüketeceği için açık teyit bekliyor.`); continue; }
+      const job: ConstructionJob = { type, name: `${item.name} Sv.${target}`, targetLevel: target, reserved: cost, queuedAt: now, startedAt: null, completesAt: null, durationMs: item.seconds / next.speed * 1000 };
+      const jobs = startWaitingConstruction([...queued, job], now, level);
+      const plannedJob = jobs[jobs.length - 1];
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        queue: { kind: "building", type, name: `${item.name} Sv.${target}`, targetLevel: target, startedAt: now, completesAt: now + item.seconds / next.speed * 1000 },
-        notices: [{ kind: "GENERAL", text: `${item.name} Sv.${target} emri uygulandı.`, at: now }, ...next.notices],
+        queue: next.queue?.kind === "unit" ? next.queue : null,
+        constructionQueue: jobs,
+        notices: [{ kind: "GENERAL", text: `${item.name} Sv.${target} emri uygulandı; kaynaklar ayrıldı.`, at: now }, ...next.notices],
       };
-      success(`${item.name} Sv.${target} inşaatı başlatıldı.`);
+      success(`${item.name} Sv.${target} inşaatı ${plannedJob.startedAt === null ? "bekleme sırasına alındı." : "başlatıldı."}`);
+      continue;
+    }
+
+    if (action.name === "cancel_construction") {
+      const type = String(action.arguments.building_type ?? "");
+      const target = Math.floor(Number(action.arguments.target_level));
+      const jobs = legacyConstructionJob(next);
+      const index = jobs.findIndex(job => job.type === type && job.targetLevel === target);
+      if (index < 0) { blocked("İptal edilecek inşaat bulunamadı."); continue; }
+      const [cancelled] = jobs.splice(index, 1);
+      const scheduled = startWaitingConstruction(jobs, now, keep(next));
+      next = {
+        ...next,
+        resources: refundReserved(next.resources, cancelled.reserved),
+        queue: next.queue?.kind === "unit" ? next.queue : null,
+        constructionQueue: scheduled,
+        notices: [{ kind: "İNŞAAT", text: `${cancelled.name} iptal edildi; ayrılan kaynaklar ambara iade edildi.`, at: now }, ...next.notices].slice(0, 20),
+      };
+      success(`${cancelled.name} iptal edildi; ayrılan kaynaklar eksiksiz iade edildi.`);
       continue;
     }
 
     if (action.name === "accelerate_construction") {
+      if (next.constructionQueue !== undefined) {
+        const activeIndex = next.constructionQueue.findIndex(job => job.startedAt !== null && job.completesAt !== null);
+        if (activeIndex < 0) { blocked("Hızlandırılacak aktif inşaat yok."); continue; }
+        const active = next.constructionQueue[activeIndex];
+        if (active.hastened) { blocked(`Hızlandırma engellendi: ${active.name} için zaten dışarıdan işçi tutuldu. Aynı işe ikinci kez usta çağrılmaz.`); continue; }
+        const seconds = Math.max(0, Math.ceil(((active.completesAt ?? now) - now) / 1000));
+        if (seconds < HASTEN.minSeconds) { blocked(`Hızlandırma engellendi: ${active.name} zaten ${seconds} saniye içinde bitiyor; usta çağırmaya değmez.`); continue; }
+        const cost = Math.max(HASTEN.minCost, Math.ceil(seconds / 60) * HASTEN.goldPerMinute);
+        if (next.resources.gold < cost) { blocked(`Hızlandırma engellendi: dışarıdan usta tutmak ${cost} altın, hazinede ${Math.floor(next.resources.gold)} var.`); continue; }
+        const saved = Math.floor(seconds / 2);
+        const jobs = next.constructionQueue.map((job, index) => index === activeIndex
+          ? { ...job, completesAt: (job.completesAt ?? now) - saved * 1000, hastened: true }
+          : job);
+        next = { ...next, resources: { ...next.resources, gold: next.resources.gold - cost }, constructionQueue: jobs,
+          notices: [{ kind: "İNŞAAT", text: `${active.name} için dışarıdan usta tutuldu; ${cost} altın yevmiye ödendi.`, at: now }, ...next.notices].slice(0, 20) };
+        success(`${active.name} için dışarıdan ${HASTEN.crew} usta çağrıldı; ${cost} altın yevmiye ödendi. Kalan süre yarıya indi: ${Math.ceil((seconds - saved) / 60)} dakika.`);
+        continue;
+      }
       if (!next.queue?.startedAt) { blocked("Hızlandırılacak aktif kuyruk yok."); continue; }
       const active = next.queue;
       if (active.hastened) { blocked(`Hızlandırma engellendi: ${active.name} için zaten dışarıdan işçi tutuldu. Aynı işe ikinci kez usta çağrılmaz.`); continue; }
@@ -220,20 +317,22 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
     if (action.name === "train_unit") {
       const veto = garrison("train_unit");
       if (veto) { blocked(veto); continue; }
-      if (next.queue) { blocked(`Eğitim emri uygulanmadı: ${next.queue.name} kuyruğu dolu.`); continue; }
+      if (next.trainingQueue) { blocked(`Eğitim emri uygulanmadı: ${next.trainingQueue.name} eğitimi sürüyor.`); continue; }
       if (!next.buildings.some(b => b.type === "barracks")) { blocked("Eğitim engellendi: önce Kışla kurulmalı."); continue; }
-      const unit = String(action.arguments.unit_type ?? ""), count = Math.floor(Number(action.arguments.count));
-      if (unit !== "spearman" || count < 1 || count > 50) { blocked("Desteklenmeyen birlik veya adet emri reddedildi."); continue; }
-      const cost = { gold: count * 8, food: count * 10, iron: count };
-      if (!affordable(next.resources, cost) || next.population - count < 20) { blocked(`${count} Mızrakçı için kaynak ya da çalışan nüfus yetersiz.`); continue; }
-      if ((rates(next).food < 0 || count > next.population * .25) && !confirmed) { blocked("Eğitim emri yiyecek/nüfus riski nedeniyle açık teyit bekliyor."); continue; }
+      const unit = unitOf(String(action.arguments.unit_type ?? "")), count = Math.floor(Number(action.arguments.count));
+      if (!unit || !isTrainableUnit(unit) || count < 1 || count > 50) { blocked("Bu birlik kışlada eğitilemez; Kiralık Birlik yalnız müzakereyle gelir."); continue; }
+      const barracks = next.buildings.find(b => b.type === "barracks")?.level ?? 0;
+      if (barracks < unit.barracksLevel) { blocked(`${unit.name} eğitimi için Kışla Sv.${unit.barracksLevel} gerekli.`); continue; }
+      const manpower = unit.manpower * count, cost = unitCostFor(unit.type, count);
+      if (!affordable(next.resources, cost) || next.population - manpower < 20) { blocked(`${count} ${unit.name} için kaynak ya da çalışan nüfus yetersiz.`); continue; }
+      if ((rates(next).food < 0 || manpower > next.population * .25) && !confirmed) { blocked("Eğitim emri yiyecek/nüfus riski nedeniyle açık teyit bekliyor."); continue; }
       next = {
         ...next,
         resources: debit(next.resources, cost),
-        population: next.population - count,
-        queue: { kind: "unit", type: "spearman", name: `${count} Mızrakçı`, count, startedAt: now, completesAt: now + count * 1200 / next.speed * 1000 },
+        population: next.population - manpower,
+        trainingQueue: { type: unit.type, name: `${count} ${unit.name}`, count, manpower, startedAt: now, completesAt: now + trainingDurationMs(unit.type, count, next.speed) },
       };
-      success(`${count} Mızrakçının eğitimi başlatıldı.`);
+      success(`${count} ${unit.name} eğitimi başlatıldı; inşaat kuyruğu etkilenmedi.`);
       continue;
     }
 
@@ -241,7 +340,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       const resource = String(action.arguments?.resource ?? "");
       const amount = Math.floor(Number(action.arguments?.amount) || 0);
       const buying = String(action.arguments?.direction ?? "sell") === "buy";
-      const market = marketState(next, now);
+      const market = marketState(next, now, channelIndex);
 
       if (!isTraded(resource)) { blocked(`Pazar emri geçersiz: ${resource || "kaynak"} pazarda işlem görmez. Yalnızca yiyecek, odun, taş, demir ve bira alınıp satılır.`); continue; }
       if (market.level < 1) { blocked("Pazar emri engellendi: Pazarımız yok. Önce Pazar kurulmalı (Kale Sv.2)."); continue; }
@@ -261,7 +360,7 @@ export function applyActions(base: Game, actions: GameAction[], now: number): Ap
       // Fiyat emrin İÇİNDE hareket eder: emir parçalara bölünür, her parça o
       // andaki stoğa göre fiyatlanır. Büyük emir kendi fiyatını bozar.
       // Yığın yalnızca satış kolunda fiyatı düşürür; alışta hiç okunmaz.
-      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0);
+      const fill = fillOrder(resource, amount, held, market.reference[resource], buying ? "buy" : "sell", market.glut[resource] ?? 0, market.index[resource] ?? 1);
       const minutes = marketDuration(amount, next.speed);
       // Teklif kimliği deterministik: aynı girdi aynı kimliği üretir, motor saf kalır.
       const id = `${buying ? "b" : "s"}-${resource}-${amount}-${now}`;

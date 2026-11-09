@@ -7,6 +7,7 @@ import { activeMembershipOf } from "../../../server/active-membership";
 import { noteToKing } from "../../../server/king-notice";
 import { RATE_LIMITS, consumeRateLimit, rateLimitResponse } from "../../../server/rate-limit";
 import { parseTimestamp, parseStoredSave, validateGameSave } from "../../../server/save-validation";
+import { queueEmigrants } from "../../../server/migration-desk";
 
 export const dynamic = "force-dynamic";
 
@@ -56,8 +57,9 @@ export async function PUT(request: Request) {
   // müzakere yolu (server/active-membership) başka bir channel seçebiliyordu —
   // kayıt bir sezona, masa başkasına giderdi.
   const channel = await activeMembershipOf(user.id);
+  const previous = existing ? parseStoredSave(existing.gameState) : null;
   const result = validateGameSave(body.game, {
-    previous: existing ? parseStoredSave(existing.gameState) : null,
+    previous,
     previousUpdatedAt: existing ? parseTimestamp(existing.updatedAt) : null,
     channelSpeed: channel?.channelSpeed ?? 1,
     channelName: channel?.channelName ?? null,
@@ -86,6 +88,21 @@ export async function PUT(request: Request) {
       const [current] = await getDb().select().from(gameSaves).where(eq(gameSaves.userId, user.id)).limit(1);
       return current ? conflict(current.gameState, current.revision)
         : Response.json({ error: "Kayıt bulunamadı." }, { status: 409, headers: noStore });
+    }
+    // Göç kuyruğu: bu yazma GERÇEKTEN DB'ye işlendiği için, `peopleLeft`
+    // defterinin bu adımda ne kadar ilerlediği artık kalıcıdır. Kuyruğa alma
+    // burada, `tick()`'in kendisinde DEĞİL: motor saf kalmalı (Math.random/
+    // Date.now/crypto yasak) ve `tick()` hem istemcide hem sunucunun "hayalet"
+    // doğrulama simülasyonunda (`checkAgainstSimulation`) çağrılıyor — orada
+    // kuyruğa alınsaydı hiç yazılmayan bir göç bile kayda geçerdi.
+    // Hata bu isteği DÜŞÜRMEZ: göçmen kuyruğu bir sonraki kayıtta yine denenir.
+    if (channel) {
+      try {
+        await queueEmigrants({
+          channelId: channel.channelId, sourceUserId: user.id,
+          before: previous?.peopleLeft, after: result.game.peopleLeft, now: Date.now(),
+        });
+      } catch { /* göç kuyruğu düşerse bile Kralın kaydı kaybolmasın */ }
     }
     return Response.json({ saved: true, revision: written.revision }, { headers: noStore });
   }

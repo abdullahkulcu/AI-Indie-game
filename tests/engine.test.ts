@@ -55,6 +55,21 @@ test("bir saatlik tick kaynakları üretim hızı kadar artırır", () => {
   assert.equal(after.lastTickAt, T0 + 3_600_000);
 });
 
+test("savaş hasarı yalnız süresi boyunca üretimi düşürür ve sınırda adımlara bölünür", () => {
+  // Konut tam dolu: bu test yalnız üretim zaman çizgisini ölçer; göç mekanikleri
+  // başka testlerin kapsamındadır ve burada kaynak karşılaştırmasını bulandırmaz.
+  const damaged = newGame({ capacity: 100, warDisruption: { until: T0 + 3_600_000, productionPenalty: .2 } });
+  assert.equal(grossRates(damaged).food, grossRates(newGame()).food * .8);
+  const once = tick(damaged, T0 + 2 * 3_600_000);
+  const split = tick(tick(damaged, T0 + 3_600_000), T0 + 2 * 3_600_000);
+  for (const key of ["gold", "food", "stone", "wood", "iron", "ale"] as const) {
+    // `tick`in mevcut rıza eğrisi küçük kayan-nokta farkları taşıyor; savaş
+    // hasarı bu farkı büyütmemeli. Sınırın iki yanında üretim aynı kalır.
+    assert.ok(Math.abs(once.resources[key] - split.resources[key]) < .05, `${key}: tek ${once.resources[key]}, bölünmüş ${split.resources[key]}`);
+  }
+  assert.equal(once.warDisruption, undefined);
+});
+
 test("çevrimdışı kazanç 24 saatle sınırlıdır", () => {
   const week = tick(newGame(), T0 + 7 * 86_400_000);
   const day = tick(newGame(), T0 + 86_400_000);
@@ -106,17 +121,21 @@ test("bina emri kaynak düşer ve kuyruğa alır; kota harcamaz", () => {
   const before = newGame();
   const { game, results } = applyActions(before, [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0);
   assert.match(results[0], /^✓/);
-  assert.equal(game.queue?.type, "quarry");
+  assert.equal(game.constructionQueue?.[0]?.type, "quarry");
+  assert.equal(game.constructionQueue?.[0]?.startedAt, T0);
   assert.equal(game.quota, before.quota, "emir kotadan düşmemeli");
   assert.equal(game.resources.wood, before.resources.wood - 100);
   assert.equal(game.resources.gold, before.resources.gold - 60);
 });
 
-test("kuyruk doluyken ikinci inşa emri engellenir", () => {
-  const busy = newGame({ queue: { kind: "building", type: "quarry", name: "Taş Ocağı Sv.1", targetLevel: 1, startedAt: T0, completesAt: T0 + 9_000_000 } });
-  const { results } = applyActions(busy, [{ name: "build_structure", arguments: { building_type: "mill", target_level: 1 } }], T0);
-  assert.match(results[0], /^✕/);
-  assert.match(results[0], /kuyruğu dolu/);
+test("tek şantiyede ikinci inşaat kaynak ayrılarak bekleme sırasına girer", () => {
+  const first = applyActions(newGame(), [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0).game;
+  const beforeSecond = first.resources;
+  const { game, results } = applyActions(first, [{ name: "build_structure", arguments: { building_type: "wheat_farm", target_level: 2, confirmed_risk: true } }], T0);
+  assert.match(results[0], /^✓/);
+  assert.equal(game.constructionQueue?.length, 2);
+  assert.equal(game.constructionQueue?.[1]?.startedAt, null, "tek şantiye doluyken ikinci iş beklemeli");
+  assert.equal(game.resources.wood, beforeSecond.wood - 148, "bekleyen işin malzemesi baştan ayrılmalı");
 });
 
 test("kale kilidi olmayan bina reddedilir", () => {
@@ -132,7 +151,39 @@ test("kışla olmadan asker eğitilemez", () => {
 test("kota sıfırken bile emirler uygulanır", () => {
   const { game, results } = applyActions(newGame({ quota: 0 }), [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0);
   assert.match(results[0], /^✓/);
-  assert.equal(game.queue?.type, "quarry");
+  assert.equal(game.constructionQueue?.[0]?.type, "quarry");
+});
+
+test("Kale seviyesi eşzamanlı şantiye sayısını belirler; boşalan yer sıradakini başlatır", () => {
+  const before = newGame({
+    resources: { gold: 10_000, food: 10_000, stone: 10_000, wood: 10_000, iron: 100, ale: 0 },
+    buildings: [
+      { type: "keep", name: "Kale", category: "Yönetim", level: 3 },
+      { type: "wheat_farm", name: "Buğday Tarlası", category: "Ekonomi", level: 1 },
+      { type: "lumberjack", name: "Oduncu Kulübesi", category: "Ekonomi", level: 1 },
+    ],
+  });
+  const dispatched = applyActions(before, [
+    { name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } },
+    { name: "build_structure", arguments: { building_type: "wheat_farm", target_level: 2 } },
+    { name: "build_structure", arguments: { building_type: "lumberjack", target_level: 2 } },
+  ], T0).game;
+  assert.equal(dispatched.constructionQueue?.filter(job => job.startedAt !== null).length, 2, "Kale Sv.3 iki şantiyeyi açmalı");
+  assert.equal(dispatched.constructionQueue?.find(job => job.type === "lumberjack")?.startedAt, null, "üçüncü iş sırada beklemeli");
+
+  const afterFirstCompletion = tick(dispatched, T0 + 3_600_000);
+  const lumberjack = afterFirstCompletion.constructionQueue?.find(job => job.type === "lumberjack");
+  assert.equal(lumberjack?.startedAt, T0 + 3_600_000, "ilk şantiye boşalınca sıradaki iş aynı anda başlamalı");
+});
+
+test("bekleyen inşaat iptal edilince ayrılan envanter eksiksiz geri gelir", () => {
+  const first = applyActions(newGame(), [{ name: "build_structure", arguments: { building_type: "quarry", target_level: 1 } }], T0).game;
+  const reservedBefore = first.resources;
+  const queued = applyActions(first, [{ name: "build_structure", arguments: { building_type: "wheat_farm", target_level: 2, confirmed_risk: true } }], T0).game;
+  const cancelled = applyActions(queued, [{ name: "cancel_construction", arguments: { building_type: "wheat_farm", target_level: 2 } }], T0);
+  assert.match(cancelled.results[0], /^✓/);
+  assert.equal(cancelled.game.constructionQueue?.length, 1);
+  assert.deepEqual(cancelled.game.resources, reservedBefore, "iptal, bekleyen iş için ayrılan her kaynağı iade etmeli");
 });
 
 test("art arda çok sayıda emir yalnızca kaynak ve kuyrukla sınırlanır", () => {

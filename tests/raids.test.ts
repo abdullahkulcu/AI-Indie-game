@@ -125,6 +125,15 @@ test("nöbetsiz krallık ağır kayıp verir, nöbetteki ordu akını püskürt�
   assert.equal(held.soldiersLost, 0);
 });
 
+test("püskürtülen akın, yaşayan garnizona saha deneyimi yazar", () => {
+  const guarded = newGame({ units: { spearman: 30 }, watchRatio: 100 });
+  const { planned } = firstRaidWindow(guarded);
+  const before = tick(guarded, planned.at - 1);
+  const after = tick(before, planned.at + 1);
+  assert.ok((after.unitExperience?.spearman ?? 0) > 0, "başarılı nöbet tecrübe kazandırmalı");
+  assert.ok(defenseOf(after).power > defenseOf({ ...after, unitExperience: {} }).power, "tecrübe savunma hesabına girmeli");
+});
+
 test("sur ve arazi savunmayı güçlendirir", () => {
   const base = newGame({ units: { spearman: 20 }, watchRatio: 60 });
   const walled = newGame({
@@ -279,6 +288,7 @@ test("pencere sınırları mutlak zamana oturur: küçük adımlar tek adımla a
   for (let at = T0 + 600_000; at <= end; at += 600_000) stepped = tick(stepped, at);
   assert.ok(single.notices.some(notice => notice.kind === "AKIN"), "bu aralıkta gerçekten bir akın olmalı");
   assert.equal(stepped.units.spearman, single.units.spearman, "asker kaybı adım boyutuna bağlı olmamalı");
+  assert.deepEqual(stepped.unitExperience, single.unitExperience, "saha deneyimi de adım boyutundan bağımsız olmalı");
   assert.deepEqual(
     stepped.notices.filter(notice => notice.kind === "AKIN"),
     single.notices.filter(notice => notice.kind === "AKIN"),

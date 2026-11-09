@@ -186,6 +186,24 @@ test("çökmüş nüfus makul sürede toparlanır", () => {
   assert.ok(population > 240, `bir haftada 24'ten 240'a çıkmalı, çıkan: ${Math.round(population)}`);
 });
 
+test("nüfus hesabı zaman aralığı bölününce birebir aynı kalır", () => {
+  const content = moodState(85, 0), revolt = moodState(5, 0);
+  const walk = (state: ReturnType<typeof moodState>, initial: number, capacity: number, buildings: Array<{ type: string; level: number }>) => {
+    const single = initial + populationChange(state, initial, capacity, buildings, 12);
+    let stepped = initial;
+    for (let hour = 0; hour < 12; hour += 1) stepped += populationChange(state, stepped, capacity, buildings, 1);
+    return { single, stepped };
+  };
+  const cases: Array<[string, ReturnType<typeof moodState>, number, number, Array<{ type: string; level: number }>]> = [
+    ["büyüme", content, 100, 400, [{ type: "marriage_hall", level: 2 }]],
+    ["kayıp", revolt, 300, 300, []],
+  ];
+  for (const [label, state, initial, capacity, buildings] of cases) {
+    const result = walk(state, initial, capacity, buildings);
+    assert.ok(Math.abs(result.single - result.stepped) < 1e-9, `${label}: tek ${result.single}, bölünmüş ${result.stepped}`);
+  }
+});
+
 test("evlilik dairesi ve meydan büyümeyi hızlandırır, kaybı etkilemez", () => {
   const content = moodState(85, 0), revolt = moodState(5, 0);
   const halls = [{ type: "marriage_hall", level: 2 }, { type: "town_square", level: 1 }];

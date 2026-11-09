@@ -1,0 +1,1 @@
+ALTER TABLE "populace_demands" ADD COLUMN "tone" text;

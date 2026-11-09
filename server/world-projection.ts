@@ -8,6 +8,14 @@
  *     içinde JSON olarak saklanır ve keşfedilen krallık için arayüze döner.
  */
 
+import { COMPARE_METRICS, COMPARE_MIN_SAMPLE, compareValuesOf, type CompareMetric } from "../engine/comparison";
+import { victoryScore, type VictoryPurse } from "../engine/victory";
+import { TRADED_KEYS, commonsReference, isTraded } from "../engine/market";
+import { armySize, moodState, suppression } from "../engine/populace";
+import { factionPressureOf } from "../engine/faction";
+import type { TradeKey } from "../engine/types";
+import { parseStoredSave } from "./save-validation";
+
 export type PublicKingdom = {
   id: string;
   name: string;
@@ -65,7 +73,10 @@ export function projectPublicKingdom(userId: string, gameState: string, expected
  * RAPOR VERMEZ  : ambar, nöbet oranı, asker maaşı, halkın rızası, sadakat,
  *                 hazine, kalan koruma süresi, gece emirleri.
  */
-export type IntelReport = Omit<PublicKingdom, "id">;
+export type IntelReport = Omit<PublicKingdom, "id"> & {
+  /** Yalnız derin gözetlemenin getirdiği nitel halk ruh hâli; asla puan değil. */
+  populaceMood?: string;
+};
 
 export function intelReportOf(kingdom: PublicKingdom): IntelReport {
   // Alanlar TEK TEK yazılır: `...kingdom` yayılsaydı `PublicKingdom` ileride
@@ -83,6 +94,24 @@ export function intelReportOf(kingdom: PublicKingdom): IntelReport {
 }
 
 /**
+ * Derin gözetleme, normal keşfin sınırını bilinçli ve dar biçimde genişletir.
+ *
+ * Rıza puanı, ambar, maaş ve nöbet hâlâ hiç sızmaz. Ajanın getirdiği tek ek
+ * bilgi, Kralın keseyi/teması hangi hedefte denemesi gerektiğini tartabilmesi
+ * için kaba bir ruh hâli etiketidir. Etiket mevcut anlık durumdan alınır ve
+ * raporla birlikte donar; gelecekteki değişimi vaat etmez.
+ */
+export function deepIntelReportOf(kingdom: PublicKingdom, gameState: string): IntelReport {
+  const report = intelReportOf(kingdom);
+  const game = parseStoredSave(gameState);
+  if (!game) return report;
+  const mood = moodState(game.popularity, suppression(
+    armySize(game.units), game.population, game.soldierUnrest ?? 0, factionPressureOf(game),
+  ));
+  return { ...report, populaceMood: mood.label };
+}
+
+/**
  * Raporun bayatlama eşiği.
  *
  * Keşif KALICIDIR: `discovered` bir kez açıldıktan sonra sönmez ve rapor anlık
@@ -95,4 +124,233 @@ export const INTEL_REPORT_STALE_MS = 6 * 3_600_000;
 
 export function isStaleReport(takenAt: number, now: number) {
   return now - takenAt >= INTEL_REPORT_STALE_MS;
+}
+
+/**
+ * CHANNEL ORTALAMASI — anonim (isimsiz) agregasyon.
+ *
+ * Kral kendi krallığını channel'daki DİĞER sancakların ortalamasıyla
+ * kıyaslayabilir; hangi değerin kime ait olduğu ASLA sızmaz. Bu dosyanın geri
+ * kalanındaki disiplin burada da geçerli: dışarıya yalnızca tek tek yazılan
+ * alanlar çıkar, ham kayıt hiçbir zaman.
+ *
+ * TEK KAYNAK NOTU — bu hesap üç işin ortak girdisidir ve üçü de BURADAN
+ * beslenir (bkz. `docs/plans/2026-08-22-canli-dunya-ve-halk-ai-vizyonu.md`):
+ *  - Fikir 1  — "diyar" sekmesindeki kıyas paneli (bugün uygulanan tüketici).
+ *  - Fikir 13 — sessiz kıyaslama: Halk'ın komşularla kendini kıyaslayıp yeni
+ *    bir talep açması. Aynı hesabı `populaceComparison` üzerinden paylaşır.
+ *    RİTİM SAPMASI: kararda "saatlik cron turunda" yazıyordu; uygulama talep
+ *    senkronunun ritmine bağlandı (Kral General'le konuştuğunda), çünkü
+ *    `syncPopulaceDemands` bugün YALNIZCA oradan çağrılıyor ve cron'a
+ *    oyuncu-başına saatlik bir talep turu eklemek yeni bir maliyet/karmaşıklık
+ *    olurdu. Gerekçenin tamamı `updates/2026-08-22-sessiz-kiyaslama.md`'de.
+ *  - Fikir 24 — channel-geneli pazar endeksi (uygulandı). Kararı gereği
+ *    bağımsız bir agregasyon KURMAZ: aşağıdaki `market` alanı aynı döngüde,
+ *    aynı süzgeçlerle birikir ve `engine/market.ts` → `channelPriceIndex`
+ *    onu fiyat çarpanına çevirir.
+ * Yeni bir tüketici kendi ortalamasını hesaplamaz; bu fonksiyonu çağırır.
+ *
+ * Ölçüt listesi, "iyi" yönü ve gizlilik alt sınırı motordadır
+ * (`engine/comparison.ts`) — arayüz ve Halk tarafı da aynı tanıma bakar.
+ */
+export type ChannelAverages = {
+  /** Ortalamaya GERÇEKTEN giren sancak sayısı (Kralın kendisi hariç). */
+  counted: number;
+  /** Kuruluş koruması sürdüğü için hariç tutulan sancak sayısı. */
+  protectedOut: number;
+  /**
+   * Ortalamalar; aday sayısı `COMPARE_MIN_SAMPLE` altındaysa `null` olur.
+   * Sayı o durumda istemciye HİÇ inmez — sınır burada, veri katmanında çizilir.
+   */
+  averages: Record<CompareMetric, number> | null;
+  /**
+   * PAZAR ENDEKSİNİN GİRDİSİ (Fikir 24). Ortalamalarla AYNI taramadan,
+   * aynı süzgeçlerden (kendisi hariç, kuruluş koruması hariç) ve aynı
+   * gizlilik alt sınırından geçer — ikinci bir channel taraması yok.
+   *
+   * Ham toplam döner, çarpan DÖNMEZ: çarpana çeviren kural motorda tek
+   * kaynakta yaşıyor (`engine/market.ts` → `channelPriceIndex`), çünkü eşiğin
+   * ölçeği bir DENGE kararıdır ve veri katmanında ikinci bir kopyası olmamalı.
+   */
+  market: {
+    /** Açık emirlerin net akışı: + satış (bolluk), − alım (kıtlık). */
+    netFlow: Record<TradeKey, number>;
+    /** Sayılan sancakların normal kilerinin toplamı; eşiğin ölçeği. */
+    reference: Record<TradeKey, number>;
+  } | null;
+};
+
+export function channelAverages(input: {
+  /** Kaydın hangi channel'a ait olduğu doğrulanır; `projectPublicKingdom` ile aynı süzgeç. */
+  channelName: string;
+  /** Kralın kendisi: kendisiyle kıyaslamak anlamsız olduğu için ortalamaya girmez. */
+  excludeUserId: string | null;
+  /** `GET /api/world`'ün ZATEN okuduğu satırlar; bu hesap için ikinci bir DB turu açılmaz. */
+  rows: ReadonlyArray<{ userId: string; gameState: string }>;
+  now: number;
+}): ChannelAverages {
+  const totals: Record<CompareMetric, number> = { popularity: 0, foodRation: 0, taxRate: 0, factionPressure: 0 };
+  // Pazar endeksinin toplamları AYNI döngüde birikir; ikinci bir tarama yok.
+  const netFlow = Object.fromEntries(TRADED_KEYS.map(key => [key, 0])) as Record<TradeKey, number>;
+  const marketReference = Object.fromEntries(TRADED_KEYS.map(key => [key, 0])) as Record<TradeKey, number>;
+  let counted = 0, protectedOut = 0;
+  for (const row of input.rows) {
+    // Kralın kendisi İLK elenir: kendi koruma durumu "hariç tutulan komşu"
+    // sayısına yazılmamalı, o sayı Krala komşular hakkında bilgi verir.
+    if (input.excludeUserId && row.userId === input.excludeUserId) continue;
+    /**
+     * Kayıt ŞEMANIN KENDİSİYLE okunur (`parseStoredSave`). Gerekçe:
+     * `projectPublicKingdom` ham JSON okur, çünkü oradaki amaç eski/kısmi bir
+     * kaydı bile haritada göstermek — alan eksikse yerine varsayılan konur.
+     * Burada amaç TERSİ: şüpheli bir kayıt ortalamayı SESSİZCE bozmasın. Şema
+     * alan sınırlarını (vergi 0-50, rıza 0-100) da tek yerde uyguladığı için
+     * elle `Number(...) || 0` zorlamasına gerek kalmaz.
+     */
+    const save = parseStoredSave(row.gameState);
+    if (!save || save.channel !== input.channelName) continue;
+    // Kuruluş koruması süren krallık ortalamaya GİRMEZ — dış kese ve göç
+    // sistemlerindeki aynı kural: henüz gerçek rekabetin içinde değil.
+    if (save.protectionEndsAt > input.now) { protectedOut++; continue; }
+    // Hangi ölçüt hangi alandan okunur (ve alan eksikse varsayılanı ne olur)
+    // motorda kararlaşır; arayüz "bizdeki değer" satırını AYNI fonksiyondan
+    // okur, yoksa iki taraf farklı ölçek gösterirdi.
+    const values = compareValuesOf(save);
+    for (const metric of COMPARE_METRICS) totals[metric] += values[metric];
+
+    /**
+     * PAZAR ENDEKSİ (Fikir 24) — bu sancağın açık emirleri ve normal kileri.
+     *
+     * YALNIZCA HÂLÂ AÇIK OLAN emir sayılır (`completesAt > now`). Bu şart
+     * gerekli: kapanma vakti geçmiş bir teklif ancak O OYUNCUNUN istemcisi
+     * `tick()` attığında kayıttan düşer, yani terk edilmiş bir krallığın
+     * kaydında SONSUZA KADAR durur. Süzülmeseydi bir daha hiç oynamayan tek
+     * bir sancak channel'ın fiyatını kalıcı olarak eğecekti. Şart aynı
+     * zamanda endeksin kendi kendine sönmesini sağlar: emirler kapandıkça
+     * akış doğal olarak sıfıra döner, ayrı bir sönüm terimi gerekmez.
+     */
+    for (const order of save.marketOrders ?? []) {
+      if (!isTraded(order.resource) || order.completesAt <= input.now) continue;
+      netFlow[order.resource] += order.direction === "sell" ? order.amount : -order.amount;
+    }
+    const reference = commonsReference(save.population);
+    for (const key of TRADED_KEYS) marketReference[key] += reference[key];
+    counted++;
+  }
+  if (counted < COMPARE_MIN_SAMPLE) return { counted, protectedOut, averages: null, market: null };
+  // Yuvarlama arayüzün işi: hesap tam kalır ki sayıyı doğrudan kullanacak
+  // tüketiciler (Fikir 24'ün pazar endeksi) yuvarlama hatası devralmasın.
+  const averages = { ...totals };
+  for (const metric of COMPARE_METRICS) averages[metric] = totals[metric] / counted;
+  // Pazar toplamları da aynı gizlilik kapısından geçer: iki komşunun net emir
+  // akışı, kendi emirlerini bilen bir Kral için tek komşunun defterini çözer.
+  return { counted, protectedOut, averages, market: { netFlow, reference: marketReference } };
+}
+
+/**
+ * HALKIN KIYAS GİRDİSİ (plan belgesindeki Fikir 13) — `engine/populace-voice.ts`
+ * → `VoiceSignals.comparison` alanının TEK üreticisi.
+ *
+ * Neden burada ve neden ayrı bir fonksiyon: kıyasın İKİ tarafı da aynı
+ * boru hattından geçmek zorunda — kayıt `parseStoredSave` ile okunur, değerler
+ * `compareValuesOf` ile çıkarılır. "Bizdeki değer"i istemcinin gönderdiği
+ * bağlamdan okusaydık ortalama ile aynı ölçeği kaybederdik (istemci bağlamında
+ * muhalefet baskısı hiç yok, istihkak ise kâğıt üstündeki değil FİİLEN
+ * dağıtılan oran) ve halk kendini yanlış ölçekle kıyaslardı.
+ *
+ * `rows` çağıranın ZATEN okuduğu channel satırlarıdır; kendi kaydımız da o
+ * listenin içindedir, yani bu hesap için ayrı bir DB turu açılmaz.
+ *
+ * `null` döner (ve talep hiç açılmaz) üç durumda: kaydımız okunamıyorsa,
+ * kaydımız bu channel'a ait değilse, ya da ortalama gizlilik alt sınırının
+ * altında kaldıysa.
+ */
+export function populaceComparison(input: {
+  channelName: string;
+  userId: string;
+  rows: ReadonlyArray<{ userId: string; gameState: string }>;
+  now: number;
+}): { mine: Record<CompareMetric, number>; averages: Record<CompareMetric, number> | null } | null {
+  const own = input.rows.find(row => row.userId === input.userId);
+  if (!own) return null;
+  const save = parseStoredSave(own.gameState);
+  if (!save || save.channel !== input.channelName) return null;
+  const { averages } = channelAverages({
+    channelName: input.channelName, excludeUserId: input.userId, rows: input.rows, now: input.now,
+  });
+  if (!averages) return null;
+  return { mine: compareValuesOf(save), averages };
+}
+
+/**
+ * ZAFER SKORU SIRALAMASI — Kralın channel içindeki yeri, komşunun verisi
+ * sızmadan.
+ *
+ * Formülün kendisi motordadır (`engine/victory.ts`); burada yalnızca "kim
+ * sıralamaya girer" ve "sıra kaç" soruları cevaplanır. Dışarıya çıkan tek yeni
+ * bilgi SIRA SAYISIDIR: hiçbir komşunun skoru, adı ya da kalemi istemciye
+ * inmez. `channelAverages` ile aynı iki süzgeç geçerlidir — kuruluş koruması
+ * süren sancak sıralamaya girmez ve gizlilik alt sınırı (`COMPARE_MIN_SAMPLE`)
+ * sağlanmazsa sıra HİÇ üretilmez. Alt sınır burada "bizden başka en az üç
+ * sancak" demektir: iki sancaklı bir sıralamada "1/2" görmek komşunun skorunu
+ * kendi skorumuzla birlikte birebir çözerdi.
+ *
+ * Kendi skorumuzu bu fonksiyon DÖNDÜRMEZ: arayüz onu CANLI oyun durumundan
+ * (istemcinin tick'lediği `Game`) ve buradan gelen kese defterinden aynı motor
+ * fonksiyonuyla hesaplar. Sıralama kayıtlı durumdan çıktığı için kılpayı
+ * gecikebilir; sıra kaba bir göstergedir, kalem kalem bir kıyas değildir.
+ */
+export type VictoryStanding = {
+  /** Kralın KENDİ gönderdiği, kaderi belli olmuş keseleri. */
+  purses: VictoryPurse[];
+  /** Karşı-istihbaratımızın yakaladığı gelen kese sayısı. */
+  caught: number;
+  /** Sıramız; alt sınır sağlanmazsa ya da kuruluş korumamız sürüyorsa null. */
+  rank: number | null;
+  /** Sıralamaya giren sancak sayısı (biz dâhil). */
+  ranked: number;
+};
+
+export function channelVictoryStanding(input: {
+  channelName: string;
+  userId: string;
+  /** `GET /api/world`'ün zaten okuduğu channel kayıtları. */
+  rows: ReadonlyArray<{ userId: string; gameState: string }>;
+  /** Channel'ın kaderi belli olmuş bütün keseleri (`pending` olanlar hariç). */
+  purses: ReadonlyArray<{ sourceUserId: string; targetUserId: string; status: "settled" | "exposed" }>;
+  now: number;
+}): VictoryStanding {
+  const sent = new Map<string, VictoryPurse[]>();
+  const caught = new Map<string, number>();
+  for (const purse of input.purses) {
+    const list = sent.get(purse.sourceUserId) ?? [];
+    list.push({ target: purse.targetUserId, status: purse.status });
+    sent.set(purse.sourceUserId, list);
+    // Yakalanan kese hedefin karşı-istihbarat hanesine yazılır: ifşa yalnızca
+    // nöbet kurulmuşsa olur, yani bu satır hedefin kazandığı bir savunmadır.
+    if (purse.status === "exposed") caught.set(purse.targetUserId, (caught.get(purse.targetUserId) ?? 0) + 1);
+  }
+  const mine = { purses: sent.get(input.userId) ?? [], caught: caught.get(input.userId) ?? 0 };
+
+  const totals: Array<{ userId: string; total: number }> = [];
+  for (const row of input.rows) {
+    const save = parseStoredSave(row.gameState);
+    if (!save || save.channel !== input.channelName) continue;
+    if (save.protectionEndsAt > input.now) continue;
+    totals.push({
+      userId: row.userId,
+      total: victoryScore({
+        purses: sent.get(row.userId) ?? [],
+        caughtPurses: caught.get(row.userId) ?? 0,
+        game: save,
+      }).total,
+    });
+  }
+  // Alt sınır: bizden başka en az COMPARE_MIN_SAMPLE sancak sıralamada olmalı.
+  const own = totals.find(entry => entry.userId === input.userId);
+  if (!own || totals.length - 1 < COMPARE_MIN_SAMPLE) {
+    return { ...mine, rank: null, ranked: totals.length };
+  }
+  // Eşitlikte aynı sıra: bizden KESİN olarak yukarıda kaç sancak var.
+  const above = totals.filter(entry => entry.total > own.total).length;
+  return { ...mine, rank: above + 1, ranked: totals.length };
 }

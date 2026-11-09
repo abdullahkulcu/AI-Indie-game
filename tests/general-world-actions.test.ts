@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { inferFallbackAction } from "../server/general-action-fallback";
+import { REMOTE_ACTIONS } from "../engine/actions";
 
 test("ortak madene gönderme emri send_miners üretir", () => {
   assert.deepEqual(inferFallbackAction("ortak demir madene gönder"), { name: "send_miners", arguments: { workers: 5 } });
@@ -37,4 +38,18 @@ test("bina emirleri bozulmadan çalışmaya devam eder", () => {
 test("kendi maden binası ile ortak maden karıştırılmaz", () => {
   // "maden kur" krallığın kendi maden binasıdır, ortak maden değil.
   assert.deepEqual(inferFallbackAction("maden kur"), { name: "build_structure", arguments: { building_type: "mine", target_level: 1, confirmed_risk: false } });
+});
+
+test("General seferi mühürlemeden taslak ve savunma doktrini bırakabilir", () => {
+  assert.ok(REMOTE_ACTIONS.includes("propose_campaign"));
+  assert.ok(REMOTE_ACTIONS.includes("set_defense_doctrine"));
+  assert.ok(REMOTE_ACTIONS.includes("respond_to_war"));
+  assert.ok(!REMOTE_ACTIONS.includes("declare_war"));
+});
+
+test("açık halk oylaması emri konuya göre güvenli uzak eylem üretir", () => {
+  assert.deepEqual(inferFallbackAction("vergiyi artırmadan önce halka referandum sor"), { name: "hold_referendum", arguments: { topic: "tax_increase" } });
+  assert.deepEqual(inferFallbackAction("istihkakı yükseltmek için halkın görüşünü sor"), { name: "hold_referendum", arguments: { topic: "food_relief" } });
+  assert.equal(inferFallbackAction("vergiyi artırmayı halka sorsak ne olur"), null);
+  assert.ok(REMOTE_ACTIONS.includes("hold_referendum"));
 });

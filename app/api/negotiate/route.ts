@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { agreements, channelMembers, negotiationMessages, negotiations } from "../../../db/schema";
+import { agreements, channelMembers, gameSaves, mercenaryContracts, negotiationMessages, negotiations, wars } from "../../../db/schema";
 import {
   DECLINABLE_STATUSES, LIMITS, MAX_MESSAGE_LENGTH, NEGOTIATION_TOPICS, SIGNABLE_STATUS,
   canBind, canDecline, canOpen, canProposeTerms, canSpeak, clampTerms, isNegotiationTopic, sideOf, validateTerms,
@@ -11,6 +11,10 @@ import { activeMembershipOf } from "../../../server/active-membership";
 import { newId } from "../../../server/ids";
 import { displayNameOf, loadTablesFor, toEngine } from "../../../server/negotiation-desk";
 import { RATE_LIMITS, consumeRateLimit, rateLimitResponse } from "../../../server/rate-limit";
+import { parseStoredSave } from "../../../server/save-validation";
+import { recruitUnitExperience } from "../../../engine/units";
+import { acceptWarTruce } from "../../../server/war-desk";
+import { kingIsAwayOnCampaign } from "../../../server/war-regency";
 
 export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
@@ -42,6 +46,7 @@ export async function GET(request: Request) {
     const otherId = side === "initiator" ? row.targetId : row.initiatorId;
     return {
       id: row.id, topic: row.topic, status: row.status, turns: row.turns, side,
+      counterpartId: otherId,
       counterpart: await displayNameOf(otherId, membership.channelName),
       proposed: row.proposed,
       proposedBy: row.proposedBy,
@@ -61,6 +66,7 @@ export async function GET(request: Request) {
     agreements: await Promise.all(deals.map(async deal => ({
       id: deal.id, topic: deal.topic, terms: JSON.parse(deal.terms) as Terms,
       iPay: deal.payerId === user.id,
+      counterpartId: deal.payerId === user.id ? deal.payeeId : deal.payerId,
       counterpart: await displayNameOf(deal.payerId === user.id ? deal.payeeId : deal.payerId, membership.channelName),
       endsAt: deal.endsAt, paidCount: deal.paidCount, everyHours: deal.everyHours,
     }))),
@@ -88,14 +94,17 @@ export async function POST(request: Request) {
 
   const membership = await activeMembershipOf(user.id);
   if (!membership) return json({ error: "Aktif bir channel'a katılmadınız." }, 403);
+  const kingAway = await kingIsAwayOnCampaign(user.id, membership.channelId);
 
   if (body.action === "set_open") {
+    if (kingAway) return json({ error: "Kral cephedeyken elçilik düzeni değiştirilemez; bu karar dönüşe ertelendi." }, 409);
     await db.update(channelMembers).set({ acceptsNegotiation: Boolean(body.accepts) })
       .where(and(eq(channelMembers.userId, user.id), eq(channelMembers.channelId, membership.channelId)));
     return json({ acceptsNegotiation: Boolean(body.accepts) });
   }
 
   if (body.action === "open") {
+    if (kingAway) return json({ error: "Kral cephedeyken yeni müzakere başlatılamaz; Naiplik yalnız mevcut savunmayı ve ekonomiyi yürütür." }, 409);
     const topic = body.topic;
     if (!isNegotiationTopic(topic)) return json({ error: "Geçersiz müzakere konusu." }, 400);
     const targetId = String(body.targetId ?? "");
@@ -143,6 +152,13 @@ export async function POST(request: Request) {
   if (!side) return json({ error: "Bu masada tarafınız yok." }, 403);
   const table = toEngine(row);
 
+  // Savaşa bağlı ateşkes belgesi istisnadır: Kral cephedeyken de çatışmayı
+  // durdurabilmelidir. Bunun dışındaki söz ve şartlar başkente dönene kadar
+  // bekler; doğrudan Elçilik API'sine gelmek bu kuralı delmez.
+  if (kingAway && !row.warId) {
+    return json({ error: "Kral cephedeyken yeni diplomatik söz veya şart bağlanamaz; masa dönüşte yeniden açılacak." }, 409);
+  }
+
   if (body.action === "reply") {
     const speak = canSpeak(table, side, now);
     if (!speak.ok) return json({ error: speak.reason }, 409);
@@ -189,6 +205,12 @@ export async function POST(request: Request) {
       .where(and(eq(negotiations.id, row.id), inArray(negotiations.status, [...DECLINABLE_STATUSES])))
       .returning({ id: negotiations.id });
     if (!closed) return json({ error: "Bu masa bu arada kapandı." }, 409);
+    // Ret, tarafları savaşmak zorunda bırakmaz; ancak aynı sefer için sonraki
+    // saha sonucunda yeni bir şart sunabilme kilidini de açık tutar.
+    if (row.warId) {
+      await db.update(wars).set({ peaceOfferAt: null, revision: sql`${wars.revision} + 1` })
+        .where(and(eq(wars.id, row.warId), eq(wars.peaceOfferAt, row.openedAt)));
+    }
     return json({ declined: true });
   }
 
@@ -202,23 +224,100 @@ export async function POST(request: Request) {
 
     const terms = table.proposed;
     const hours = terms.hours ?? 24;
-    const payerId = terms.payerSide === "initiator" ? row.initiatorId : row.targetId;
-    const payeeId = payerId === row.initiatorId ? row.targetId : row.initiatorId;
+    if (terms.topic === "mercenary" && terms.lessorSide !== "initiator" && terms.lessorSide !== "target") {
+      return json({ error: "Kiralık birlik şartında kiralayan taraf geçersiz." }, 400);
+    }
+    const mercenaryLessorId = terms.topic === "mercenary"
+      ? (terms.lessorSide === "initiator" ? row.initiatorId : row.targetId)
+      : null;
+    const mercenaryRenterId = mercenaryLessorId
+      ? (mercenaryLessorId === row.initiatorId ? row.targetId : row.initiatorId)
+      : null;
+    if (terms.topic === "mercenary" && (!mercenaryLessorId || !mercenaryRenterId)) {
+      return json({ error: "Kiralık birlik şartında kiralayan taraf belirlenemedi." }, 400);
+    }
+    // Yukarıdaki doğrulama sonrasında, sözleşme içindeki iki taraf da mutlaka
+    // gerçek kullanıcı kimliğidir. Yerel sabitler Drizzle sorgularında null
+    // kimliğin yanlışlıkla `IS NULL` sorgusuna dönüşmesini de engeller.
+    const lessorId = mercenaryLessorId ?? "";
+    const renterId = mercenaryRenterId ?? "";
+    const payerId: string = terms.topic === "mercenary"
+      ? mercenaryRenterId!
+      : (terms.payerSide === "initiator" ? row.initiatorId : row.targetId);
+    const payeeId: string = terms.topic === "mercenary"
+      ? mercenaryLessorId!
+      : (payerId === row.initiatorId ? row.targetId : row.initiatorId);
+    const agreementId = newId("ag");
 
     // İmza yarışı burada kapanır. Durum geçişi KOŞULLU yazılır; yarışı yalnızca
     // bir istek kazanır ve anlaşma ANCAK o kazanan istekte yazılır. Eskiden
     // anlaşma koşulsuz yazılıyor, iki eşzamanlı imza masa başına iki aktif
     // anlaşma doğuruyor ve cron haracı İKİ KEZ tahsil ediyordu.
-    const [signed] = await db.update(negotiations).set({ status: "agreed", lastTurnAt: now })
-      .where(and(eq(negotiations.id, row.id), eq(negotiations.status, SIGNABLE_STATUS)))
-      .returning({ id: negotiations.id });
-    if (!signed) return json({ error: "Bu masa bu arada kapandı; imza atılamadı." }, 409);
+    const signed = await db.transaction(async trx => {
+      const [claimed] = await trx.update(negotiations).set({ status: "agreed", lastTurnAt: now })
+        .where(and(eq(negotiations.id, row.id), eq(negotiations.status, SIGNABLE_STATUS)))
+        .returning({ id: negotiations.id });
+      if (!claimed) return { ok: false as const, error: "Bu masa bu arada kapandı; imza atılamadı.", status: 409 };
 
-    await db.insert(agreements).values({
-      id: newId("ag"), channelId: row.channelId, negotiationId: row.id, topic: row.topic,
-      payerId, payeeId, terms: row.proposed,
-      startedAt: now, endsAt: now + hours * 3_600_000, everyHours: terms.everyHours ?? 6, paidCount: 0, status: "active",
-    });
+      await trx.insert(agreements).values({
+        id: agreementId, channelId: row.channelId, negotiationId: row.id, topic: row.topic,
+        payerId, payeeId, terms: JSON.stringify(terms),
+        startedAt: now, endsAt: now + hours * 3_600_000, everyHours: terms.everyHours ?? 6, paidCount: 0, status: "active",
+      });
+
+      if (row.warId) {
+        const truce = await acceptWarTruce(trx, { warId: row.warId, now });
+        if (!truce.ok) throw new Error(truce.error);
+      }
+
+      if (terms.topic === "mercenary") {
+        const count = terms.mercenaryCount ?? 0;
+        const fee = terms.mercenaryFee ?? 0;
+        const [existingRows, lessorRow, renterRow] = await Promise.all([
+          trx.select({ id: mercenaryContracts.id }).from(mercenaryContracts)
+            .where(and(eq(mercenaryContracts.renterId, renterId), eq(mercenaryContracts.status, "active"))).limit(1),
+          trx.select().from(gameSaves).where(eq(gameSaves.userId, lessorId)).limit(1),
+          trx.select().from(gameSaves).where(eq(gameSaves.userId, renterId)).limit(1),
+        ]);
+        if (existingRows[0]) throw new Error("Bu krallıkta zaten yürürlükte bir kiralık birlik sözleşmesi var.");
+        const lessor = lessorRow[0] ? parseStoredSave(lessorRow[0].gameState) : null;
+        const renter = renterRow[0] ? parseStoredSave(renterRow[0].gameState) : null;
+        if (!lessor || !renter || lessor.population - count < 20) {
+          throw new Error("Kiralayan krallığın sözleşmeye ayıracak nüfusu yok.");
+        }
+        if (renter.resources.gold < fee) throw new Error("Kiracı krallığın peşin bedel için yeterli altını yok.");
+        const nextLessor = {
+          ...lessor,
+          population: lessor.population - count,
+          resources: { ...lessor.resources, gold: lessor.resources.gold + fee },
+          notices: [{ kind: "KİRALIK BİRLİK", text: `${count} vatandaş ${hours} saatliğine kiraya verildi; ${fee} altın peşin tahsil edildi. Kayıplar size ait sayılacak.`, at: now }, ...lessor.notices].slice(0, 20),
+        };
+        const nextRenter = {
+          ...renter,
+          resources: { ...renter.resources, gold: renter.resources.gold - fee },
+          units: { ...renter.units, mercenary: (renter.units.mercenary ?? 0) + count },
+          unitExperience: recruitUnitExperience(renter.units, renter.unitExperience, { mercenary: count }),
+          notices: [{ kind: "KİRALIK BİRLİK", text: `${count} Kiralık Birlik ${hours} saat için garnizona katıldı; ${fee} altın peşin ödendi. Kayıplar kiralayanın nüfusuna yazılır.`, at: now }, ...renter.notices].slice(0, 20),
+        };
+        const [lessorWritten] = await trx.update(gameSaves)
+          .set({ gameState: JSON.stringify(nextLessor), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+          .where(and(eq(gameSaves.userId, lessorId), eq(gameSaves.revision, lessorRow[0]!.revision)))
+          .returning({ userId: gameSaves.userId });
+        if (!lessorWritten) throw new Error("Kiralayan krallığın kaydı değişti; şartı yeniden sunun.");
+        const [renterWritten] = await trx.update(gameSaves)
+          .set({ gameState: JSON.stringify(nextRenter), revision: sql`${gameSaves.revision} + 1`, updatedAt: sql`CURRENT_TIMESTAMP` })
+          .where(and(eq(gameSaves.userId, renterId), eq(gameSaves.revision, renterRow[0]!.revision)))
+          .returning({ userId: gameSaves.userId });
+        if (!renterWritten) throw new Error("Kiracı krallığın kaydı değişti; şartı yeniden sunun.");
+        await trx.insert(mercenaryContracts).values({
+          id: newId("mc"), channelId: row.channelId, agreementId, lessorId, renterId,
+          count, fee, startedAt: now, endsAt: now + hours * 3_600_000, status: "active",
+        });
+      }
+
+      return { ok: true as const };
+    }).catch(error => ({ ok: false as const, error: error instanceof Error ? error.message : "Kiralık birlik sözleşmesi yazılamadı.", status: 409 }));
+    if (!signed.ok) return json({ error: signed.error }, signed.status);
     return json({ agreed: true, terms });
   }
 
