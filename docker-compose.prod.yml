@@ -38,8 +38,12 @@ services:
       - .:/app:ro
       - node_modules:/app/node_modules
       - vinext_cache:/app/.vinext
-      # Derleme çıktısı salt-okunur ağaca yazılamaz; kendi hacminde durur.
-      - dist:/app/dist
+    # Kaynak ağacı salt-okunur iken `vinext build` önce `/app/dist` klasörünü
+    # temizler. İç içe named volume bazı Docker kurulumlarında üstteki ro bind
+    # mount tarafından gölgelenip EROFS veriyordu; çıktı yalnız aynı kapsayıcı
+    # yaşamı boyunca gerektiğinden güvenli bir tmpfs yeterlidir.
+    tmpfs:
+      - /app/dist
     healthcheck:
       # Derleme ilk açılışta uzun sürer; dev sunucusundan geç hazır olur.
       start_period: 300s
@@ -55,6 +59,3 @@ services:
 
   cron:
     restart: unless-stopped
-
-volumes:
-  dist: {}

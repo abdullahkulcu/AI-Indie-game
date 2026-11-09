@@ -9,6 +9,8 @@ PowerPoint/PDF sunum çıktıları ve sunum inceleme artıkları çıkarıldı. 
 uygulama kodu, veritabanı göçleri, testler, yapay zekâ rehberleri ve temel
 mimari/yayın belgeleri korunmuştur. Yayın denetiminde eksik olan son iki Divan
 göç kaydı da sıralı göç defterine eklendi.
+Üretim başlatmasında derleme çıktısının salt-okunur kaynak ağacına yazılamadığı
+görüldü; çıktı alanı kapsayıcı içi geçici belleğe alındı.
 
 ## Neden
 
@@ -27,6 +29,7 @@ görmesi için sıralı göç defterinde de yer alması gerekir.
 - docs/demirkale-*.inspect.ndjson
 - docs/audits/
 - drizzle/pg/meta/_journal.json
+- docker-compose.prod.yml
 
 ## Test durumu
 
